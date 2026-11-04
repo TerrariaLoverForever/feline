@@ -14,15 +14,15 @@ pub fn start() -> Result<(), String> {
     }
     let exe =
         std::env::current_exe().map_err(|e| format!("couldn't find the Feline program: {e}"))?;
-    let mut command = Command::new(exe);
+    let mut helper = Command::new(exe);
+    helper.arg("--presence");
+    // Its own session, like the game, so closing the Feline window or the
+    // terminal it was started from doesn't take the helper with it.
+    let mut command = feline_core::launch::detached(helper);
     command
-        .arg("--presence")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // Its own process group, so closing the Feline window (or the terminal
-    // it was started from) doesn't take the helper with it.
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     command
         .spawn()
         .map(drop)

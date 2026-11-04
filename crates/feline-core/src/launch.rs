@@ -2,9 +2,10 @@
 //! Starting a runtime for play, and watching it.
 //!
 //! Stability rules:
-//! - The runtime gets **its own process group**. Signals aimed at Feline
-//!   (Ctrl+C in the terminal, the terminal closing) don't reach the game, and
-//!   closing or crashing Feline never ends a game session.
+//! - The runtime gets **its own session** (and so its own process group), so
+//!   it's cut off from the terminal Feline may have been started from: Ctrl+C,
+//!   the terminal closing (SIGHUP) or job control never reach the game, and
+//!   closing or crashing Feline never ends a game session. See [`detached`].
 //! - All runtime output goes to a log file in `~/.local/state/feline/logs/`,
 //!   never to a pipe Feline must keep reading. A pipe would stall the game if
 //!   Feline stopped reading it (for example after Feline exits).
@@ -66,13 +67,62 @@ impl std::fmt::Display for LaunchError {
 
 impl std::error::Error for LaunchError {}
 
-/// Starts `command` in its own process group with output going to a new log
-/// file in `log_dir`, named after `label` and the current time.
-pub fn spawn(
-    mut command: Command,
-    log_dir: &Path,
-    label: &str,
-) -> Result<RunningGame, LaunchError> {
+/// Makes `command` run in a new session, detached from Feline's terminal.
+///
+/// Rust's own `CommandExt::setsid` isn't stable yet, and calling `setsid()`
+/// ourselves would need `unsafe` code, so the standard `setsid` program
+/// (util-linux, on practically every distribution) does it: `setsid <program>
+/// <args>`. Because the child isn't a process-group leader, `setsid` replaces
+/// itself with the program under the **same process ID**, so waiting for it,
+/// monitoring it and its exit status work unchanged.
+///
+/// Falls back to just a new process group (still safe from Ctrl+C) if
+/// `setsid` isn't installed, or if the program itself can't be found: then
+/// starting it directly gives the clear "not found" error.
+pub fn detached(command: Command) -> Command {
+    let program_exists = {
+        let program = Path::new(command.get_program());
+        if program.components().count() > 1 {
+            program.is_file()
+        } else {
+            which(&program.to_string_lossy()).is_some()
+        }
+    };
+    let setsid = which("setsid").filter(|_| program_exists);
+    let Some(setsid) = setsid else {
+        let mut command = command;
+        command.process_group(0);
+        return command;
+    };
+    let mut wrapped = Command::new(setsid);
+    wrapped.arg(command.get_program()).args(command.get_args());
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => wrapped.env(key, value),
+            None => wrapped.env_remove(key),
+        };
+    }
+    if let Some(dir) = command.get_current_dir() {
+        wrapped.current_dir(dir);
+    }
+    wrapped
+}
+
+/// The first executable called `name` on `PATH`.
+fn which(name: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(name))
+        .find(|p| {
+            p.metadata()
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
+/// Starts `command` in its own session (see [`detached`]) with output going
+/// to a new log file in `log_dir`, named after `label` and the current time.
+pub fn spawn(command: Command, log_dir: &Path, label: &str) -> Result<RunningGame, LaunchError> {
+    let mut command = detached(command);
     let log_path = log_dir.join(format!("{label}-{}.log", unix_seconds()));
     let log = fs::create_dir_all(log_dir)
         .and_then(|()| fs::File::create(&log_path))
@@ -88,9 +138,7 @@ pub fn spawn(
     command
         .stdin(Stdio::null())
         .stdout(log)
-        .stderr(log_for_stderr)
-        // 0 = "make a new group whose ID is the child's own PID".
-        .process_group(0);
+        .stderr(log_for_stderr);
 
     let program = command.get_program().to_string_lossy().into_owned();
     let child = command.spawn().map_err(|source| {
@@ -195,26 +243,45 @@ mod tests {
     }
 
     #[test]
-    fn runtime_gets_its_own_process_group() {
+    fn runtime_gets_its_own_session_with_the_same_pid() {
         let dir = temp_dir("launch-pgid");
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "sleep 1"]);
         let game = spawn(cmd, &dir, "test").expect("starts");
         let pid = game.pid();
-        // Field 5 of /proc/<pid>/stat is the process group ID. The command
-        // name (field 2) is in parentheses, so split after the last ')'.
-        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
-        let after_name = stat.rsplit_once(')').unwrap().1;
-        let pgid: u32 = after_name
-            .split_whitespace()
-            .nth(2)
-            .unwrap()
-            .parse()
-            .unwrap();
+        // `setsid` hands over to the program a moment after starting, so
+        // look until the process is the program (or give up after 2 s).
+        // Fields of /proc/<pid>/stat after the name in parentheses:
+        // [0] state, [1] ppid, [2] pgrp, [3] session.
+        let read = || {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+            let after_name = stat.rsplit_once(')').unwrap().1.to_owned();
+            let field = |n: usize| -> u32 {
+                after_name
+                    .split_whitespace()
+                    .nth(n)
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            };
+            let comm = fs::read_to_string(format!("/proc/{pid}/comm")).unwrap();
+            (field(2), field(3), comm.trim().to_owned())
+        };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let (mut pgid, mut sid, mut comm) = read();
+        while comm == "setsid" && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            (pgid, sid, comm) = read();
+        }
         let _ = game.wait();
         let _ = fs::remove_dir_all(&dir);
 
         assert_eq!(pgid, pid, "the game leads its own process group");
+        if which("setsid").is_some() {
+            assert_eq!(sid, pid, "and its own session, away from Feline's terminal");
+            // `setsid` replaced itself with the program: same PID.
+            assert_eq!(comm, "sh");
+        }
     }
 
     #[test]

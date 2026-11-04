@@ -61,9 +61,7 @@ pub struct Report {
 
 pub fn install() -> Result<Report, String> {
     let data = paths::data_home().ok_or("couldn't find your home folder ($HOME is not set)")?;
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("couldn't find the path of the running Feline program: {e}"))?;
-    let exec = quote_exec(&exe)?;
+    let exec = quote_exec(&exec_path()?)?;
 
     let mut files = Vec::new();
     let entry = data.join("applications").join(format!("{APP_ID}.desktop"));
@@ -97,6 +95,21 @@ pub fn uninstall() -> Result<Vec<PathBuf>, String> {
     Ok(removed)
 }
 
+/// The program Feline's menu entries should start: normally this Feline
+/// binary. A launcher script can set `FELINE_EXEC` to its own absolute path,
+/// so the entries keep pointing at the script (for example one that always
+/// starts the newest build of a source checkout).
+fn exec_path() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("FELINE_EXEC").map(PathBuf::from)
+        && path.is_absolute()
+        && path.is_file()
+    {
+        return Ok(path);
+    }
+    std::env::current_exe()
+        .map_err(|e| format!("couldn't find the path of the running Feline program: {e}"))
+}
+
 /// The file name of Feline's hidden link-handler entry. It's separate from
 /// the menu entry, so Feline only becomes a candidate for `roblox://` links
 /// when the user switches link handling on.
@@ -110,8 +123,7 @@ fn link_entry_path() -> Result<PathBuf, String> {
 /// Adds the hidden entry that opens `roblox://` and `roblox-player:` links
 /// with this Feline binary.
 pub fn install_link_entry() -> Result<(), String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("couldn't find the path of the running Feline program: {e}"))?;
+    let exe = exec_path()?;
     let entry = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
@@ -173,15 +185,26 @@ fn desktop_entry(exec: &str) -> String {
         + "\n"
 }
 
-/// Quotes a path for a desktop entry's `Exec=` key, following the Desktop
-/// Entry spec: wrap in double quotes, backslash-escape `"` `` ` `` `$` `\`,
-/// and double `%` (which otherwise starts a field code like `%u`).
+/// Writes a path for a desktop entry's `Exec=` key, following the Desktop
+/// Entry spec: `%` is doubled (it otherwise starts a field code like `%u`),
+/// and the path is quoted only if it contains a reserved character (space,
+/// quotes, `$`, `~`, …), with `"` `` ` `` `$` `\` backslash-escaped inside.
+///
+/// Quoting only when needed matters: `xdg-mime` (xdg-utils 1.2) takes the
+/// first word of `Exec=` with any quote marks still attached, can't find a
+/// program by that name, and silently skips the entry.
 fn quote_exec(path: &Path) -> Result<String, String> {
     let text = path
         .to_str()
         .ok_or("the Feline program's path isn't valid UTF-8, so it can't go in a menu entry")?;
     if text.chars().any(char::is_control) {
         return Err("the Feline program's path contains control characters".into());
+    }
+    const RESERVED: &[char] = &[
+        ' ', '\t', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(', ')', '`',
+    ];
+    if !text.contains(RESERVED) {
+        return Ok(text.replace('%', "%%"));
     }
     let mut quoted = String::from("\"");
     for c in text.chars() {
@@ -235,9 +258,14 @@ mod tests {
 
     #[test]
     fn exec_quoting_follows_the_spec() {
+        // No reserved characters: no quotes (xdg-utils needs that).
         assert_eq!(
             quote_exec(Path::new("/home/me/feline")).unwrap(),
-            "\"/home/me/feline\""
+            "/home/me/feline"
+        );
+        assert_eq!(
+            quote_exec(Path::new("/opt/100%/feline")).unwrap(),
+            "/opt/100%%/feline"
         );
         assert_eq!(
             quote_exec(Path::new("/home/me/My Apps/100%/$x/feline")).unwrap(),
