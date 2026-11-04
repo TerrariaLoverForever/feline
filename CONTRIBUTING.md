@@ -42,8 +42,9 @@ Feline's runtime is developed **independently**.
 
 **Disclosure:** during early planning, Cordial's README and three of its
 documentation files (`docs/architecture.md`, `docs/nvidia.md`,
-`docs/runtime-spec.md`) were read. None of Cordial's source code was read, and
-no Cordial code is in Feline. The optional Cordial adapter
+`docs/runtime-spec.md`) were read. No Cordial source code was read during
+planning (later, limited reads for the launcher are listed below), and no
+Cordial code is in Feline. The optional Cordial adapter
 (`crates/feline-core/src/runtime/cordial.rs`) only starts Cordial through its
 public command line.
 
@@ -54,7 +55,13 @@ work), Stud's README, release metadata and packaging files
 of two source files: `stud-config/src/settings.cpp` (the keys and types of
 Stud's `config.json`, so Feline can edit that file without breaking it) and
 `render-host/src/discord_rpc.cpp` (which confirmed that Discord presence needs an
-application ID). No Stud code is in Feline. Sober's public configuration
+application ID), plus a summary of `stud-config/include/stud/settings.h` (the
+defaults of those keys). No Stud code is in Feline.
+
+For the Cordial settings tab, Cordial's `crates/cordial-protocol/src/settings.rs`
+(its MIT/Apache protocol crate, meant for other programs) and an AI-made summary
+of `crates/cordial-shell/src/shell_config.rs` (only the accepted values of a few
+`shell.json` keys) were read. No Cordial code is in Feline. Sober's public configuration
 documentation was read; Sober's code is not available.
 
 ## Before sending a change

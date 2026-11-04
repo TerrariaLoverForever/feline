@@ -52,3 +52,44 @@ export struct CheckRow {
     title: string,
     detail: string,
 }
+
+// What control a runtime setting uses.
+export enum SettingKind {
+    toggle,
+    choice,
+    number,
+}
+
+// One runtime setting on the Settings page.
+export struct SettingRow {
+    // The key in the runtime's settings file.
+    key: string,
+    label: string,
+    help: string,
+    kind: SettingKind,
+    // Current value, in the field matching `kind`.
+    on: bool,
+    choices: [string],
+    choice-index: int,
+    number: int,
+    min: int,
+    max: int,
+    // Locked because a Feline setting overrides it.
+    managed: bool,
+    managed-reason: string,
+}
+
+// One runtime's tab on the Settings page.
+export struct RuntimeTab {
+    // Backend id, e.g. "sober".
+    id: string,
+    name: string,
+    // Which installation and file is being edited, e.g. "Flatpak · ~/.var/app/…".
+    source: string,
+    // Empty when everything is fine; otherwise why the settings can't be changed.
+    status: string,
+    status-level: Level,
+    // False when the settings can be looked at but not changed right now.
+    editable: bool,
+    rows: [SettingRow],
+}

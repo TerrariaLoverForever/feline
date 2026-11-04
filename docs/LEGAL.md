@@ -53,6 +53,7 @@ been added. Until it is resolved, no runtime code is written (see
 | Component | License | How it's used |
 |---|---|---|
 | Rust standard library | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
+| [serde_json](https://github.com/serde-rs/json) 1 (+ `serde`, `indexmap` for key order) | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |

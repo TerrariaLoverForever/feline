@@ -5,6 +5,7 @@
 mod cli;
 mod desktop;
 mod gui;
+mod settings_page;
 
 use std::process::ExitCode;
 

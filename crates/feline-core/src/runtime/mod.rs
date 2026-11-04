@@ -17,6 +17,7 @@
 //! Policy: no installation is ever chosen automatically. The user picks one.
 //! Nothing in this file is specific to any external runtime.
 
+pub mod config;
 pub mod cordial;
 pub mod sober;
 pub mod stud;
@@ -29,6 +30,8 @@ use std::process::Command;
 
 use crate::link::GameLink;
 use crate::process::RunError;
+use crate::settings::Overrides;
+use config::{ConfigError, ConfigFile, SettingDef};
 
 /// Everything a backend may look at while detecting. Kept explicit (instead of
 /// reading `$HOME` etc. directly) so tests can use a fake environment.
@@ -39,6 +42,9 @@ pub struct DetectContext {
     pub path: Option<OsString>,
     /// System-wide Flatpak installation, normally `/var/lib/flatpak`.
     pub flatpak_system_dir: PathBuf,
+    /// `$XDG_CONFIG_HOME` if set (and absolute), for non-Flatpak runtimes'
+    /// settings files. `None` means `~/.config`.
+    pub config_home: Option<PathBuf>,
 }
 
 impl DetectContext {
@@ -51,7 +57,31 @@ impl DetectContext {
             flatpak_system_dir: std::env::var_os("FLATPAK_SYSTEM_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/var/lib/flatpak")),
+            config_home: std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute()),
         }
+    }
+
+    /// The settings folder of a non-Flatpak program, e.g. `~/.config/stud`.
+    pub fn config_dir(&self, program: &str) -> Option<PathBuf> {
+        let base = match &self.config_home {
+            Some(dir) => dir.clone(),
+            None => self.home.as_ref()?.join(".config"),
+        };
+        Some(base.join(program))
+    }
+
+    /// The settings folder a Flatpak app sees as its config home, e.g.
+    /// `~/.var/app/org.vinegarhq.Sober/config`.
+    pub fn flatpak_config_dir(&self, app_id: &str) -> Option<PathBuf> {
+        Some(
+            self.home
+                .as_ref()?
+                .join(".var/app")
+                .join(app_id)
+                .join("config"),
+        )
     }
 
     /// The per-user Flatpak installation, `~/.local/share/flatpak`.
@@ -186,6 +216,68 @@ impl Installation {
         self.backend.plan_launch(self, target)
     }
 
+    /// Where this installation keeps its own settings file, if Feline can edit it.
+    pub fn config_path(&self, ctx: &DetectContext) -> Option<PathBuf> {
+        self.backend.config_path(self, ctx)
+    }
+
+    /// True if this runtime is running right now (any installation of it).
+    pub fn is_running(&self) -> bool {
+        config::any_process_named(self.backend.process_names())
+    }
+
+    /// Opens this installation's settings file for editing.
+    pub fn load_config(&self, ctx: &DetectContext) -> Result<ConfigFile, ConfigError> {
+        let path = self
+            .config_path(ctx)
+            .ok_or(ConfigError::Missing(PathBuf::new()))?;
+        ConfigFile::load(&path)
+    }
+
+    /// Changes one setting and saves the file, unless the runtime is running.
+    pub fn set_config_value(
+        &self,
+        ctx: &DetectContext,
+        def: &SettingDef,
+        value: serde_json::Value,
+    ) -> Result<(), ConfigError> {
+        if self.is_running() {
+            return Err(ConfigError::Running(self.backend.name()));
+        }
+        let mut file = self.load_config(ctx)?;
+        if file.set(def, value)? {
+            file.save()?;
+        }
+        Ok(())
+    }
+
+    /// Writes Feline's overrides into this installation's settings file.
+    pub fn apply_overrides(
+        &self,
+        ctx: &DetectContext,
+        overrides: &Overrides,
+    ) -> Result<ApplyOutcome, ConfigError> {
+        let defs = self.backend.settings();
+        if defs.is_empty() || self.config_path(ctx).is_none() {
+            return Ok(ApplyOutcome::NotEditable);
+        }
+        let mut file = match self.load_config(ctx) {
+            Ok(file) => file,
+            // Nothing to override yet: the runtime creates its file on first start.
+            Err(ConfigError::Missing(_)) => return Ok(ApplyOutcome::NoFile),
+            Err(e) => return Err(e),
+        };
+        let changed = file.apply_overrides(defs, overrides)?;
+        if changed.is_empty() {
+            return Ok(ApplyOutcome::Unchanged);
+        }
+        if self.is_running() {
+            return Err(ConfigError::Running(self.backend.name()));
+        }
+        file.save()?;
+        Ok(ApplyOutcome::Changed(changed))
+    }
+
     /// A stable string identifying this installation, used to remember the
     /// user's choice in the settings file, e.g. `cordial:flatpak-system` or
     /// `cordial:appimage:/home/me/Applications/Cordial.AppImage`.
@@ -204,6 +296,19 @@ impl Installation {
             InstallKind::Native(path) => format!("{id}:native:{}", path.display()),
         }
     }
+}
+
+/// What [`Installation::apply_overrides`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplyOutcome {
+    /// This runtime has no settings Feline edits.
+    NotEditable,
+    /// The runtime hasn't created its settings file yet.
+    NoFile,
+    /// Everything already matched.
+    Unchanged,
+    /// These keys were changed.
+    Changed(Vec<&'static str>),
 }
 
 /// What the user wants to start.
@@ -268,6 +373,20 @@ pub trait RuntimeBackend: Send + Sync {
         Err(RuntimeError::Unsupported {
             what: "a bug-report summary",
         })
+    }
+    /// The settings of this runtime that Feline shows and may change. Empty
+    /// for runtimes whose settings file Feline doesn't edit.
+    fn settings(&self) -> &'static [SettingDef] {
+        &[]
+    }
+    /// Where `installation` keeps the settings file described by `settings`.
+    fn config_path(&self, _installation: &Installation, _ctx: &DetectContext) -> Option<PathBuf> {
+        None
+    }
+    /// Process names (as in `/proc/<pid>/comm`, cut to 15 characters) that
+    /// mean this runtime is running.
+    fn process_names(&self) -> &'static [&'static str] {
+        &[]
     }
     /// Builds the command that starts `target`. May start the program briefly
     /// to find out which options it supports, so call it off the UI thread.

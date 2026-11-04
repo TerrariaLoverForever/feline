@@ -2,19 +2,19 @@
 // The Feline main window: sidebar navigation plus the current page.
 
 import { Theme } from "theme.slint";
-import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow } from "types.slint";
+import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab } from "types.slint";
 import { Icons } from "icons.slint";
 import { Logo, NavItem } from "components.slint";
 import { HomePage } from "pages/home.slint";
 import { RuntimesPage } from "pages/runtimes.slint";
-import { ComingSoonPage } from "pages/coming-soon.slint";
+import { SettingsPage } from "pages/settings.slint";
 import { SystemPage } from "pages/system.slint";
 import { DiagnosticsPage } from "pages/diagnostics.slint";
 import { AboutPage } from "pages/about.slint";
 import { AccountNotice } from "pages/notice.slint";
 
 // Make the shared types visible to Rust.
-export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow }
+export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab }
 
 export component AppWindow inherits Window {
     title: "Feline";
@@ -76,6 +76,19 @@ export component AppWindow inherits Window {
     callback run-doctor();
     callback run-runtime-info();
     callback build-report();
+
+    // Settings page (set from Rust)
+    in property <int> renderer-index;
+    in property <int> gamemode-index;
+    in property <int> close-index;
+    in property <string> apply-status;
+    in property <Level> apply-level;
+    in property <[RuntimeTab]> settings-tabs;
+    callback settings-opened();
+    callback set-override(string, int);
+    callback set-runtime-bool(string, string, bool);
+    callback set-runtime-choice(string, string, int);
+    callback set-runtime-number(string, string, int);
 
     HorizontalLayout {
         // Sidebar
@@ -147,10 +160,10 @@ export component AppWindow inherits Window {
                 NavItem {
                     label: "Settings";
                     icon: Icons.settings;
-                    soon: true;
                     active: root.page == Page.settings;
                     clicked => {
                         root.page = Page.settings;
+                        root.settings-opened();
                     }
                 }
                 NavItem {
@@ -231,10 +244,29 @@ export component AppWindow inherits Window {
                 root.rescan();
             }
         }
-        if root.page == Page.settings: ComingSoonPage {
+        if root.page == Page.settings: SettingsPage {
             horizontal-stretch: 1;
-            heading: "Settings";
-            description: "Launcher preferences will live here. Your runtime choice is already saved automatically (in ~/.config/feline/settings.conf).";
+            renderer-index: root.renderer-index;
+            gamemode-index: root.gamemode-index;
+            close-index: root.close-index;
+            apply-status: root.apply-status;
+            apply-level: root.apply-level;
+            tabs: root.settings-tabs;
+            set-override(which, index) => {
+                root.set-override(which, index);
+            }
+            set-bool(tab, key, value) => {
+                root.set-runtime-bool(tab, key, value);
+            }
+            set-choice(tab, key, index) => {
+                root.set-runtime-choice(tab, key, index);
+            }
+            set-number(tab, key, value) => {
+                root.set-runtime-number(tab, key, value);
+            }
+            reload => {
+                root.settings-opened();
+            }
         }
         if root.page == Page.system: SystemPage {
             horizontal-stretch: 1;

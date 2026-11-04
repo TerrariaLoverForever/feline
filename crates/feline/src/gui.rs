@@ -22,23 +22,25 @@ use feline_core::launch::{self, GameExit};
 use feline_core::link::{self, LinkError};
 use feline_core::paths;
 use feline_core::runtime::{DetectContext, InstallKind, Installation, LaunchTarget, detect_all};
-use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Settings};
+use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Overrides, Settings};
 use feline_core::system::{CheckLevel, FlatpakNvidia, SessionType, SystemInfo};
 use slint::{ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
+use crate::settings_page::{self, Edit};
+
 /// A detected runtime and its version (looked up once, during detection).
 #[derive(Clone)]
-struct Found {
-    installation: Installation,
+pub(crate) struct Found {
+    pub(crate) installation: Installation,
     version: Option<String>,
 }
 
 #[derive(Default)]
-struct State {
-    found: Vec<Found>,
-    settings: Settings,
+pub(crate) struct State {
+    pub(crate) found: Vec<Found>,
+    pub(crate) settings: Settings,
     detecting: bool,
     /// True from pressing Play until the runtime exits.
     busy: bool,
@@ -48,13 +50,15 @@ struct State {
     scanning_system: bool,
     /// True while a Diagnostics action is running.
     diag_busy: bool,
+    /// The last failed save on the Settings page: (runtime id, message).
+    pub(crate) settings_message: Option<(String, String)>,
 }
 
-type Shared = Arc<Mutex<State>>;
+pub(crate) type Shared = Arc<Mutex<State>>;
 
 /// Locks the state. If another thread panicked while holding the lock, the
 /// data is still usable for our purposes, so we continue instead of crashing.
-fn lock(shared: &Shared) -> MutexGuard<'_, State> {
+pub(crate) fn lock(shared: &Shared) -> MutexGuard<'_, State> {
     shared
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -74,6 +78,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
         Ok("system") => ui.set_page(Page::System),
         Ok("diagnostics") => ui.set_page(Page::Diagnostics),
         Ok("about") => ui.set_page(Page::About),
+        Ok("settings") => ui.set_page(Page::Settings),
         _ => {}
     }
     let log_folder = paths::log_dir()
@@ -122,6 +127,55 @@ pub fn run() -> Result<(), slint::PlatformError> {
         move || {
             if let Some(ui) = weak.upgrade() {
                 start_system_scan(&ui, &shared);
+            }
+        }
+    });
+
+    ui.on_settings_opened({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::refresh(&ui, &shared);
+            }
+        }
+    });
+    ui.on_set_override({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |which, index| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_override(&ui, &shared, which.as_str(), index);
+            }
+        }
+    });
+    ui.on_set_runtime_bool({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |tab, key, value| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_runtime_value(&ui, &shared, &tab, &key, Edit::Bool(value));
+            }
+        }
+    });
+    ui.on_set_runtime_choice({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |tab, key, index| {
+            if let Some(ui) = weak.upgrade() {
+                // A negative index can't happen with a dropdown; treat it as 0.
+                let index = usize::try_from(index).unwrap_or(0);
+                settings_page::set_runtime_value(&ui, &shared, &tab, &key, Edit::Choice(index));
+            }
+        }
+    });
+    ui.on_set_runtime_number({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |tab, key, value| {
+            if let Some(ui) = weak.upgrade() {
+                let edit = Edit::Number(i64::from(value));
+                settings_page::set_runtime_value(&ui, &shared, &tab, &key, edit);
             }
         }
     });
@@ -573,6 +627,7 @@ fn start_detection(ui: &AppWindow, shared: &Shared) {
                 drop(state);
                 ui.set_detecting(false);
                 refresh_runtimes(&ui, &shared_for_thread);
+                settings_page::refresh(&ui, &shared_for_thread);
             });
         });
 
@@ -645,6 +700,7 @@ fn select_runtime(ui: &AppWindow, shared: &Shared, key: &str) {
         ),
     }
     refresh_runtimes(ui, shared);
+    settings_page::refresh(ui, shared);
 }
 
 fn kind_label(kind: &InstallKind) -> String {
@@ -664,7 +720,7 @@ fn short_kind(kind: &InstallKind) -> &'static str {
 }
 
 /// Shows `/home/me/x` as `~/x`.
-fn tilde(path: &std::path::Path) -> String {
+pub(crate) fn tilde(path: &std::path::Path) -> String {
     match std::env::var_os("HOME").map(PathBuf::from) {
         Some(home) => match path.strip_prefix(&home) {
             Ok(rest) => format!("~/{}", rest.display()),
@@ -685,7 +741,7 @@ fn set_launch(ui: &AppWindow, state: LaunchState, title: &str, detail: &str) {
 }
 
 fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
-    let installation = {
+    let (installation, overrides) = {
         let mut state = lock(shared);
         if state.busy {
             return; // already starting or running
@@ -702,7 +758,7 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
         };
         let installation = found.installation.clone();
         state.busy = true;
-        installation
+        (installation, state.settings.overrides)
     };
 
     let name = installation.backend.name();
@@ -713,7 +769,7 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
     let spawned = thread::Builder::new()
         .name("feline-game".into())
         .spawn(move || {
-            let outcome = run_game(&installation, &target, |title, detail| {
+            let outcome = run_game(&installation, &target, &overrides, |title, detail| {
                 let (title, detail) = (title.to_owned(), detail.to_owned());
                 let _ = weak.upgrade_in_event_loop(move |ui| {
                     set_launch(&ui, LaunchState::Running, &title, &detail);
@@ -764,9 +820,17 @@ impl Outcome {
 fn run_game(
     installation: &Installation,
     target: &LaunchTarget,
+    overrides: &Overrides,
     on_running: impl FnOnce(&str, &str),
 ) -> Outcome {
     let name = installation.backend.name();
+
+    // Write Feline's overrides into the runtime's settings first. A failure
+    // isn't fatal: the game still starts, with the runtime's own settings.
+    let settings_warning = installation
+        .apply_overrides(&DetectContext::host(), overrides)
+        .err()
+        .map(|e| format!("Feline's settings weren't applied: {e}"));
 
     let plan = match installation.plan_launch(target) {
         Ok(plan) => plan,
@@ -785,12 +849,14 @@ fn run_game(
         (None, LaunchTarget::Home) => format!("Roblox is running in {name}"),
         (None, LaunchTarget::Game(_)) => format!("Joining the experience in {name}"),
     };
-    on_running(
-        &title,
-        plan.note
-            .as_deref()
-            .unwrap_or("Have fun! You can close Feline; the game keeps running."),
-    );
+    let mut detail = plan
+        .note
+        .clone()
+        .unwrap_or_else(|| "Have fun! You can close Feline; the game keeps running.".to_owned());
+    if let Some(warning) = settings_warning {
+        detail = format!("{warning}\n{detail}");
+    }
+    on_running(&title, &detail);
 
     match game.wait() {
         Ok(exit) => describe_exit(name, exit),

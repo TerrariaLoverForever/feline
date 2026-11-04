@@ -13,13 +13,114 @@
 //!
 //! Sober has no self-check or diagnostics command, so the trait's defaults
 //! ("not offered") apply.
+//!
+//! Settings: `~/.var/app/org.vinegarhq.Sober/config/sober/config.json`, keys
+//! and defaults from Sober's configuration documentation
+//! (<https://vinegarhq.org/Sober/Configuration/index.html>). The file starts
+//! with a `//` comment header, which Feline keeps.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use super::config::{Choice, Kind, Link, SettingDef, Val};
 use super::{
     DetectContext, InstallKind, Installation, LaunchPlan, LaunchTarget, Origin, RuntimeBackend,
     RuntimeError, flatpak_installs, metainfo_version,
 };
+
+const fn toggle(
+    key: &'static str,
+    label: &'static str,
+    help: &'static str,
+    default: bool,
+) -> SettingDef {
+    SettingDef {
+        key,
+        label,
+        help,
+        kind: Kind::Toggle,
+        default: Val::Bool(default),
+        link: None,
+    }
+}
+
+static SETTINGS: &[SettingDef] = &[
+    SettingDef {
+        link: Some(Link::Renderer {
+            vulkan: Val::Bool(false),
+            opengl: Some(Val::Bool(true)),
+        }),
+        ..toggle(
+            "use_opengl",
+            "Use OpenGL instead of Vulkan",
+            "Can work around \"OutOfMemory\" crashes.",
+            false,
+        )
+    },
+    SettingDef {
+        key: "graphics_optimization_mode",
+        label: "Graphics optimization",
+        help: "Performance lowers detail and texture quality for more speed.",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "quality",
+                label: "Quality",
+            },
+            Choice {
+                value: "balanced",
+                label: "Balanced",
+            },
+            Choice {
+                value: "performance",
+                label: "Performance",
+            },
+        ]),
+        default: Val::Str("balanced"),
+        link: None,
+    },
+    SettingDef {
+        link: Some(Link::GameMode),
+        ..toggle(
+            "enable_gamemode",
+            "GameMode",
+            "Asks Feral GameMode to boost performance while you play.",
+            true,
+        )
+    },
+    toggle(
+        "enable_hidpi",
+        "HiDPI",
+        "Scales the window to your screen's pixel density.",
+        false,
+    ),
+    SettingDef {
+        link: Some(Link::CloseOnLeave),
+        ..toggle("close_on_leave", "Close when leaving a game", "", true)
+    },
+    toggle(
+        "server_location_indicator_enabled",
+        "Show server location",
+        "Shows where the game server you joined is.",
+        false,
+    ),
+    toggle(
+        "allow_gamepad_permission",
+        "Allow gamepads",
+        "Lets Roblox use controllers.",
+        false,
+    ),
+    toggle(
+        "discord_rpc_enabled",
+        "Discord status",
+        "Sober's own Discord Rich Presence.",
+        false,
+    ),
+    toggle(
+        "discord_rpc_show_join_button",
+        "Discord Join button",
+        "Lets people join your server from your Discord profile.",
+        false,
+    ),
+];
 
 pub const FLATPAK_ID: &str = "org.vinegarhq.Sober";
 
@@ -55,6 +156,22 @@ impl RuntimeBackend for Sober {
                 known_version: flatpak_version(&active),
             })
             .collect()
+    }
+
+    fn settings(&self) -> &'static [SettingDef] {
+        SETTINGS
+    }
+
+    fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
+        // Sober only exists as a Flatpak.
+        matches!(installation.kind, InstallKind::Flatpak { .. })
+            .then(|| ctx.flatpak_config_dir(FLATPAK_ID))
+            .flatten()
+            .map(|dir| dir.join("sober/config.json"))
+    }
+
+    fn process_names(&self) -> &'static [&'static str] {
+        &["sober"]
     }
 
     fn version(&self, _installation: &Installation) -> Result<String, RuntimeError> {
@@ -125,6 +242,7 @@ mod tests {
             home: Some(home),
             path: None,
             flatpak_system_dir: PathBuf::from("/nonexistent"),
+            config_home: None,
         };
         let found = SOBER.detect(&ctx);
         let _ = fs::remove_dir_all(&root);

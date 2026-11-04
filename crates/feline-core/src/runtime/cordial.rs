@@ -18,12 +18,17 @@
 //! Which options exist is read from `--help` at launch time, so Feline works
 //! with old and new Cordial versions without hard-coding version numbers.
 //!
-//! We deliberately don't touch `cordial-run` or Cordial's files: those are
-//! internals that can change in any release.
+//! We deliberately don't touch `cordial-run`, an internal that can change in
+//! any release. Feline does edit a few keys of Cordial's settings file,
+//! `shell.json`, whose allowed values were checked against the way Cordial
+//! loads that file. That matters: one unknown value makes Cordial ignore the
+//! whole file and fall back to defaults. Cordial's renderer key (`graphics`)
+//! has no documented value list, so Feline leaves it alone.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use super::config::{Choice, Kind, Link, SettingDef, Val};
 use super::{
     DetectContext, DoctorReport, InstallKind, Installation, LaunchPlan, LaunchTarget, Origin,
     RuntimeBackend, RuntimeError, find_appimages, find_on_path, flatpak_installs, metainfo_version,
@@ -44,6 +49,96 @@ const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(30);
 const DOCTOR_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Cordial;
+
+const fn toggle(
+    key: &'static str,
+    label: &'static str,
+    help: &'static str,
+    default: bool,
+) -> SettingDef {
+    SettingDef {
+        key,
+        label,
+        help,
+        kind: Kind::Toggle,
+        default: Val::Bool(default),
+        link: None,
+    }
+}
+
+const fn choice(value: &'static str, label: &'static str) -> Choice {
+    Choice { value, label }
+}
+
+static SETTINGS: &[SettingDef] = &[
+    SettingDef {
+        key: "frame_rate_limit",
+        label: "FPS limit",
+        help: "Cordial's own frame cap. Roblox's in-game Maximum Frame Rate also applies.",
+        kind: Kind::Choice(&[
+            choice("display", "Match the display"),
+            choice("cap90", "90 FPS"),
+            choice("cap120", "120 FPS"),
+            choice("cap144", "144 FPS"),
+            choice("cap165", "165 FPS"),
+            choice("cap240", "240 FPS"),
+            choice("cap360", "360 FPS"),
+            choice("cap480", "480 FPS"),
+        ]),
+        default: Val::Str("display"),
+        link: None,
+    },
+    SettingDef {
+        key: "present_mode",
+        label: "Present mode",
+        help: "How frames reach the screen. Mailbox is smooth without tearing; Immediate has the lowest latency but can tear.",
+        kind: Kind::Choice(&[
+            choice("automatic", "Automatic"),
+            choice("fifo", "VSync (FIFO)"),
+            choice("mailbox", "Mailbox"),
+            choice("immediate", "Immediate"),
+        ]),
+        default: Val::Str("mailbox"),
+        link: None,
+    },
+    SettingDef {
+        key: "throttle",
+        label: "Lower the frame rate",
+        help: "Saves power while you aren't looking at the game.",
+        kind: Kind::Choice(&[
+            choice("visible", "When the window is hidden"),
+            choice("unfocused", "When the window isn't focused"),
+            choice("off", "Never"),
+        ]),
+        default: Val::Str("visible"),
+        link: None,
+    },
+    SettingDef {
+        link: Some(Link::GameMode),
+        ..toggle(
+            "gamemode",
+            "GameMode",
+            "Asks Feral GameMode to boost performance while you play.",
+            true,
+        )
+    },
+    toggle(
+        "mangohud",
+        "MangoHud overlay",
+        "Shows FPS and frame times over the game.",
+        false,
+    ),
+    toggle(
+        "vkbasalt",
+        "vkBasalt",
+        "Post-processing effects (sharpening and more).",
+        false,
+    ),
+    SettingDef {
+        link: Some(Link::CloseOnLeave),
+        ..toggle("close_on_leave", "Close when leaving a game", "", false)
+    },
+];
 
 impl RuntimeBackend for Cordial {
     fn id(&self) -> &'static str {
@@ -123,6 +218,22 @@ impl RuntimeBackend for Cordial {
             }
         }
         Ok(LaunchPlan { command, note })
+    }
+
+    fn settings(&self) -> &'static [SettingDef] {
+        SETTINGS
+    }
+
+    fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
+        let dir = match &installation.kind {
+            InstallKind::Flatpak { app_id, .. } => ctx.flatpak_config_dir(app_id)?.join("cordial"),
+            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.config_dir("cordial")?,
+        };
+        Some(dir.join("shell.json"))
+    }
+
+    fn process_names(&self) -> &'static [&'static str] {
+        &["cordial", "cordial-run"]
     }
 
     fn has_doctor(&self) -> bool {
@@ -286,6 +397,7 @@ mod tests {
             home: Some(home.clone()),
             path: Some(bin.clone().into_os_string()),
             flatpak_system_dir: system,
+            config_home: None,
         };
         let found = CORDIAL.detect(&ctx);
         let _ = fs::remove_dir_all(&root);

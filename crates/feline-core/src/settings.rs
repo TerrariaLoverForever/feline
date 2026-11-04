@@ -7,6 +7,8 @@
 //! # Feline settings
 //! runtime = cordial:flatpak-system
 //! account_notice = 1
+//! renderer = opengl
+//! gamemode = on
 //! ```
 //!
 //! Stability rules:
@@ -26,6 +28,68 @@ use crate::paths;
 /// accepted an older version sees the new one once.
 pub const ACCOUNT_NOTICE_VERSION: u32 = 1;
 
+/// Feline's renderer override for all runtimes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Renderer {
+    /// Don't override: each runtime uses its own setting.
+    #[default]
+    Runtime,
+    Vulkan,
+    OpenGl,
+}
+
+/// An on/off override, or "let each runtime decide".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Toggle {
+    #[default]
+    Runtime,
+    On,
+    Off,
+}
+
+/// Feline-wide settings that override the matching setting of every runtime
+/// (see `runtime::config`). The default overrides nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Overrides {
+    pub renderer: Renderer,
+    pub gamemode: Toggle,
+    pub close_on_leave: Toggle,
+}
+
+impl Renderer {
+    fn parse(value: &str) -> Self {
+        match value {
+            "vulkan" => Self::Vulkan,
+            "opengl" => Self::OpenGl,
+            _ => Self::Runtime,
+        }
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::Vulkan => "vulkan",
+            Self::OpenGl => "opengl",
+        }
+    }
+}
+
+impl Toggle {
+    fn parse(value: &str) -> Self {
+        match value {
+            "on" => Self::On,
+            "off" => Self::Off,
+            _ => Self::Runtime,
+        }
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     /// [`Installation::key`](crate::runtime::Installation::key) of the runtime
@@ -33,6 +97,7 @@ pub struct Settings {
     pub runtime: Option<String>,
     /// The version of the account-risk notice the user accepted; 0 = never.
     pub account_notice: u32,
+    pub overrides: Overrides,
 }
 
 impl Settings {
@@ -63,6 +128,10 @@ impl Settings {
                 // A value that isn't a number counts as "never accepted", so
                 // the notice is shown again rather than skipped.
                 "account_notice" => settings.account_notice = value.parse().unwrap_or(0),
+                // Unknown values mean "don't override", the safe choice.
+                "renderer" => settings.overrides.renderer = Renderer::parse(value),
+                "gamemode" => settings.overrides.gamemode = Toggle::parse(value),
+                "close_on_leave" => settings.overrides.close_on_leave = Toggle::parse(value),
                 _ => {}
             }
         }
@@ -76,6 +145,16 @@ impl Settings {
         }
         if self.account_notice > 0 {
             text.push_str(&format!("account_notice = {}\n", self.account_notice));
+        }
+        let o = &self.overrides;
+        if o.renderer != Renderer::Runtime {
+            text.push_str(&format!("renderer = {}\n", o.renderer.as_str()));
+        }
+        if o.gamemode != Toggle::Runtime {
+            text.push_str(&format!("gamemode = {}\n", o.gamemode.as_str()));
+        }
+        if o.close_on_leave != Toggle::Runtime {
+            text.push_str(&format!("close_on_leave = {}\n", o.close_on_leave.as_str()));
         }
         text
     }
@@ -120,6 +199,16 @@ mod tests {
     }
 
     #[test]
+    fn overrides_parse_and_default_to_runtime() {
+        let s = Settings::parse("renderer = vulkan\ngamemode = on\nclose_on_leave = maybe\n");
+        assert_eq!(s.overrides.renderer, Renderer::Vulkan);
+        assert_eq!(s.overrides.gamemode, Toggle::On);
+        assert_eq!(s.overrides.close_on_leave, Toggle::Runtime);
+        // Nothing overridden → nothing written.
+        assert!(!Settings::default().to_text().contains("renderer"));
+    }
+
+    #[test]
     fn account_notice_versions() {
         assert!(Settings::default().needs_account_notice());
         assert!(Settings::parse("account_notice = banana\n").needs_account_notice());
@@ -145,6 +234,11 @@ mod tests {
         let settings = Settings {
             runtime: Some("cordial:appimage:/home/me/My Apps/Cordial.AppImage".into()),
             account_notice: ACCOUNT_NOTICE_VERSION,
+            overrides: Overrides {
+                renderer: Renderer::OpenGl,
+                gamemode: Toggle::Off,
+                close_on_leave: Toggle::On,
+            },
         };
         settings.save_to(&path).unwrap();
         let loaded = Settings::load_from(&path).unwrap();

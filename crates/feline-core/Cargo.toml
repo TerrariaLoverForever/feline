@@ -11,3 +11,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# Reading and writing the runtimes' JSON settings files. `preserve_order`
+# keeps keys in their original order, so Feline's edits produce small,
+# readable diffs and don't reshuffle another program's file.
+serde_json = { version = "1", features = ["preserve_order"] }

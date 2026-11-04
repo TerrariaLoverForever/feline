@@ -1,0 +1,299 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Settings page: Feline's own settings (which override the runtimes'), and a
+// tab per runtime that edits that runtime's own settings file.
+
+import { ScrollView, Switch, ComboBox, SpinBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Level, SettingKind, SettingRow, RuntimeTab } from "../types.slint";
+import { Pill, StatusDot, Card, Eyebrow, BodyText, PageTitle, Divider } from "../components.slint";
+
+// A tab in the tab bar.
+component Tab inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+
+    height: 36px;
+    border-radius: 18px;
+    background: root.active ? Theme.accent.with-alpha(0.18) : touch.has-hover ? Theme.surface-hover : transparent;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent.with-alpha(0.6) : Theme.border;
+    animate background, border-color { duration: Theme.fast; }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 13px;
+            font-weight: root.active ? 700 : 500;
+            color: root.active ? Theme.lavender : Theme.text-muted;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Label and help text on the left, a control on the right.
+component SettingLine inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> help;
+    // Shown instead of the help text when a Feline setting overrides this one.
+    in property <string> managed-reason;
+    spacing: 20px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: root.label;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            if root.managed-reason != "": Pill {
+                text: "Managed by Feline";
+                tone: Theme.lavender;
+            }
+        }
+        if root.managed-reason != "": BodyText {
+            text: root.managed-reason + ".";
+            color: Theme.lavender.with-alpha(0.8);
+        }
+        if root.managed-reason == "" && root.help != "": BodyText {
+            text: root.help;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        @children
+    }
+}
+
+// One of Feline's own override settings: a dropdown.
+component OverrideLine inherits SettingLine {
+    in property <[string]> options;
+    in property <int> index;
+    callback changed(int);
+    ComboBox {
+        width: 230px;
+        model: root.options;
+        current-index: root.index;
+        selected => {
+            root.changed(self.current-index);
+        }
+    }
+}
+
+export component SettingsPage inherits Rectangle {
+    // Feline's override settings (index into each options list).
+    in property <int> renderer-index;
+    in property <int> gamemode-index;
+    in property <int> close-index;
+    // Result of applying Feline's settings to the runtimes.
+    in property <string> apply-status;
+    in property <Level> apply-level;
+
+    in property <[RuntimeTab]> tabs;
+    // 0 = Feline, 1.. = tabs[n - 1]
+    in-out property <int> current: 0;
+
+    callback set-override(string, int);
+    callback set-bool(string, string, bool);
+    callback set-choice(string, string, int);
+    callback set-number(string, string, int);
+    callback reload();
+
+    property <[string]> toggle-options: ["Let each runtime decide", "On", "Off"];
+
+    ScrollView {
+        VerticalLayout {
+            padding: 32px;
+            spacing: 16px;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: 6px;
+                PageTitle {
+                    text: "Settings";
+                }
+                BodyText {
+                    text: "Feline's own settings, and the settings of each runtime, in one place.";
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Tab {
+                    text: "Feline";
+                    active: root.current == 0;
+                    clicked => {
+                        root.current = 0;
+                    }
+                }
+                for tab[i] in root.tabs: Tab {
+                    text: tab.name;
+                    active: root.current == i + 1;
+                    clicked => {
+                        root.current = i + 1;
+                        root.reload();
+                    }
+                }
+            }
+
+            // ---------------- Feline tab
+            if root.current == 0: Card {
+                Eyebrow {
+                    text: "OVERRIDES FOR EVERY RUNTIME";
+                }
+                BodyText {
+                    text: "These replace the matching setting of Sober, Cordial and Stud. Feline writes them into each runtime's settings file now, and again every time it starts a game.";
+                }
+                OverrideLine {
+                    label: "Renderer";
+                    help: "Cordial's renderer isn't changed: its OpenGL ES setting isn't documented.";
+                    options: ["Let each runtime decide", "Vulkan", "OpenGL"];
+                    index: root.renderer-index;
+                    changed(i) => {
+                        root.set-override("renderer", i);
+                    }
+                }
+                Divider { }
+                OverrideLine {
+                    label: "GameMode";
+                    help: "Feral GameMode can boost performance while you play, if it's installed.";
+                    options: root.toggle-options;
+                    index: root.gamemode-index;
+                    changed(i) => {
+                        root.set-override("gamemode", i);
+                    }
+                }
+                Divider { }
+                OverrideLine {
+                    label: "Close the runtime when leaving a game";
+                    options: root.toggle-options;
+                    index: root.close-index;
+                    changed(i) => {
+                        root.set-override("close-on-leave", i);
+                    }
+                }
+                if root.apply-status != "": HorizontalLayout {
+                    spacing: 10px;
+                    padding-top: 6px;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 5px;
+                        StatusDot {
+                            tone: Theme.level-color(root.apply-level);
+                        }
+                    }
+                    BodyText {
+                        horizontal-stretch: 1;
+                        text: root.apply-status;
+                    }
+                }
+            }
+            if root.current == 0: Card {
+                Eyebrow {
+                    text: "FRAME RATE";
+                }
+                BodyText {
+                    text: "Set the FPS limit in Roblox itself: Settings → Maximum Frame Rate, in any experience. Cordial also has its own limit on its tab.";
+                }
+            }
+
+            // ---------------- Runtime tabs
+            for tab[i] in root.tabs: VerticalLayout {
+                visible: root.current == i + 1;
+                // Hidden tabs take no space.
+                height: root.current == i + 1 ? self.preferred-height : 0px;
+                spacing: 16px;
+
+                if tab.source != "": BodyText {
+                    text: "Editing: " + tab.source;
+                }
+                if tab.status != "": Rectangle {
+                    border-radius: Theme.radius-small;
+                    background: Theme.level-color(tab.status-level).with-alpha(0.08);
+                    border-width: 1px;
+                    border-color: Theme.level-color(tab.status-level).with-alpha(0.35);
+                    HorizontalLayout {
+                        padding: 14px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: start;
+                            padding-top: 5px;
+                            StatusDot {
+                                tone: Theme.level-color(tab.status-level);
+                            }
+                        }
+                        BodyText {
+                            horizontal-stretch: 1;
+                            text: tab.status;
+                            color: Theme.text;
+                        }
+                    }
+                }
+                if tab.rows.length > 0: Card {
+                    for row[j] in tab.rows: VerticalLayout {
+                        if j > 0: Divider { }
+                        if row.kind == SettingKind.toggle: SettingLine {
+                            label: row.label;
+                            help: row.help;
+                            managed-reason: row.managed-reason;
+                            Switch {
+                                checked: row.on;
+                                enabled: tab.editable && !row.managed;
+                                toggled => {
+                                    root.set-bool(tab.id, row.key, self.checked);
+                                }
+                            }
+                        }
+                        if row.kind == SettingKind.choice: SettingLine {
+                            label: row.label;
+                            help: row.help;
+                            managed-reason: row.managed-reason;
+                            ComboBox {
+                                width: 230px;
+                                model: row.choices;
+                                current-index: row.choice-index;
+                                enabled: tab.editable && !row.managed;
+                                selected => {
+                                    root.set-choice(tab.id, row.key, self.current-index);
+                                }
+                            }
+                        }
+                        if row.kind == SettingKind.number: SettingLine {
+                            label: row.label;
+                            help: row.help;
+                            managed-reason: row.managed-reason;
+                            SpinBox {
+                                width: 130px;
+                                minimum: row.min;
+                                maximum: row.max;
+                                value: row.number;
+                                enabled: tab.editable && !row.managed;
+                                edited(v) => {
+                                    root.set-number(tab.id, row.key, v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
