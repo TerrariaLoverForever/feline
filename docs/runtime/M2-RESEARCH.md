@@ -209,6 +209,21 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
   `dl*` family (Feline's: `dl_iterate_phdr` reports the engine for C++
   unwinding; `dlopen` logs requests, so far only `libc.so`). The engine
   starts its own threads during the constructors.
+- Step 5 in progress: Feline's Java world (`jni.rs`: JavaVM 8 slots, JNIEnv
+  233 slots, order generated from AOSP's `jni.h`) answers `JNI_OnLoad`. It
+  looks up classes such as `com/roblox/engine/jni/locale/
+  NativeLocaleJavaInterface` and `…/user/NativeUserJavaInterface` and their
+  static getters, then the main thread **overflows its stack in infinite
+  recursion inside the engine** (the same three return addresses repeating).
+  Ruled out, by observation only: the constructors alone (no crash without
+  `JNI_OnLoad`), stack size (also with a 512 MB stack), signal handlers
+  (the engine installs none: `SigCgt`), other threads (its two workers are
+  idle on a futex). How far `JNI_OnLoad` gets before the loop varies between
+  runs. Diagnostics: `FELINE_JNI_TRACE=1` (every JNI call),
+  `FELINE_THREAD_WATCH=1` (thread snapshot in crash reports),
+  `FELINE_SKIP_ONLOAD=1`; crash reports give the engine offset, the faulting
+  address and the engine return addresses on the stack (on an alternate
+  signal stack, so stack overflows are reported too).
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

@@ -22,7 +22,7 @@
 
 #![allow(unsafe_code)]
 
-use std::ffi::{CString, c_char, c_int};
+use std::ffi::{CString, c_char, c_int, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::elf::{DT_INIT_ARRAY, Elf};
@@ -50,7 +50,28 @@ fn format_number(mut n: usize, buf: &mut [u8; 20]) -> &[u8] {
     }
 }
 
-extern "C" fn on_fatal_signal(signal: c_int) {
+/// The engine's load bias, for reporting crash addresses as offsets.
+static BIAS: AtomicUsize = AtomicUsize::new(0);
+static IMAGE_LEN: AtomicUsize = AtomicUsize::new(0);
+
+/// Writes `n` as 0x-prefixed hex into `buf` (no allocation: signal-safe).
+fn format_hex(mut n: usize, buf: &mut [u8; 18]) -> &[u8] {
+    let mut at = buf.len();
+    loop {
+        at -= 1;
+        buf[at] = b"0123456789abcdef"[n % 16];
+        n /= 16;
+        if n == 0 {
+            break;
+        }
+    }
+    at -= 2;
+    buf[at] = b'0';
+    buf[at + 1] = b'x';
+    &buf[at..]
+}
+
+extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, context: *mut c_void) {
     let name: &[u8] = match signal {
         libc::SIGSEGV => b"a bad memory access (SIGSEGV)",
         libc::SIGBUS => b"a bus error (SIGBUS)",
@@ -59,17 +80,48 @@ extern "C" fn on_fatal_signal(signal: c_int) {
         libc::SIGABRT => b"abort (SIGABRT)",
         _ => b"a fatal signal",
     };
+    let current = CURRENT.load(Ordering::Relaxed);
     let (mut a, mut b) = ([0u8; 20], [0u8; 20]);
-    let current = format_number(CURRENT.load(Ordering::Relaxed), &mut a);
-    let total = format_number(TOTAL.load(Ordering::Relaxed), &mut b);
-    let parts: [&[u8]; 7] = [
+    let where_: [&[u8]; 4] = if current == 0 {
+        [b" after the constructors", b"", b"", b""]
+    } else {
+        [
+            b" in constructor ",
+            format_number(current, &mut a),
+            b" of ",
+            format_number(TOTAL.load(Ordering::Relaxed), &mut b),
+        ]
+    };
+    // The instruction that failed (RIP) and, for memory errors, the address.
+    // SAFETY: with SA_SIGINFO the kernel passes a valid siginfo_t and
+    // ucontext_t; reading their fields is async-signal-safe.
+    let (rip, fault) = unsafe {
+        let uc = context.cast::<libc::ucontext_t>();
+        let rip = (*uc).uc_mcontext.gregs[libc::REG_RIP as usize] as usize;
+        (rip, (*info).si_addr() as usize)
+    };
+    let (bias, len) = (
+        BIAS.load(Ordering::Relaxed),
+        IMAGE_LEN.load(Ordering::Relaxed),
+    );
+    let (mut h1, mut h2) = ([0u8; 18], [0u8; 18]);
+    let at: [&[u8]; 2] = if bias != 0 && rip >= bias && rip < bias + len {
+        [b" at engine offset ", format_hex(rip - bias, &mut h1)]
+    } else {
+        [b" at address ", format_hex(rip, &mut h1)]
+    };
+    let parts: [&[u8]; 11] = [
         b"feline-runtime: stopped by ",
         name,
-        b" in constructor ",
-        current,
-        b" of ",
-        total,
-        b"\n",
+        where_[0],
+        where_[1],
+        where_[2],
+        where_[3],
+        at[0],
+        at[1],
+        b" (accessing ",
+        format_hex(fault, &mut h2),
+        b")\n",
     ];
     for part in parts {
         // SAFETY: write(2) is async-signal-safe; the buffers are valid.
@@ -77,12 +129,118 @@ extern "C" fn on_fatal_signal(signal: c_int) {
             libc::write(2, part.as_ptr().cast(), part.len());
         }
     }
+    // A rough backtrace: values on the stack just above the stack pointer
+    // that point into the engine are mostly return addresses. Runaway
+    // recursion shows up as the same few repeating.
+    // SAFETY: as above, plus: the words read lie between the stack pointer
+    // and the stack's top, which is mapped (the thread was running there).
+    unsafe {
+        let uc = context.cast::<libc::ucontext_t>();
+        let rsp = (*uc).uc_mcontext.gregs[libc::REG_RSP as usize] as usize;
+        write_bytes(b"feline-runtime: engine addresses on the stack:");
+        let mut shown = 0;
+        for i in 0..4096 {
+            let value = *((rsp + i * 8) as *const usize);
+            if bias != 0 && value > bias && value < bias + len {
+                let mut h = [0u8; 18];
+                write_bytes(b" ");
+                write_bytes(format_hex(value - bias, &mut h));
+                shown += 1;
+                if shown == 24 {
+                    break;
+                }
+            }
+        }
+        write_bytes(b"\n");
+        let len = SNAPSHOT_LEN.load(Ordering::Acquire);
+        let snapshot = SNAPSHOT.load(Ordering::Acquire);
+        if !snapshot.is_null() && len > 0 {
+            libc::write(2, snapshot.cast(), len);
+        }
+    }
     // SA_RESETHAND restored the default action, so returning re-raises the
     // signal (or abort() raises it again) and the process ends normally for
     // that signal.
 }
 
+/// The latest thread snapshot (see [`start_thread_watch`]), for the crash
+/// handler: a leaked buffer, published with an atomic pointer so the handler
+/// never takes a lock.
+static SNAPSHOT: std::sync::atomic::AtomicPtr<u8> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static SNAPSHOT_LEN: AtomicUsize = AtomicUsize::new(0);
+
+/// `FELINE_THREAD_WATCH=1`: a diagnostic thread that records, every 10 ms,
+/// each thread's name, state and where in the kernel it waits
+/// (`/proc/self/task/*`), so a crash report shows what the other threads
+/// were doing. Diagnostics only: each snapshot is leaked.
+pub fn start_thread_watch() {
+    if std::env::var_os("FELINE_THREAD_WATCH").is_none() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("feline-watch".into())
+        .spawn(|| {
+            loop {
+                let mut text = String::from("feline-runtime: threads (name, state, waiting in):\n");
+                if let Ok(tasks) = std::fs::read_dir("/proc/self/task") {
+                    for task in tasks.filter_map(Result::ok) {
+                        let read = |f: &str| {
+                            std::fs::read_to_string(task.path().join(f)).unwrap_or_default()
+                        };
+                        let stat = read("stat");
+                        let state = stat
+                            .rsplit_once(')')
+                            .map(|(_, r)| r.trim().chars().next().unwrap_or('?'));
+                        text.push_str(&format!(
+                            "  {:<16} {} {}\n",
+                            read("comm").trim(),
+                            state.unwrap_or('?'),
+                            read("wchan").trim()
+                        ));
+                    }
+                }
+                // Which signals the process catches, blocks or has pending.
+                if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                    for line in status
+                        .lines()
+                        .filter(|l| l.starts_with("Sig") || l.starts_with("ShdPnd"))
+                    {
+                        text.push_str(&format!("  {line}\n"));
+                    }
+                }
+                let bytes: &'static mut [u8] = Box::leak(text.into_bytes().into_boxed_slice());
+                SNAPSHOT_LEN.store(0, Ordering::Release);
+                SNAPSHOT.store(bytes.as_mut_ptr(), Ordering::Release);
+                SNAPSHOT_LEN.store(bytes.len(), Ordering::Release);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+}
+
+fn write_bytes(bytes: &[u8]) {
+    // SAFETY: write(2) is async-signal-safe; the buffer is valid.
+    unsafe {
+        libc::write(2, bytes.as_ptr().cast(), bytes.len());
+    }
+}
+
+/// Gives this thread an alternate signal stack, so the crash report can be
+/// written even when the crash is a stack overflow.
+fn install_signal_stack() {
+    const SIZE: usize = 256 * 1024;
+    let memory: &'static mut [u8] = Box::leak(vec![0u8; SIZE].into_boxed_slice());
+    let stack = libc::stack_t {
+        ss_sp: memory.as_mut_ptr().cast(),
+        ss_flags: 0,
+        ss_size: SIZE,
+    };
+    // SAFETY: the memory is leaked, so it stays valid for the thread's life.
+    unsafe { libc::sigaltstack(&stack, std::ptr::null_mut()) };
+}
+
 fn install_crash_reporting() {
+    install_signal_stack();
     for signal in [
         libc::SIGSEGV,
         libc::SIGBUS,
@@ -94,8 +252,9 @@ fn install_crash_reporting() {
         // is valid; the handler only does async-signal-safe work.
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = on_fatal_signal as extern "C" fn(c_int) as usize;
-            action.sa_flags = libc::SA_RESETHAND;
+            action.sa_sigaction =
+                on_fatal_signal as extern "C" fn(c_int, *mut libc::siginfo_t, *mut c_void) as usize;
+            action.sa_flags = libc::SA_RESETHAND | libc::SA_SIGINFO | libc::SA_ONSTACK;
             libc::sigemptyset(&mut action.sa_mask);
             libc::sigaction(signal, &action, std::ptr::null_mut());
         }
@@ -117,6 +276,8 @@ pub fn run_constructors(elf: &Elf, image: &Image) -> Result<usize, String> {
         phdr: image.bias() + phdr,
         phnum,
     });
+    BIAS.store(image.bias() as usize, Ordering::Relaxed);
+    IMAGE_LEN.store(image.len(), Ordering::Relaxed);
     let count = elf.init_array_len() as usize;
     let Some(array) = elf.dyn_value(DT_INIT_ARRAY) else {
         return Ok(0);
@@ -173,6 +334,9 @@ pub fn call_jni_onload(elf: &Elf, image: &Image) -> Result<i32, String> {
         .find(|s| s.defined && s.name == "JNI_OnLoad")
         .ok_or("the library has no JNI_OnLoad")?;
     let vm = crate::jni::java_vm()?;
+    start_thread_watch();
+    // The engine may have installed its own crash handler meanwhile.
+    install_crash_reporting();
     stubs::set_phase("JNI_OnLoad".to_owned());
     // SAFETY: as for the constructors: the engine's own function at its
     // exported address, with the signature JNI defines.

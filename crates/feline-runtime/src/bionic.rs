@@ -208,6 +208,15 @@ pub unsafe extern "C" fn __FD_ISSET_chk(fd: c_int, set: *const u64, set_size: us
     c_int::from(unsafe { *set.add(word) } & bit != 0)
 }
 
+/// `sighandler_t signal(int signum, sighandler_t handler)`: forwarded to
+/// glibc (same signal numbers and handler type), but logged, so it's visible
+/// when the engine takes over a signal (e.g. installs its own crash handler).
+pub extern "C" fn signal(signum: c_int, handler: libc::sighandler_t) -> libc::sighandler_t {
+    eprintln!("feline-runtime: the engine set a handler for signal {signum}");
+    // SAFETY: the same call the engine made, passed through unchanged.
+    unsafe { libc::signal(signum, handler) }
+}
+
 /// The address of Feline's implementation of `name`, if there is one.
 pub fn implementation(name: &str) -> Option<u64> {
     if let Some(address) = crate::dl::implementation(name) {
@@ -216,6 +225,9 @@ pub fn implementation(name: &str) -> Option<u64> {
     type FdOp = unsafe extern "C" fn(c_int, *mut u64, usize);
     let address = match name {
         "sysconf" => sysconf as extern "C" fn(c_int) -> c_long as usize,
+        "signal" => {
+            signal as extern "C" fn(c_int, libc::sighandler_t) -> libc::sighandler_t as usize
+        }
         "__fwrite_chk" => {
             __fwrite_chk
                 as unsafe extern "C" fn(

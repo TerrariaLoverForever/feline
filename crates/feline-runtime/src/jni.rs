@@ -97,15 +97,35 @@ fn log(what: String) {
     eprintln!("feline-runtime: jni: {what}");
 }
 
+/// `FELINE_JNI_TRACE=1` logs every call to Feline's JNI functions (also
+/// the quiet ones such as references and exception checks), numbered, up to
+/// a limit, to see how the engine uses the interface.
+fn trace(function: &str) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    if !*ENABLED.get_or_init(|| std::env::var_os("FELINE_JNI_TRACE").is_some()) {
+        return;
+    }
+    let n = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    if n <= 200 {
+        eprintln!("feline-runtime: jni trace #{n}: {function}");
+    } else if n == 201 {
+        eprintln!("feline-runtime: jni trace: more than 200 calls, not logging further");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // JNIEnv functions Feline implements
 // ---------------------------------------------------------------------------
 
 extern "C" fn get_version(_env: Handle) -> JInt {
+    trace("GetVersion");
     JNI_VERSION_1_6
 }
 
 unsafe extern "C" fn find_class(_env: Handle, name: *const c_char) -> Handle {
+    trace("FindClass");
     // SAFETY: the engine passes a valid class name.
     let name = unsafe { text(name) };
     log(format!("FindClass {name}"));
@@ -176,6 +196,7 @@ unsafe extern "C" fn register_natives(
     methods: *const NativeMethod,
     count: JInt,
 ) -> JInt {
+    trace("RegisterNatives");
     let class = class_name(class);
     let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     for i in 0..count.max(0) as usize {
@@ -190,42 +211,56 @@ unsafe extern "C" fn register_natives(
 }
 
 extern "C" fn unregister_natives(_env: Handle, _class: Handle) -> JInt {
+    trace("UnregisterNatives");
     JNI_OK
 }
 
 // No Java code runs, so no Java exception is ever pending.
 extern "C" fn exception_check(_env: Handle) -> JBoolean {
+    trace("ExceptionCheck");
     0
 }
 extern "C" fn exception_occurred(_env: Handle) -> Handle {
+    trace("ExceptionOccurred");
     std::ptr::null_mut()
 }
-extern "C" fn exception_clear(_env: Handle) {}
+extern "C" fn exception_clear(_env: Handle) {
+    trace("ExceptionClear/Describe");
+}
 
 // References: Feline's objects live as long as the process, so a new
 // reference is the same handle and deleting one does nothing.
 extern "C" fn new_ref(_env: Handle, object: Handle) -> Handle {
+    trace("New(Global|Local|WeakGlobal)Ref");
     object
 }
-extern "C" fn delete_ref(_env: Handle, _object: Handle) {}
+extern "C" fn delete_ref(_env: Handle, _object: Handle) {
+    trace("Delete(Global|Local|WeakGlobal)Ref");
+}
 extern "C" fn push_local_frame(_env: Handle, _capacity: JInt) -> JInt {
+    trace("PushLocalFrame");
     JNI_OK
 }
 extern "C" fn pop_local_frame(_env: Handle, result: Handle) -> Handle {
+    trace("PopLocalFrame");
     result
 }
 extern "C" fn ensure_local_capacity(_env: Handle, _capacity: JInt) -> JInt {
+    trace("EnsureLocalCapacity");
     JNI_OK
 }
 extern "C" fn is_same_object(_env: Handle, a: Handle, b: Handle) -> JBoolean {
+    trace("IsSameObject");
     JBoolean::from(a == b)
 }
 /// JNILocalRefType: every Feline handle behaves like a valid reference.
 extern "C" fn get_object_ref_type(_env: Handle, _object: Handle) -> JInt {
+    trace("GetObjectRefType");
     1
 }
 
 unsafe extern "C" fn new_string_utf(_env: Handle, s: *const c_char) -> Handle {
+    trace("NewStringUTF");
     if s.is_null() {
         return std::ptr::null_mut();
     }
@@ -241,6 +276,7 @@ unsafe extern "C" fn get_string_utf_chars(
     string: Handle,
     is_copy: *mut JBoolean,
 ) -> *const c_char {
+    trace("GetStringUTFChars");
     if !is_copy.is_null() {
         // SAFETY: the engine passes a writable jboolean or NULL.
         unsafe { *is_copy = 0 };
@@ -251,8 +287,11 @@ unsafe extern "C" fn get_string_utf_chars(
         _ => std::ptr::null(),
     }
 }
-extern "C" fn release_string_utf_chars(_env: Handle, _string: Handle, _chars: *const c_char) {}
+extern "C" fn release_string_utf_chars(_env: Handle, _string: Handle, _chars: *const c_char) {
+    trace("ReleaseStringUTFChars");
+}
 extern "C" fn get_string_utf_length(_env: Handle, string: Handle) -> JInt {
+    trace("GetStringUTFLength");
     let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     match index(string).and_then(|i| world.objects.get(i)) {
         Some(Object::Str(s)) => s.as_bytes().len() as JInt,
@@ -261,6 +300,7 @@ extern "C" fn get_string_utf_length(_env: Handle, string: Handle) -> JInt {
 }
 
 unsafe extern "C" fn get_java_vm(_env: Handle, vm: *mut Handle) -> JInt {
+    trace("GetJavaVM");
     // SAFETY: the engine passes a writable JavaVM* slot.
     unsafe { *vm = tables().vm };
     JNI_OK
@@ -273,11 +313,13 @@ unsafe extern "C" fn get_java_vm(_env: Handle, vm: *mut Handle) -> JInt {
 /// GetEnv, AttachCurrentThread(AsDaemon): every thread gets the same env;
 /// Feline's functions keep no per-thread state.
 unsafe extern "C" fn vm_get_env(_vm: Handle, env: *mut Handle, _arg: *mut c_void) -> JInt {
+    trace("JavaVM::GetEnv/AttachCurrentThread");
     // SAFETY: the engine passes a writable JNIEnv* slot.
     unsafe { *env = tables().env };
     JNI_OK
 }
 extern "C" fn vm_detach(_vm: Handle) -> JInt {
+    trace("JavaVM::DetachCurrentThread");
     JNI_OK
 }
 

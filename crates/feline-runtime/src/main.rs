@@ -166,6 +166,16 @@ fn run_init(data: &[u8]) -> ExitCode {
             elf.init_array_len()
         );
         let ran = feline_runtime::init::run_constructors(&elf, image)?;
+        // Diagnostic: FELINE_SKIP_ONLOAD=1 waits 3 s instead of calling
+        // JNI_OnLoad, to tell its problems apart from the engine's threads'.
+        if std::env::var_os("FELINE_SKIP_ONLOAD").is_some() {
+            feline_runtime::init::start_thread_watch();
+            eprintln!("feline-runtime: skipping JNI_OnLoad, waiting 3 s…");
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            return Ok(format!(
+                "Constructors    all {ran} ran and returned\nWaited          3 s without JNI_OnLoad, no crash\n"
+            ));
+        }
         eprintln!("feline-runtime: calling JNI_OnLoad…");
         let version = feline_runtime::init::call_jni_onload(&elf, image)?;
         let world = feline_runtime::jni::summary();
