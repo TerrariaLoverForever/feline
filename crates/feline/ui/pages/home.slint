@@ -8,6 +8,32 @@ import { LaunchState } from "../types.slint";
 import { Icons } from "../icons.slint";
 import { Logo, Pill, StatusDot, PlayButton, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
 
+// One number in the monitoring row, e.g. "CPU 12%".
+component Stat inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    border-radius: Theme.radius-small;
+    background: Theme.surface-raised;
+    border-width: 1px;
+    border-color: Theme.border;
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 2px;
+        Eyebrow {
+            text: root.label;
+        }
+        Text {
+            text: root.value;
+            font-size: 17px;
+            font-weight: 700;
+            color: Theme.text;
+        }
+    }
+}
+
 export component HomePage inherits Rectangle {
     // Selected runtime (set from Rust). Empty name = nothing selected.
     in property <string> selected-name;
@@ -18,6 +44,10 @@ export component HomePage inherits Rectangle {
     in property <LaunchState> launch-state;
     in property <string> launch-title;
     in property <string> launch-detail;
+    // Basic monitoring (set from Rust); empty until the first sample.
+    in property <string> stat-time;
+    in property <string> stat-cpu;
+    in property <string> stat-memory;
 
     // Link check (set from Rust).
     in property <bool> link-ready;
@@ -99,7 +129,7 @@ export component HomePage inherits Rectangle {
                         color: Theme.text;
                     }
                     Text {
-                        text: "Made for Linux. Built with care.";
+                        text: "Roblox on Linux. Always lands on its feet.";
                         font-size: 15px;
                         color: Theme.lavender;
                     }
@@ -136,7 +166,7 @@ export component HomePage inherits Rectangle {
                                     alignment: center;
                                     spacing: 2px;
                                     Text {
-                                        text: root.detecting ? "Looking for runtimes…"
+                                        text: root.detecting ? "Sniffing around for runtimes…"
                                             : root.has-runtime ? root.selected-name : "No runtime selected";
                                         font-size: 14px;
                                         font-weight: 600;
@@ -192,6 +222,23 @@ export component HomePage inherits Rectangle {
                     if root.launch-detail != "": BodyText {
                         text: root.launch-detail;
                     }
+                    if root.launch-state == LaunchState.running && root.stat-time != "": HorizontalLayout {
+                        spacing: 10px;
+                        padding-top: 8px;
+                        alignment: start;
+                        Stat {
+                            label: "PLAYING FOR";
+                            value: root.stat-time;
+                        }
+                        Stat {
+                            label: "CPU";
+                            value: root.stat-cpu;
+                        }
+                        Stat {
+                            label: "MEMORY";
+                            value: root.stat-memory;
+                        }
+                    }
                 }
                 if root.launch-state == LaunchState.failed || root.launch-state == LaunchState.ended: VerticalLayout {
                     alignment: start;
@@ -217,7 +264,7 @@ export component HomePage inherits Rectangle {
                     text: "JOIN AN EXPERIENCE";
                 }
                 BodyText {
-                    text: "Got a link from the Roblox website or a friend? Paste it to jump straight into that experience.";
+                    text: "Paste a link from the Roblox website or a friend to pounce straight into that experience.";
                 }
                 HorizontalLayout {
                     spacing: 10px;

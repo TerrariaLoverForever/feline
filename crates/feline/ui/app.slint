@@ -42,6 +42,10 @@ export component AppWindow inherits Window {
     in property <LaunchState> launch-state: LaunchState.idle;
     in property <string> launch-title;
     in property <string> launch-detail;
+    // Basic monitoring while the game runs (set from Rust)
+    in property <string> stat-time;
+    in property <string> stat-cpu;
+    in property <string> stat-memory;
 
     // Link check (set from Rust)
     in property <bool> link-ready;
@@ -220,6 +224,9 @@ export component AppWindow inherits Window {
             launch-state: root.launch-state;
             launch-title: root.launch-title;
             launch-detail: root.launch-detail;
+            stat-time: root.stat-time;
+            stat-cpu: root.stat-cpu;
+            stat-memory: root.stat-memory;
             link-ready: root.link-ready;
             link-valid: root.link-valid;
             link-message: root.link-message;

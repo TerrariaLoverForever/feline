@@ -10,6 +10,7 @@
 
 pub mod launch;
 pub mod link;
+pub mod monitor;
 pub mod paths;
 pub mod presence;
 pub mod process;

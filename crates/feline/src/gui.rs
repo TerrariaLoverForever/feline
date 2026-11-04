@@ -14,6 +14,7 @@
 //!   `Arc` lets several threads own it, `Mutex` lets only one change it at a time.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
@@ -772,6 +773,9 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
 
     let name = installation.backend.name();
     set_launch(ui, LaunchState::Starting, &format!("Starting {name}…"), "");
+    ui.set_stat_time(SharedString::new());
+    ui.set_stat_cpu(SharedString::new());
+    ui.set_stat_memory(SharedString::new());
 
     let weak = ui.as_weak();
     let shared_for_thread = shared.clone();
@@ -784,11 +788,20 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
                     ui.set_presence_status(status.into());
                 });
             };
+            let stats_ui = weak.clone();
+            let on_stats = move |stats: Stats| {
+                let _ = stats_ui.upgrade_in_event_loop(move |ui| {
+                    ui.set_stat_time(stats.time.into());
+                    ui.set_stat_cpu(stats.cpu.into());
+                    ui.set_stat_memory(stats.memory.into());
+                });
+            };
             let outcome = run_game(
                 &installation,
                 &target,
                 &settings,
                 on_presence,
+                on_stats,
                 |title, detail| {
                     let (title, detail) = (title.to_owned(), detail.to_owned());
                     let _ = weak.upgrade_in_event_loop(move |ui| {
@@ -843,6 +856,7 @@ fn run_game(
     target: &LaunchTarget,
     settings: &Settings,
     on_presence: impl Fn(String) + Send + 'static,
+    on_stats: impl Fn(Stats) + Send + 'static,
     on_running: impl FnOnce(&str, &str),
 ) -> Outcome {
     let overrides = &settings.overrides;
@@ -887,9 +901,9 @@ fn run_game(
         .and_then(Result::ok);
 
     let default_detail = if presence.is_some() {
-        "Have fun! Keep Feline open to show your Discord status."
+        "Off you pounce. Keep Feline open to show your Discord status."
     } else {
-        "Have fun! You can close Feline; the game keeps running."
+        "Off you pounce. You can close Feline; the game keeps running."
     };
     let mut detail = plan
         .note
@@ -900,7 +914,11 @@ fn run_game(
     }
     on_running(&title, &detail);
 
+    let monitor = Monitor::start(game.pid(), on_stats);
     let waited = game.wait();
+    if let Some(monitor) = monitor {
+        monitor.stop();
+    }
     // Clears the Discord status.
     if let Some(presence) = presence {
         presence.stop();
@@ -911,6 +929,63 @@ fn run_game(
             "Lost track of the game",
             format!("Feline couldn't wait for {name} to finish: {e}. It may still be running."),
         ),
+    }
+}
+
+/// What the Home page shows while a game runs, already formatted.
+struct Stats {
+    time: String,
+    cpu: String,
+    memory: String,
+}
+
+/// Samples the game's CPU and memory every two seconds (background thread).
+struct Monitor {
+    stop: Arc<AtomicBool>,
+    thread: thread::JoinHandle<()>,
+}
+
+impl Monitor {
+    const INTERVAL: Duration = Duration::from_secs(2);
+
+    /// `None` if the thread couldn't start; the game runs anyway, just
+    /// without numbers.
+    fn start(pid: u32, on_stats: impl Fn(Stats) + Send + 'static) -> Option<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = stop.clone();
+        let started = std::time::Instant::now();
+        let thread = thread::Builder::new()
+            .name("feline-monitor".into())
+            .spawn(move || {
+                let mut sampler = feline_core::monitor::Sampler::new(pid);
+                // The first sample is only the starting point for CPU.
+                sampler.sample();
+                while !stop_flag.load(Ordering::Relaxed) {
+                    // Sleep in small steps so the game ending stops us quickly.
+                    let wake = std::time::Instant::now() + Self::INTERVAL;
+                    while std::time::Instant::now() < wake && !stop_flag.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    let Some(sample) = sampler.sample() else {
+                        continue;
+                    };
+                    on_stats(Stats {
+                        time: duration_label(started.elapsed()),
+                        cpu: format!("{:.0}%", sample.cpu_percent),
+                        memory: format!(
+                            "{:.1} GiB",
+                            sample.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                        ),
+                    });
+                }
+            })
+            .ok()?;
+        Some(Self { stop, thread })
+    }
+
+    fn stop(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.thread.join();
     }
 }
 

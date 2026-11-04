@@ -29,7 +29,7 @@ will only be claimed once it has been, with reproducible evidence.
 | 8 | Settings page: Feline overrides (renderer, GameMode, close on leave), a tab per runtime (Sober, Cordial, Stud) editing its own file, "Managed by Feline" locks | Done |
 | 9 | Feline's own Discord Rich Presence (from the Roblox logs; username and Join button off by default; turns off the runtimes' own) | Done |
 | 10 | ~~Install and update Stud from Feline~~ | Dropped: users install Stud themselves, like Sober and Cordial |
-| 11 | Basic monitoring (running time, CPU and RAM of the game process) | Planned |
+| 11 | Basic monitoring: time played, CPU and memory (PSS) of the whole game process tree, on the Home page | Done |
 | 12 | Polish and docs | Planned |
 
 Out of scope for M1: registering as the `roblox://` link handler, a FastFlag

@@ -182,11 +182,11 @@ export component RuntimesPage inherits Rectangle {
         }
 
         if root.detecting && root.runtimes.length == 0: BodyText {
-            text: "Looking for runtimes…";
+            text: "Sniffing around for runtimes…";
         }
         if !root.detecting && root.runtimes.length == 0: Card {
             CardTitle {
-                text: "No external runtime found";
+                text: "No runtimes found. The cat looked everywhere.";
             }
             BodyText {
                 text: "Feline works with Sober (Flathub), Cordial (github.com/luohoa97/cordial) and Stud (github.com/CatPieLeaf/Stud). Install one, then press Rescan.";
