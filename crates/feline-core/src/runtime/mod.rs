@@ -18,9 +18,12 @@
 //! Nothing in this file is specific to any external runtime.
 
 pub mod cordial;
+pub mod sober;
+pub mod stud;
 
 use std::ffi::OsString;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -245,10 +248,27 @@ pub trait RuntimeBackend: Send + Sync {
     fn detect(&'static self, ctx: &DetectContext) -> Vec<Installation>;
     /// Asks the program for its version.
     fn version(&self, installation: &Installation) -> Result<String, RuntimeError>;
-    /// Runs the runtime's self-check.
-    fn doctor(&self, installation: &Installation) -> Result<DoctorReport, RuntimeError>;
+    /// True if the runtime has a self-check ([`RuntimeBackend::doctor`]).
+    fn has_doctor(&self) -> bool {
+        false
+    }
+    /// True if the runtime can describe itself for bug reports
+    /// ([`RuntimeBackend::diagnostics`]).
+    fn has_diagnostics(&self) -> bool {
+        false
+    }
+    /// Runs the runtime's self-check. The default is for runtimes without one.
+    fn doctor(&self, _installation: &Installation) -> Result<DoctorReport, RuntimeError> {
+        Err(RuntimeError::Unsupported {
+            what: "a self-check",
+        })
+    }
     /// A block of text describing the install, meant for bug reports.
-    fn diagnostics(&self, installation: &Installation) -> Result<String, RuntimeError>;
+    fn diagnostics(&self, _installation: &Installation) -> Result<String, RuntimeError> {
+        Err(RuntimeError::Unsupported {
+            what: "a bug-report summary",
+        })
+    }
     /// Builds the command that starts `target`. May start the program briefly
     /// to find out which options it supports, so call it off the UI thread.
     fn plan_launch(
@@ -261,7 +281,7 @@ pub trait RuntimeBackend: Send + Sync {
 /// Every backend Feline knows about. The order is not a preference: Feline
 /// never picks a runtime on the user's behalf. A `static` lives for the whole
 /// program, so we can hand out `'static` references.
-static BACKENDS: &[&dyn RuntimeBackend] = &[&cordial::CORDIAL];
+static BACKENDS: &[&dyn RuntimeBackend] = &[&cordial::CORDIAL, &sober::SOBER, &stud::STUD];
 
 pub fn backends() -> &'static [&'static dyn RuntimeBackend] {
     BACKENDS
@@ -286,6 +306,8 @@ pub enum RuntimeError {
     },
     /// The program's output wasn't in the expected format.
     UnexpectedOutput { what: &'static str },
+    /// The runtime doesn't offer this, e.g. Sober has no self-check.
+    Unsupported { what: &'static str },
 }
 
 impl fmt::Display for RuntimeError {
@@ -308,6 +330,7 @@ impl fmt::Display for RuntimeError {
             Self::UnexpectedOutput { what } => {
                 write!(f, "{what} gave output Feline doesn't understand")
             }
+            Self::Unsupported { what } => write!(f, "this runtime doesn't offer {what}"),
         }
     }
 }
@@ -334,6 +357,83 @@ pub fn tail_lines(text: &str, max_lines: usize) -> String {
     lines[lines.len().saturating_sub(max_lines)..].join("\n")
 }
 
+// ---------------------------------------------------------------------------
+// Detection helpers shared by the backends
+// ---------------------------------------------------------------------------
+
+/// Folders where people commonly keep AppImages (searched non-recursively).
+const APPIMAGE_DIRS: &[&str] = &["Applications", "AppImages", ".local/bin", ".local/opt"];
+
+/// The user and system installs of Flatpak `app_id`, as (scope, path of the
+/// active deployment). Only checks folders; starts nothing.
+pub(crate) fn flatpak_installs(ctx: &DetectContext, app_id: &str) -> Vec<(FlatpakScope, PathBuf)> {
+    let roots = [
+        (ctx.flatpak_user_dir(), FlatpakScope::User),
+        (Some(ctx.flatpak_system_dir.clone()), FlatpakScope::System),
+    ];
+    roots
+        .into_iter()
+        .filter_map(|(dir, scope)| {
+            let active = dir?.join("app").join(app_id).join("current/active");
+            active.is_dir().then_some((scope, active))
+        })
+        .collect()
+}
+
+/// The first executable called `name` on `PATH`, like the shell would find.
+pub(crate) fn find_on_path(ctx: &DetectContext, name: &str) -> Option<PathBuf> {
+    let path_var = ctx.path.as_ref()?;
+    std::env::split_paths(path_var)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable(candidate))
+}
+
+/// Executable files named `<prefix>*.AppImage` (any case) in the usual
+/// AppImage folders, sorted within each folder.
+pub(crate) fn find_appimages(ctx: &DetectContext, prefix: &str) -> Vec<PathBuf> {
+    let Some(home) = &ctx.home else {
+        return Vec::new();
+    };
+    let prefix = prefix.to_ascii_lowercase();
+    let mut found = Vec::new();
+    for dir in APPIMAGE_DIRS {
+        let Ok(entries) = fs::read_dir(home.join(dir)) else {
+            continue;
+        };
+        let mut paths: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".appimage"))
+            })
+            .filter(|p| is_executable(p))
+            .collect();
+        paths.sort();
+        found.extend(paths);
+    }
+    found
+}
+
+/// Reads the newest release version from an AppStream metainfo file.
+pub(crate) fn metainfo_version(file: &Path) -> Option<String> {
+    parse_metainfo_version(&fs::read_to_string(file).ok()?)
+}
+
+/// Extracts the first `<release version="…">` from AppStream XML. Releases
+/// are listed newest first. A full XML parser would be a big dependency for
+/// one attribute; this handles the standard form and returns None otherwise.
+pub fn parse_metainfo_version(xml: &str) -> Option<String> {
+    let after = xml.split("<release ").nth(1)?;
+    let tag = after.split('>').next()?;
+    let value = tag.split("version=").nth(1)?;
+    let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let version = value[1..].split(quote).next()?;
+    (!version.is_empty()).then(|| version.to_owned())
+}
+
 /// True if `path` is a regular file with an execute bit set.
 pub(crate) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -344,6 +444,20 @@ pub(crate) fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metainfo_version_parsing() {
+        let xml = r#"<component><releases>
+            <release version="0.27.0" date="2026-10-08"><description/></release>
+            <release version="0.26.0" date="2026-10-08"/>
+        </releases></component>"#;
+        assert_eq!(parse_metainfo_version(xml).as_deref(), Some("0.27.0"));
+        assert_eq!(
+            parse_metainfo_version("<release date='x' version='1.2'/>").as_deref(),
+            Some("1.2")
+        );
+        assert_eq!(parse_metainfo_version("<component/>"), None);
+    }
 
     #[test]
     fn tail_keeps_last_lines() {

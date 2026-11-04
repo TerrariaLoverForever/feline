@@ -25,8 +25,13 @@ will only be claimed once it has been, with reproducible evidence.
 | 4 | App shell: window, navigation, dark theme, branding, Home page, first-run account notice, About page | Done |
 | 5 | One-click Play, Join by link, Runtimes page with selection | Done |
 | 6 | System page (copyable report), Diagnostics page (quick checks, runtime self-check and info, full bug report, logs) | Done |
-| 7 | Basic monitoring (running time, CPU and RAM of the game process) | Planned |
-| 8 | Polish and docs | Planned |
+| 7 | Sober and Stud backends (detect and launch), shared detection helpers | Done |
+| 8 | Settings page: Feline settings, a page per runtime (Sober, Cordial, Stud), "Managed by Feline" override rules | Planned |
+| 9 | Feline's own Discord Rich Presence (from the Roblox logs; username and Join button off by default) | Planned |
+| 10 | Install and update Stud from its GitHub releases (SHA-256 checked) | Planned |
+| 11 | Basic monitoring (running time, CPU and RAM of the game process) | Planned |
+| 12 | Polish and docs | Planned |
 
 Out of scope for M1: registering as the `roblox://` link handler, a FastFlag
-editor, updates, packaging, benchmarks.
+editor, a global FPS limit (use Roblox's in-game Maximum Frame Rate; Cordial's
+page offers its own), Feline self-updates, packaging, benchmarks.

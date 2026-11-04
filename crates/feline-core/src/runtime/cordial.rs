@@ -21,13 +21,13 @@
 //! We deliberately don't touch `cordial-run` or Cordial's files: those are
 //! internals that can change in any release.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use super::{
-    DetectContext, DoctorReport, FlatpakScope, InstallKind, Installation, LaunchPlan, LaunchTarget,
-    Origin, RuntimeBackend, RuntimeError, is_executable, tail_lines,
+    DetectContext, DoctorReport, InstallKind, Installation, LaunchPlan, LaunchTarget, Origin,
+    RuntimeBackend, RuntimeError, find_appimages, find_on_path, flatpak_installs, metainfo_version,
+    tail_lines,
 };
 use crate::link::GameLink;
 use crate::process::run_captured;
@@ -36,9 +36,6 @@ pub const FLATPAK_ID: &str = "io.github.luohoa97.Cordial";
 
 /// The one instance of the backend (it has no state).
 pub static CORDIAL: Cordial = Cordial;
-
-/// Folders where people commonly keep AppImages (searched non-recursively).
-const APPIMAGE_DIRS: &[&str] = &["Applications", "AppImages", ".local/bin", ".local/opt"];
 
 // Timeouts. Generous, because a Flatpak's first start can be slow (cold
 // caches), but bounded so a stuck runtime never hangs Feline.
@@ -67,45 +64,24 @@ impl RuntimeBackend for Cordial {
         let mut found = Vec::new();
 
         // 1. Flatpak installs (user and system).
-        let flatpaks = [
-            (ctx.flatpak_user_dir(), FlatpakScope::User),
-            (Some(ctx.flatpak_system_dir.clone()), FlatpakScope::System),
-        ];
-        for (dir, scope) in flatpaks {
-            let Some(dir) = dir else { continue };
-            let active = dir.join("app").join(FLATPAK_ID).join("current/active");
-            if active.is_dir() {
-                found.push(Installation {
-                    backend: self,
-                    kind: InstallKind::Flatpak {
-                        app_id: FLATPAK_ID,
-                        scope,
-                    },
-                    known_version: flatpak_version(&active),
-                });
-            }
+        for (scope, active) in flatpak_installs(ctx, FLATPAK_ID) {
+            found.push(Installation {
+                backend: self,
+                kind: InstallKind::Flatpak {
+                    app_id: FLATPAK_ID,
+                    scope,
+                },
+                known_version: flatpak_version(&active),
+            });
         }
-
         // 2. A `cordial` program on PATH (distro package, AUR, …).
-        if let Some(path_var) = &ctx.path {
-            for dir in std::env::split_paths(path_var) {
-                let candidate = dir.join("cordial");
-                if is_executable(&candidate) {
-                    found.push(self.installation(InstallKind::Native(candidate)));
-                    break; // like the shell: the first match on PATH wins
-                }
-            }
+        if let Some(path) = find_on_path(ctx, "cordial") {
+            found.push(self.installation(InstallKind::Native(path)));
         }
-
         // 3. AppImages in the usual folders.
-        if let Some(home) = &ctx.home {
-            for dir in APPIMAGE_DIRS {
-                for path in cordial_appimages(&home.join(dir)) {
-                    found.push(self.installation(InstallKind::AppImage(path)));
-                }
-            }
+        for path in find_appimages(ctx, "cordial") {
+            found.push(self.installation(InstallKind::AppImage(path)));
         }
-
         found
     }
 
@@ -147,6 +123,14 @@ impl RuntimeBackend for Cordial {
             }
         }
         Ok(LaunchPlan { command, note })
+    }
+
+    fn has_doctor(&self) -> bool {
+        true
+    }
+
+    fn has_diagnostics(&self) -> bool {
+        true
     }
 
     fn doctor(&self, installation: &Installation) -> Result<DoctorReport, RuntimeError> {
@@ -215,25 +199,13 @@ impl Cordial {
     }
 }
 
-/// Reads the newest `<release version="…">` from the Flatpak's AppStream
-/// metainfo. Releases are listed newest first, so the first one wins.
+/// Reads the version from the Flatpak's AppStream metainfo.
 fn flatpak_version(active: &Path) -> Option<String> {
-    let file = active
-        .join("files/share/metainfo")
-        .join(format!("{FLATPAK_ID}.metainfo.xml"));
-    parse_metainfo_version(&fs::read_to_string(file).ok()?)
-}
-
-/// Extracts the first release version from AppStream XML. A full XML parser
-/// would be a big dependency for one attribute; this handles the standard
-/// `<release version="X" …>` form and returns None for anything odd.
-pub fn parse_metainfo_version(xml: &str) -> Option<String> {
-    let after = xml.split("<release ").nth(1)?;
-    let tag = after.split('>').next()?;
-    let value = tag.split("version=").nth(1)?;
-    let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-    let version = value[1..].split(quote).next()?;
-    (!version.is_empty()).then(|| version.to_owned())
+    metainfo_version(
+        &active
+            .join("files/share/metainfo")
+            .join(format!("{FLATPAK_ID}.metainfo.xml")),
+    )
 }
 
 /// `cordial --help` starts with "cordial 0.27.0".
@@ -243,26 +215,6 @@ pub fn parse_help_version(help: &str) -> Option<String> {
     version
         .starts_with(|c: char| c.is_ascii_digit())
         .then(|| version.to_owned())
-}
-
-/// Executable files in `dir` named like `cordial*.AppImage` (any case).
-fn cordial_appimages(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_ascii_lowercase)
-                .is_some_and(|n| n.starts_with("cordial") && n.ends_with(".appimage"))
-        })
-        .filter(|p| is_executable(p))
-        .collect();
-    paths.sort();
-    paths
 }
 
 /// Joins stdout and stderr for display, skipping an empty stderr.
@@ -280,7 +232,10 @@ fn combine(stdout: &str, stderr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::FlatpakScope;
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
 
     fn temp_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("feline-test-{name}-{}", std::process::id()));
@@ -293,20 +248,6 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, contents).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    #[test]
-    fn metainfo_version() {
-        let xml = r#"<component><releases>
-            <release version="0.27.0" date="2026-10-08"><description/></release>
-            <release version="0.26.0" date="2026-10-08"/>
-        </releases></component>"#;
-        assert_eq!(parse_metainfo_version(xml).as_deref(), Some("0.27.0"));
-        assert_eq!(
-            parse_metainfo_version("<release date='x' version='1.2'/>").as_deref(),
-            Some("1.2")
-        );
-        assert_eq!(parse_metainfo_version("<component/>"), None);
     }
 
     #[test]

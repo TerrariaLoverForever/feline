@@ -42,6 +42,9 @@ export component DiagnosticsPage inherits Rectangle {
 
     // The selected runtime; empty = none selected.
     in property <string> runtime-name;
+    // What the selected runtime offers.
+    in property <bool> runtime-has-doctor;
+    in property <bool> runtime-has-info;
     // True while a self-check or report is being produced.
     in property <bool> running;
     // Result of the last action.
@@ -119,8 +122,11 @@ export component DiagnosticsPage inherits Rectangle {
                         }
                     }
                 }
-                if root.has-runtime: BodyText {
+                if root.has-runtime && (root.runtime-has-doctor || root.runtime-has-info): BodyText {
                     text: "The self-check asks the runtime to test the display, GPU and Vulkan, sound and more. Runtime info is the block its developers ask for in bug reports.";
+                }
+                if root.has-runtime && !root.runtime-has-doctor && !root.runtime-has-info: BodyText {
+                    text: root.runtime-name + " has no self-check of its own. The quick checks above and the full bug report still work.";
                 }
                 HorizontalLayout {
                     spacing: 10px;
@@ -128,7 +134,7 @@ export component DiagnosticsPage inherits Rectangle {
                     SecondaryButton {
                         text: "Run self-check";
                         icon: Icons.stethoscope;
-                        enabled: root.has-runtime && !root.running;
+                        enabled: root.has-runtime && root.runtime-has-doctor && !root.running;
                         clicked => {
                             root.run-doctor();
                         }
@@ -136,7 +142,7 @@ export component DiagnosticsPage inherits Rectangle {
                     SecondaryButton {
                         text: "Runtime info";
                         icon: Icons.about;
-                        enabled: root.has-runtime && !root.running;
+                        enabled: root.has-runtime && root.runtime-has-info && !root.running;
                         clicked => {
                             root.run-runtime-info();
                         }

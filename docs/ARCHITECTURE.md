@@ -48,6 +48,8 @@ All Feline code is licensed GPL-3.0-or-later.
 | `process` | Runs helper commands with captured output, an output cap and a timeout |
 | `runtime` | `RuntimeBackend` trait, `Origin` (Feline vs external), `Installation`, `detect_all` |
 | `settings` | `~/.config/feline/settings.conf`: chosen runtime, accepted account-notice version |
+| `runtime::sober` | Optional adapter for the external Sober runtime (Flatpak only, closed source): `sober [link]` |
+| `runtime::stud` | Optional adapter for the external Stud runtime: Flatpak / `stud` on `PATH` (verified by its metainfo) / AppImage, `stud [link]` |
 | `runtime::cordial` | Optional adapter for the external Cordial runtime: finds Flatpak / `PATH` / AppImage installs, uses `--help`, `--doctor`, `--diagnostics` |
 
 Detection never starts processes; only `Installation::version()` (when the

@@ -71,7 +71,7 @@ pub fn run(args: &[&str]) -> ExitCode {
 
 const NO_RUNTIME: &str = "No runtime found. Feline's own runtime is not available yet; \
                           Feline can also start supported external runtimes you install \
-                          yourself (currently: Cordial).";
+                          yourself (currently: Sober, Cordial, Stud).";
 
 fn list_runtimes() -> ExitCode {
     let found = detect_all(&DetectContext::host());

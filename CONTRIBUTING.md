@@ -31,8 +31,8 @@ Commits without a sign-off can't be merged.
 
 Feline's runtime is developed **independently**.
 
-- **Do not copy, port, translate or adapt code from Cordial, Sober** or any
-  other Roblox runtime, even where its license would allow it.
+- **Do not copy, port, translate or adapt code from Cordial, Sober, Stud** or
+  any other Roblox runtime, even where its license would allow it.
 - **Do not consult their source code** while working on Feline's runtime.
   Public, high-level documentation (READMEs, user docs) may be read, but
   implementations must be your own.
@@ -46,6 +46,16 @@ documentation files (`docs/architecture.md`, `docs/nvidia.md`,
 no Cordial code is in Feline. The optional Cordial adapter
 (`crates/feline-core/src/runtime/cordial.rs`) only starts Cordial through its
 public command line.
+
+For the launcher's Stud adapter and settings work (stage 7 onward, not runtime
+work), Stud's README, release metadata and packaging files
+(`packaging/stud.desktop.in`, `packaging/flatpak/io.github.catpieleaf.Stud.yml`,
+`packaging/aur/PKGBUILD.bin`, `CMakeLists.txt`) were read, plus AI-made summaries
+of two source files: `stud-config/src/settings.cpp` (the keys and types of
+Stud's `config.json`, so Feline can edit that file without breaking it) and
+`render-host/src/discord_rpc.cpp` (which confirmed that Discord presence needs an
+application ID). No Stud code is in Feline. Sober's public configuration
+documentation was read; Sober's code is not available.
 
 ## Before sending a change
 

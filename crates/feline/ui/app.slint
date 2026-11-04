@@ -35,6 +35,8 @@ export component AppWindow inherits Window {
     in property <string> runtimes-error;
     in property <string> selected-name;
     in property <string> selected-detail;
+    in property <bool> selected-has-doctor;
+    in property <bool> selected-has-info;
 
     // Launching (set from Rust)
     in property <LaunchState> launch-state: LaunchState.idle;
@@ -248,6 +250,8 @@ export component AppWindow inherits Window {
             checks: root.checks;
             checks-loading: root.system-loading;
             runtime-name: root.selected-name;
+            runtime-has-doctor: root.selected-has-doctor;
+            runtime-has-info: root.selected-has-info;
             running: root.diag-running;
             result-title: root.diag-title;
             result-level: root.diag-level;

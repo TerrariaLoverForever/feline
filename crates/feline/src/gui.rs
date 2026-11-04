@@ -487,12 +487,15 @@ fn run_diagnostic(
             match installation {
                 None => output.push_str("\nRuntime         none selected\n"),
                 Some(installation) => {
-                    output.push_str(&format!("\nRuntime         {installation}\n\n"));
-                    match installation.diagnostics() {
-                        Ok(text) => output.push_str(&text),
-                        Err(e) => output.push_str(&format!("(runtime info unavailable: {e})")),
+                    output.push_str(&format!("\nRuntime         {installation}\n"));
+                    if installation.backend.has_diagnostics() {
+                        output.push('\n');
+                        match installation.diagnostics() {
+                            Ok(text) => output.push_str(&text),
+                            Err(e) => output.push_str(&format!("(runtime info unavailable: {e})")),
+                        }
+                        output.push('\n');
                     }
-                    output.push('\n');
                 }
             }
             DiagResult {
@@ -605,6 +608,8 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
                 None => f.installation.backend.name().to_owned(),
             };
             ui.set_selected_name(name.into());
+            ui.set_selected_has_doctor(f.installation.backend.has_doctor());
+            ui.set_selected_has_info(f.installation.backend.has_diagnostics());
             ui.set_selected_detail(
                 format!("External runtime · {}", short_kind(&f.installation.kind)).into(),
             );
@@ -612,6 +617,8 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
         None => {
             ui.set_selected_name(SharedString::new());
             ui.set_selected_detail(SharedString::new());
+            ui.set_selected_has_doctor(false);
+            ui.set_selected_has_info(false);
         }
     }
 }

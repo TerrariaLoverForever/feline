@@ -9,7 +9,8 @@ development.
 
 Until Feline's runtime is ready, Feline can optionally start an **external
 third-party runtime** that you install yourself (currently supported:
-[Cordial](https://github.com/luohoa97/cordial)). Feline never picks one for
+[Sober](https://sober.vinegarhq.org), [Cordial](https://github.com/luohoa97/cordial)
+and [Stud](https://github.com/CatPieLeaf/Stud)). Feline never picks one for
 you, contains none of their code, and ships no Roblox files.
 
 **Unofficial project, not affiliated with Roblox Corporation.** Roblox does not
