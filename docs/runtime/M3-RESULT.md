@@ -151,5 +151,19 @@ initialized (`stage:InitializedLuaApp`), its DataModel loading
 yet). Vulkan is declined by the engine ("Android version is too old to
 activate Vulkan"), so it chooses OpenGL ES and calls `eglGetDisplay`.
 
-**Next:** EGL on top of the host's EGL (Mesa/NVIDIA) with the window's
-Wayland/X11 surface, so the engine can draw.
+### First frames
+
+EGL now runs on the host's EGL (glvnd: NVIDIA or Mesa), see `egl.rs`:
+`eglGetDisplay` becomes the window's Wayland (or X11) display,
+`eglCreateWindowSurface` turns the `ANativeWindow` into a `wl_egl_window`,
+Android-only config attributes are left out, and the rest of EGL and all of
+GL ES are forwarded unchanged (same Khronos API on both systems).
+
+Result (debug build, idle priority, no network): the engine reaches
+`APP_READY (Landing)`, runs Roblox's Lua app UI (CoreGui, React) and
+presents **650 frames in 15 s** into the Feline window. Images from the
+network fail to load, as expected offline.
+
+**Next:** input (AGDK's `onTouchEventNative` / key events from winit), the
+network (`getaddrinfo`, TLS certificates), audio (FMOD's Java `AudioDevice`),
+and a release-build performance check.

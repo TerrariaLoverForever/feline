@@ -631,6 +631,11 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
             found(Kind::ForwardLibc, host.libc(glibc))
         } else if name.starts_with("gl") {
             found(Kind::ForwardGles, host.gles(name))
+        } else if name.starts_with("egl") {
+            // EGL is the same Khronos API on Android and Linux; the
+            // platform-specific functions are Feline's own (egl.rs) and were
+            // bound above.
+            found(Kind::ForwardGles, host.egl(name))
         } else {
             None
         };

@@ -339,7 +339,11 @@ fn run_init(data: &[u8]) -> ExitCode {
                         handle,
                         std::time::Duration::from_secs(15),
                     )?;
-                    format!("window open 15 s with the engine ({why})")
+                    let frames = feline_runtime::egl::frames();
+                    format!(
+                        "window open 15 s with the engine ({why}), {frames} frames presented (about {} per second)",
+                        frames / 15
+                    )
                 }
                 None => {
                     let callbacks =

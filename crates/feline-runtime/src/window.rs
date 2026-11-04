@@ -15,9 +15,9 @@
 //!
 //! # `unsafe` in this module
 //!
-//! Only the `ANativeWindow_*` C functions, which take the engine's pointers.
+//! None needed: the `ANativeWindow_*` functions compare the engine's pointer
+//! with Feline's window before using it.
 
-#![allow(unsafe_code)]
 #![allow(non_snake_case)] // the NDK's exact names
 
 use std::ffi::{c_int, c_void};
@@ -149,6 +149,7 @@ impl ApplicationHandler for App {
                 if let Some(native) = native_window() {
                     native.width.store(size.width as i32, Ordering::Relaxed);
                     native.height.store(size.height as i32, Ordering::Relaxed);
+                    crate::egl::window_resized(size.width as i32, size.height as i32);
                 }
                 self.changes.push(WindowChange::Resized {
                     width: size.width as i32,
@@ -237,32 +238,39 @@ pub extern "C" fn ANativeWindow_fromSurface(
     }
 }
 
-/// # Safety
-/// `window` came from ANativeWindow_fromSurface.
-pub unsafe extern "C" fn ANativeWindow_acquire(window: *const NativeWindow) {
-    // SAFETY: a live window (never freed).
-    unsafe { (*window).refs.fetch_add(1, Ordering::Relaxed) };
+/// The window behind an engine pointer: only Feline's own window is accepted
+/// (NULL or anything else is logged and refused, so a bad pointer can't be
+/// dereferenced).
+fn ours(window: *const NativeWindow, function: &str) -> Option<&'static NativeWindow> {
+    let found = native_window().filter(|w| std::ptr::eq(*w, window));
+    if found.is_none() {
+        eprintln!("feline-runtime: {function} for an unknown window {window:p}");
+    }
+    found
 }
 
-/// # Safety
-/// `window` came from ANativeWindow_fromSurface.
-pub unsafe extern "C" fn ANativeWindow_release(window: *const NativeWindow) {
-    // SAFETY: as above.
-    unsafe { (*window).refs.fetch_sub(1, Ordering::Relaxed) };
+/// `void ANativeWindow_acquire(ANativeWindow*)`
+pub extern "C" fn ANativeWindow_acquire(window: *const NativeWindow) {
+    if let Some(w) = ours(window, "ANativeWindow_acquire") {
+        w.refs.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
-/// # Safety
-/// `window` came from ANativeWindow_fromSurface.
-pub unsafe extern "C" fn ANativeWindow_getWidth(window: *const NativeWindow) -> c_int {
-    // SAFETY: as above.
-    unsafe { (*window).width.load(Ordering::Relaxed) }
+/// `void ANativeWindow_release(ANativeWindow*)`
+pub extern "C" fn ANativeWindow_release(window: *const NativeWindow) {
+    if let Some(w) = ours(window, "ANativeWindow_release") {
+        w.refs.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
-/// # Safety
-/// `window` came from ANativeWindow_fromSurface.
-pub unsafe extern "C" fn ANativeWindow_getHeight(window: *const NativeWindow) -> c_int {
-    // SAFETY: as above.
-    unsafe { (*window).height.load(Ordering::Relaxed) }
+/// `int32_t ANativeWindow_getWidth(ANativeWindow*)`: negative on error.
+pub extern "C" fn ANativeWindow_getWidth(window: *const NativeWindow) -> c_int {
+    ours(window, "ANativeWindow_getWidth").map_or(-libc::EINVAL, |w| w.size().0)
+}
+
+/// `int32_t ANativeWindow_getHeight(ANativeWindow*)`: negative on error.
+pub extern "C" fn ANativeWindow_getHeight(window: *const NativeWindow) -> c_int {
+    ours(window, "ANativeWindow_getHeight").map_or(-libc::EINVAL, |w| w.size().1)
 }
 
 pub fn implementation(name: &str) -> Option<u64> {

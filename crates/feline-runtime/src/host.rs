@@ -2,7 +2,8 @@
 // (with the additional permission in LICENSE.exception)
 //! Finding the host's functions and variables that imports are forwarded to:
 //! glibc (`libc.so.6`, `libm.so.6`) and the system's OpenGL ES library
-//! (`libGLESv2.so.2`, usually glvnd, which dispatches to the GPU driver).
+//! (`libGLESv2.so.2`) and EGL (`libEGL.so.1`), usually glvnd, which
+//! dispatches to the GPU driver.
 //!
 //! Each library is opened by name and searched on its own, never "the whole
 //! process", so an import can't accidentally bind to a same-named symbol in
@@ -22,6 +23,7 @@ pub struct Host {
     libc: *mut c_void,
     libm: *mut c_void,
     gles: *mut c_void,
+    egl: *mut c_void,
 }
 
 fn open(name: &str) -> *mut c_void {
@@ -50,6 +52,7 @@ impl Host {
             libc: open("libc.so.6"),
             libm: open("libm.so.6"),
             gles: open("libGLESv2.so.2"),
+            egl: open("libEGL.so.1"),
         }
     }
 
@@ -62,6 +65,12 @@ impl Host {
     /// An OpenGL ES function.
     pub fn gles(&self, name: &str) -> Option<u64> {
         lookup(self.gles, name)
+    }
+
+    /// An EGL function (the ones that differ by platform are Feline's own,
+    /// in `egl.rs`).
+    pub fn egl(&self, name: &str) -> Option<u64> {
+        lookup(self.egl, name)
     }
 
     pub fn has_gles(&self) -> bool {

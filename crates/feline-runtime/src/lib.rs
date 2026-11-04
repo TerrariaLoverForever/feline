@@ -23,6 +23,7 @@ pub mod bionic;
 pub mod check;
 pub mod dex;
 pub mod dl;
+pub mod egl;
 pub mod elf;
 pub mod host;
 pub mod imports;
