@@ -19,3 +19,6 @@ workspace = true
 # mprotect, munmap, page size). Apache-2.0 WITH LLVM-exception OR Apache-2.0
 # OR MIT. Default features off: no `std` I/O wrappers we don't use.
 rustix = { version = "1.1", default-features = false, features = ["std", "mm", "param"] }
+# `dlopen`/`dlsym`, to find the host's (glibc, GLES) functions the engine's
+# imports are forwarded to. MIT OR Apache-2.0.
+libc = "0.2"

@@ -11,7 +11,8 @@
 //!    library was linked as if loaded at address 0; the *load bias* is where
 //!    it really is. `RELATIVE`: bias + addend. `GLOB_DAT`/`JUMP_SLOT`/`64`
 //!    for a symbol the library defines itself: bias + its value (+ addend).
-//!    Imports (functions from libc, EGL, …) are left for step 3.
+//!    Imports (functions from libc, EGL, …) get the address `imports.rs`
+//!    bound them to (step 3); without bindings they're left at 0.
 //! 4. **Protect:** set each segment's permissions (code read + execute, data
 //!    read + write, never both write and execute), then make the RELRO part
 //!    read-only, so data meant to be constant after loading can't be changed.
@@ -37,6 +38,7 @@ use std::fmt;
 use rustix::mm::{self, MapFlags, MprotectFlags, ProtFlags};
 
 use crate::elf::{self, Elf, PT_GNU_RELRO, PT_LOAD, Segment, Symbol};
+use crate::imports::Imports;
 
 const R_X86_64_64: u32 = 1;
 const R_X86_64_GLOB_DAT: u32 = 6;
@@ -126,7 +128,9 @@ pub struct LoadReport {
     pub relative: usize,
     /// Relocations to symbols the library defines itself.
     pub own_symbols: usize,
-    /// Relocations to imports, left for step 3.
+    /// Relocations to imports that were bound (step 3).
+    pub imports_bound: usize,
+    /// Relocations to imports left at 0 (no bindings given).
     pub imports_waiting: usize,
     /// The distinct imported names those relocations need.
     pub import_names: BTreeSet<String>,
@@ -141,9 +145,9 @@ fn align_up(v: u64, page: u64) -> Option<u64> {
     Some(v.checked_add(page - 1)? & !(page - 1))
 }
 
-/// Maps `elf`'s segments, applies every relocation that doesn't need an
-/// import, and sets the final permissions. Runs none of its code.
-pub fn load(elf: &Elf) -> Result<(Image, LoadReport), LoadError> {
+/// Maps `elf`'s segments, applies its relocations (imports from `imports`,
+/// if given) and sets the final permissions. Runs none of its code.
+pub fn load(elf: &Elf, imports: Option<&Imports>) -> Result<(Image, LoadReport), LoadError> {
     let page = rustix::param::page_size() as u64;
     let loads: Vec<Segment> = elf
         .segments
@@ -206,7 +210,7 @@ pub fn load(elf: &Elf) -> Result<(Image, LoadReport), LoadError> {
         }
 
         // 3. Relocate.
-        relocate(elf, memory, min, image.bias)?
+        relocate(elf, memory, min, image.bias, imports)?
     };
 
     // 4. Protect, each segment by its own flags, then RELRO read-only.
@@ -265,12 +269,19 @@ fn protect(image: &Image, offset: u64, len: u64, flags: MprotectFlags) -> Result
 }
 
 /// Applies the relocations through the (bounds-checked) slice.
-fn relocate(elf: &Elf, memory: &mut [u8], min: u64, bias: u64) -> Result<LoadReport, LoadError> {
+fn relocate(
+    elf: &Elf,
+    memory: &mut [u8],
+    min: u64,
+    bias: u64,
+    imports: Option<&Imports>,
+) -> Result<LoadReport, LoadError> {
     let symbols: Vec<Symbol> = elf.symbols()?;
     let mut report = LoadReport {
         size: 0,
         relative: 0,
         own_symbols: 0,
+        imports_bound: 0,
         imports_waiting: 0,
         import_names: BTreeSet::new(),
         relro_bytes: 0,
@@ -289,16 +300,28 @@ fn relocate(elf: &Elf, memory: &mut [u8], min: u64, bias: u64) -> Result<LoadRep
                     .and_then(|i| symbols.get(i))
                     .ok_or_else(|| LoadError::Layout(format!("relocation to symbol {index}")))?;
                 if !symbol.defined {
-                    report.imports_waiting += 1;
                     report.import_names.insert(symbol.name.clone());
-                    continue; // step 3 resolves imports
-                }
-                report.own_symbols += 1;
-                let address = bias.wrapping_add(symbol.value);
-                if kind == R_X86_64_64 {
-                    address.wrapping_add(r.addend as u64)
+                    let Some(imports) = imports else {
+                        report.imports_waiting += 1;
+                        continue;
+                    };
+                    let binding = imports.bindings.get(&symbol.name).ok_or_else(|| {
+                        LoadError::Layout(format!("no binding for the import `{}`", symbol.name))
+                    })?;
+                    report.imports_bound += 1;
+                    if kind == R_X86_64_64 {
+                        binding.address.wrapping_add(r.addend as u64)
+                    } else {
+                        binding.address
+                    }
                 } else {
-                    address
+                    report.own_symbols += 1;
+                    let address = bias.wrapping_add(symbol.value);
+                    if kind == R_X86_64_64 {
+                        address.wrapping_add(r.addend as u64)
+                    } else {
+                        address
+                    }
                 }
             }
             other => {
@@ -331,13 +354,14 @@ impl LoadReport {
         format!(
             "Mapped          {:.1} MB, library address 0 is at {:#x}\n\
              Relocated       {} relative, {} to its own symbols\n\
-             Waiting         {} relocations to {} imported functions (resolved in step 3)\n\
+             Imports         {} relocations bound, {} left at 0, to {} imported names\n\
              Protected       code read+execute, data read+write, {:.1} MB RELRO read-only\n\
              Run             nothing (no constructors, no JNI_OnLoad)\n",
             self.size as f64 / 1e6,
             image.bias(),
             self.relative,
             self.own_symbols,
+            self.imports_bound,
             self.imports_waiting,
             self.import_names.len(),
             self.relro_bytes as f64 / 1e6,
@@ -382,7 +406,7 @@ mod tests {
     fn loads_relocates_and_protects_a_tiny_library() {
         let data = tiny_with_relocations();
         let elf = Elf::parse(&data).unwrap();
-        let (image, report) = load(&elf).unwrap();
+        let (image, report) = load(&elf, None).unwrap();
 
         assert_eq!(report.relative, 1);
         assert_eq!(report.own_symbols, 1);
@@ -402,5 +426,17 @@ mod tests {
             Some(b"\x7fELF".to_vec())
         );
         assert_eq!(image.read_u64(u64::MAX - 3), None, "outside the image");
+    }
+
+    #[test]
+    fn binds_imports_to_their_host_functions() {
+        let data = tiny_with_relocations();
+        let elf = Elf::parse(&data).unwrap();
+        let host = crate::host::Host::open();
+        let imports = crate::imports::bind(&elf.symbols().unwrap(), &host).unwrap();
+        let (image, report) = load(&elf, Some(&imports)).unwrap();
+        assert_eq!((report.imports_bound, report.imports_waiting), (1, 0));
+        // `puts` is forwarded to glibc's puts.
+        assert_eq!(image.read_u64(0x3f0), host.libc("puts"));
     }
 }

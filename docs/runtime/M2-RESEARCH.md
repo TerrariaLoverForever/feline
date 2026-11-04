@@ -186,6 +186,17 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
   permissions plus 5.2 MB of read-only RELRO, in 0.3 s. The remaining 626
   relocations need the 576 imports (step 3). `unsafe` is limited to four
   operations in `load.rs`; all writes go through a bounds-checked slice.
+- Step 3 done: `feline-runtime --load` binds **all 576 imports** and all 626
+  import relocations: 195 forwarded to glibc, 63 to glibc's libm, 74 to the
+  system's OpenGL ES, 8 glibc variables, 15 Feline-owned variables, 6
+  optional left empty, and **215 stubs** (44 `pthread_*`, 23 stdio, 23 media,
+  17 EGL, 16 bionic internals and fortify functions, ~20 locale/wide-char,
+  and Android's config, looper, asset, window and `dl*` APIs). Forwarding is
+  limited to functions whose whole binary interface matches; known
+  mismatches (`addrinfo` field order, 8- vs 128-byte `sigset_t`, 128- vs
+  80-bit `long double`, `_SC_*` numbers, `__assert` argument order, …) are
+  stubs until Feline implements them. Each stub is generated code that
+  names the missing function and stops (`--imports` lists them all).
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

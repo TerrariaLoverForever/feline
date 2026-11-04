@@ -13,11 +13,13 @@ feline-runtime: Feline's own runtime for Roblox's Android client (in development
 
 Usage: feline-runtime --check <libroblox.so>
        feline-runtime --load <libroblox.so>
+       feline-runtime --imports <libroblox.so>
 
 --check  reads the engine library and reports what loading it would involve.
---load   also puts it into memory: copies its segments, applies the
-         relocations that don't need imports and sets memory permissions.
-         Then it frees the memory and exits.
+--load   also puts it into memory: binds every import (forwarded to glibc
+         or OpenGL ES, Feline data, or a stub), applies all relocations and
+         sets memory permissions. Then it frees the memory and exits.
+--imports  like --load, and lists every import by how it was bound.
 
 Neither runs any of the library's code. Roblox's code isn't disassembled;
 only its ELF interface is read.
@@ -49,7 +51,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        [flag, path] if flag == "--load" => {
+        [flag, path] if flag == "--load" || flag == "--imports" => {
             let data = match std::fs::read(path) {
                 Ok(data) => data,
                 Err(e) => {
@@ -57,12 +59,9 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let result = feline_runtime::elf::Elf::parse(&data)
-                .map_err(feline_runtime::load::LoadError::from)
-                .and_then(|elf| feline_runtime::load::load(&elf));
-            match result {
-                Ok((image, report)) => {
-                    print!("{}", report.to_text(&image));
+            match load_with_imports(&data, flag == "--imports") {
+                Ok(text) => {
+                    print!("{text}");
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -80,4 +79,53 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// Binds the imports, loads the library, and describes the result.
+fn load_with_imports(data: &[u8], list: bool) -> Result<String, String> {
+    use feline_runtime::imports::{self, Kind};
+    use std::fmt::Write as _;
+
+    let elf = feline_runtime::elf::Elf::parse(data).map_err(|e| e.to_string())?;
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let host = feline_runtime::host::Host::open();
+    let imports = imports::bind(&symbols, &host)?;
+    let (image, report) =
+        feline_runtime::load::load(&elf, Some(&imports)).map_err(|e| e.to_string())?;
+
+    let mut out = report.to_text(&image);
+    let kinds = [
+        Kind::ForwardLibc,
+        Kind::ForwardLibm,
+        Kind::ForwardGles,
+        Kind::ForwardData,
+        Kind::FelineData,
+        Kind::Stub,
+        Kind::WeakEmpty,
+    ];
+    let _ = writeln!(out, "Bound           {} imports:", imports.bindings.len());
+    for kind in kinds {
+        let _ = writeln!(out, "  {:>4}  {}", imports.count(kind), kind.label());
+    }
+    if !host.has_gles() {
+        let _ = writeln!(
+            out,
+            "Note            no libGLESv2.so.2 found; OpenGL ES functions are stubs"
+        );
+    }
+    if list {
+        for kind in kinds {
+            let names = imports.names(kind);
+            if !names.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "\n{} ({}):\n  {}",
+                    kind.label(),
+                    names.len(),
+                    names.join(" ")
+                );
+            }
+        }
+    }
+    Ok(out)
 }

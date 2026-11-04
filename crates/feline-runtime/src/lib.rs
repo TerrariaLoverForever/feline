@@ -13,10 +13,13 @@
 //! through its ELF interface, never disassembled.
 
 // `unsafe` is denied everywhere (workspace lint) except where a module opts
-// in explicitly: so far only `load`, for mapping memory. Each use there says
-// why it's sound.
+// in explicitly: `load` (mapping the engine), `host` (dlopen/dlsym) and
+// `stubs` (generated stub code). Each use says why it's sound.
 
 pub mod check;
 pub mod elf;
+pub mod host;
+pub mod imports;
 pub mod load;
 pub mod packed;
+pub mod stubs;
