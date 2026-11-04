@@ -163,6 +163,26 @@ pub fn run_constructors(elf: &Elf, image: &Image) -> Result<usize, String> {
     Ok(ran)
 }
 
+/// Calls the engine's `JNI_OnLoad(JavaVM*, void*)`, as Android does right
+/// after loading a library that exports it. Returns the JNI version it asks
+/// for.
+pub fn call_jni_onload(elf: &Elf, image: &Image) -> Result<i32, String> {
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let onload = symbols
+        .iter()
+        .find(|s| s.defined && s.name == "JNI_OnLoad")
+        .ok_or("the library has no JNI_OnLoad")?;
+    let vm = crate::jni::java_vm()?;
+    stubs::set_phase("JNI_OnLoad".to_owned());
+    // SAFETY: as for the constructors: the engine's own function at its
+    // exported address, with the signature JNI defines.
+    let function: extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> c_int =
+        unsafe { std::mem::transmute(image.bias() + onload.value) };
+    let version = function(vm, std::ptr::null_mut());
+    stubs::set_phase(String::new());
+    Ok(version)
+}
+
 /// Ends the process right away, without running exit handlers: the engine
 /// registered some with glibc during its constructors, and they would run
 /// more of its code.

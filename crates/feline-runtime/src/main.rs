@@ -166,10 +166,25 @@ fn run_init(data: &[u8]) -> ExitCode {
             elf.init_array_len()
         );
         let ran = feline_runtime::init::run_constructors(&elf, image)?;
-        Ok(format!(
+        eprintln!("feline-runtime: calling JNI_OnLoad…");
+        let version = feline_runtime::init::call_jni_onload(&elf, image)?;
+        let world = feline_runtime::jni::summary();
+        let mut per_class: std::collections::BTreeMap<&str, usize> = Default::default();
+        for (class, _, _) in &world.natives {
+            *per_class.entry(class.as_str()).or_insert(0) += 1;
+        }
+        let mut text = format!(
             "Constructors    all {ran} ran and returned\n\
-             Next            JNI_OnLoad (M3 step 5)\n"
-        ))
+             JNI_OnLoad      returned version {version:#x}\n\
+             Java world      {} classes looked up, {} methods/fields, {} natives registered\n",
+            world.classes.len(),
+            world.members,
+            world.natives.len()
+        );
+        for (class, n) in per_class {
+            text.push_str(&format!("  natives {n:>4}  {class}\n"));
+        }
+        Ok(text)
     })();
     match result {
         Ok(text) => {

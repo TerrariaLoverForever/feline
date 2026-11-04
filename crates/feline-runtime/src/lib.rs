@@ -15,7 +15,8 @@
 // `unsafe` is denied everywhere (workspace lint) except where a module opts
 // in explicitly: `load` (mapping the engine), `host` (dlopen/dlsym),
 // `stubs` (generated stub code), `init` (running the engine's constructors)
-// `bionic` and `dl` (Feline's implementations calling glibc). Each use says why it's sound.
+// `bionic` and `dl` (Feline's implementations calling glibc) and `jni`
+// (the fake Java world the engine calls into). Each use says why it's sound.
 
 pub mod bionic;
 pub mod check;
@@ -24,6 +25,8 @@ pub mod elf;
 pub mod host;
 pub mod imports;
 pub mod init;
+pub mod jni;
+pub mod jni_names;
 pub mod load;
 pub mod packed;
 pub mod stubs;
