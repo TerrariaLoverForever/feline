@@ -133,6 +133,47 @@ pub fn set_apk(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Unpacks the APK's `assets/` folder into `dest` (once: skipped when
+/// `dest/.complete` exists), for engine code that reads assets as plain
+/// files (`PlatformParams.assetFolderPath`). Returns `dest`.
+pub fn unpack_assets(dest: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let marker = dest.join(".complete");
+    if marker.exists() {
+        return Ok(dest.to_owned());
+    }
+    let manager = MANAGER.get().ok_or("no APK opened")?;
+    for (name, entry) in &manager.entries {
+        let Some(relative) = name.strip_prefix("assets/") else {
+            continue;
+        };
+        // Never write outside `dest` (a zip entry name could contain "..").
+        if relative.is_empty()
+            || relative.ends_with('/')
+            || relative.split('/').any(|p| p == ".." || p.is_empty())
+        {
+            continue;
+        }
+        let raw = manager
+            .map
+            .get(entry.data_offset as usize..(entry.data_offset + entry.compressed) as usize)
+            .ok_or("an asset lies outside the APK")?;
+        let data = if entry.deflated {
+            miniz_oxide::inflate::decompress_to_vec(raw)
+                .map_err(|_| format!("{name} couldn't be unpacked"))?
+        } else {
+            raw.to_vec()
+        };
+        let path = dest.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, data)
+            .map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+    }
+    std::fs::write(&marker, b"").map_err(|e| e.to_string())?;
+    Ok(dest.to_owned())
+}
+
 /// An open asset.
 pub struct Asset {
     data: Vec<u8>,

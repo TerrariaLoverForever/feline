@@ -124,6 +124,32 @@ getters returning instances of the declared class, `stat`/`lstat`/`fstat`
 forwarded (bionic's x86-64 `struct stat` is the kernel's layout, as is
 glibc's).
 
-**Next:** the window: `onSurfaceCreatedNative(surface)` with an
-`ANativeWindow` backed by a real Wayland/X11 window, and Vulkan/EGL
-surfaces on it.
+## M4 progress: a window and Roblox's app start
+
+- **Window:** `FELINE_WINDOW=1` opens a real desktop window (winit, Wayland
+  with X11 fallback) and hands the engine an `android.view.Surface` for it;
+  `ANativeWindow_fromSurface/getWidth/getHeight` answer from that window, and
+  AGDK's `onSurfaceCreatedNative` / `onSurfaceChangedNative` /
+  `onWindowFocusChangedNative` are delivered.
+- **Declarations:** `feline-runtime --natives <apk>` lists the `native` method
+  declarations in the APK's DEX files (names and type signatures only; see
+  CONTRIBUTING.md), which tells Feline the argument types of `Java_*` exports.
+- **App start (`FELINE_APP=1`, experimental):** assets unpacked to the data
+  folder; `nativeGameGlobalInit`; `nativeInitClientSettings` with an empty
+  `{"applicationSettings":{}}` (accepted, returns 0); `nativeAppBridgeV2InitWithParams`;
+  `nativeAppBridgeV2StartAppWithParams` with the window's surface.
+- **New pieces:** the engine runs inside its data folder (it writes
+  `appData/` and `cache/` relative to it); `NewObject*`, `AllocObject`,
+  direct byte buffers; `Build.VERSION.SDK_INT`; `mallinfo` (= glibc's
+  `mallinfo2`); semaphores on futexes (bionic's `sem_t` is 16 bytes, glibc's
+  32); `setjmp`/`longjmp` forwarded (glibc's 200-byte `jmp_buf` fits
+  bionic's 256).
+
+The engine's own log then shows: controllers instantiated, the Lua app
+initialized (`stage:InitializedLuaApp`), its DataModel loading
+`rbxasset://places/Mobile.rbxl`. FMOD audio fails cleanly (no audio device
+yet). Vulkan is declined by the engine ("Android version is too old to
+activate Vulkan"), so it chooses OpenGL ES and calls `eglGetDisplay`.
+
+**Next:** EGL on top of the host's EGL (Mesa/NVIDIA) with the window's
+Wayland/X11 surface, so the engine can draw.

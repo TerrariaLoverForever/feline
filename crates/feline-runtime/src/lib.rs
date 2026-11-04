@@ -21,6 +21,7 @@
 pub mod assets;
 pub mod bionic;
 pub mod check;
+pub mod dex;
 pub mod dl;
 pub mod elf;
 pub mod host;
@@ -32,6 +33,7 @@ pub mod liblog;
 pub mod load;
 pub mod looper;
 pub mod packed;
+pub mod sem;
 pub mod stubs;
 pub mod sysconf_table;
 pub mod trace;

@@ -383,6 +383,9 @@ pub fn call_initialize_native_code(elf: &Elf, image: &Image) -> Result<i64, Stri
     crate::looper::set_main_thread();
     let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")?;
     let [files, obb, external] = data_dirs()?;
+    // The engine keeps its logs and caches (`appData/`, `cache/`) relative
+    // to the working directory, so run it inside its own data folder.
+    std::env::set_current_dir(&files).map_err(|e| format!("couldn't enter {files}: {e}"))?;
     let activity = crate::jni::new_instance("com/roblox/client/startup/MainGameActivity");
     let (files, obb, external) = (
         crate::jni::new_string(&files),
@@ -534,6 +537,54 @@ pub fn run_window_loop(
         stubs::set_phase(String::new());
     }
     Ok("time is up")
+}
+
+/// Calls one of the engine's exported static natives of
+/// `com.roblox.engine.jni.NativeGLInterface`, as Roblox's Java code would:
+/// `Java_…_<method>(JNIEnv*, jclass, args…)`. Argument and return types come
+/// from the method's DEX declaration (see dex.rs); all are passed and
+/// returned as machine words here (objects, ints and longs are all word
+/// sized in registers on x86-64).
+pub fn call_gl_native(
+    elf: &Elf,
+    image: &Image,
+    method: &str,
+    args: &[usize],
+) -> Result<usize, String> {
+    let name = format!("Java_com_roblox_engine_jni_NativeGLInterface_{method}");
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let entry = symbols
+        .iter()
+        .find(|s| s.defined && s.name == name)
+        .ok_or_else(|| format!("no {name}"))?;
+    let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")? as usize;
+    let class = crate::jni::new_class("com/roblox/engine/jni/NativeGLInterface") as usize;
+    let address = (image.bias() + entry.value) as usize;
+    eprintln!("feline-runtime: calling NativeGLInterface.{method}");
+    stubs::set_phase(format!("NativeGLInterface.{method}"));
+    // SAFETY: the engine's exported JNI function; the arguments follow its
+    // DEX declaration (all word-sized).
+    let result = unsafe {
+        match args {
+            [] => std::mem::transmute::<usize, extern "C" fn(usize, usize) -> usize>(address)(
+                env, class,
+            ),
+            [a] => std::mem::transmute::<usize, extern "C" fn(usize, usize, usize) -> usize>(
+                address,
+            )(env, class, *a),
+            [a, b] => std::mem::transmute::<
+                usize,
+                extern "C" fn(usize, usize, usize, usize) -> usize,
+            >(address)(env, class, *a, *b),
+            [a, b, c] => std::mem::transmute::<
+                usize,
+                extern "C" fn(usize, usize, usize, usize, usize) -> usize,
+            >(address)(env, class, *a, *b, *c),
+            _ => return Err("too many arguments".into()),
+        }
+    };
+    stubs::set_phase(String::new());
+    Ok(result)
 }
 
 /// Runs this (main) thread's looper for `duration`, as Android's main

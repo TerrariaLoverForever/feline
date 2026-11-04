@@ -43,11 +43,22 @@ enum Object {
     Str(CString),
     /// An instance of a class (e.g. the activity), with no fields.
     Instance(String),
+    /// A `java.nio.DirectByteBuffer` over the engine's own memory
+    /// (`NewDirectByteBuffer`): its address and size in bytes.
+    Buffer {
+        address: usize,
+        capacity: i64,
+    },
 }
 
 /// A Java String the runtime hands to the engine (e.g. a folder path).
 pub fn new_string(text: &str) -> Handle {
     add_object(Object::Str(CString::new(text).unwrap_or_default()))
+}
+
+/// The class object for `class` (one per name).
+pub fn new_class(class: &str) -> Handle {
+    class_handle(class)
 }
 
 /// An object of class `class` (slash-separated, e.g. `android/os/Bundle`).
@@ -301,6 +312,7 @@ extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
             Some(Object::Class(_)) => "java/lang/Class".to_owned(),
             Some(Object::Str(_)) => "java/lang/String".to_owned(),
             Some(Object::Instance(class)) => class.clone(),
+            Some(Object::Buffer { .. }) => "java/nio/DirectByteBuffer".to_owned(),
             None => "java/lang/Object".to_owned(),
         }
     };
@@ -333,6 +345,58 @@ extern "C" fn is_instance_of(env: Handle, object: Handle, class: Handle) -> JBoo
     let result = actual == wanted || wanted == "java/lang/Object";
     log(format!("IsInstanceOf {actual} of {wanted} -> {result}"));
     JBoolean::from(result)
+}
+
+/// `NewObject{,V,A}(env, class, constructor,
+/// args…)`: a new, empty instance of `class`. No Java constructor runs, so
+/// the arguments are not read (for `NewObject`, the C variadic arguments are
+/// simply left unread, which the x86-64 calling convention allows).
+extern "C" fn new_object(_env: Handle, class: Handle, constructor: Handle) -> Handle {
+    trace("NewObject");
+    let name = class_name(class);
+    let signature = member_of(constructor)
+        .map(|(_, _, sig)| sig)
+        .unwrap_or_default();
+    log(format!("new {name} {signature} (no Java constructor runs)"));
+    new_instance(&name)
+}
+
+/// `NewDirectByteBuffer(env, address, capacity)`: a buffer object over
+/// memory the engine owns (Feline only remembers where it is).
+extern "C" fn new_direct_byte_buffer(_env: Handle, address: *mut c_void, capacity: i64) -> Handle {
+    trace("NewDirectByteBuffer");
+    add_object(Object::Buffer {
+        address: address as usize,
+        capacity,
+    })
+}
+
+fn buffer(object: Handle) -> Option<(usize, i64)> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    match index(object).and_then(|i| world.objects.get(i)) {
+        Some(Object::Buffer { address, capacity }) => Some((*address, *capacity)),
+        _ => None,
+    }
+}
+
+/// `GetDirectBufferAddress`: NULL for anything that isn't a direct buffer,
+/// as JNI specifies.
+extern "C" fn get_direct_buffer_address(_env: Handle, object: Handle) -> *mut c_void {
+    trace("GetDirectBufferAddress");
+    buffer(object).map_or(std::ptr::null_mut(), |(a, _)| a as *mut c_void)
+}
+
+/// `GetDirectBufferCapacity`: -1 for anything that isn't a direct buffer.
+extern "C" fn get_direct_buffer_capacity(_env: Handle, object: Handle) -> i64 {
+    trace("GetDirectBufferCapacity");
+    buffer(object).map_or(-1, |(_, c)| c)
+}
+
+extern "C" fn alloc_object(_env: Handle, class: Handle) -> Handle {
+    trace("AllocObject");
+    let name = class_name(class);
+    log(format!("alloc {name}"));
+    new_instance(&name)
 }
 
 unsafe extern "C" fn new_string_utf(_env: Handle, s: *const c_char) -> Handle {
@@ -484,6 +548,35 @@ fn answer(method: Handle, kind: &str, value: &str) -> String {
     ret
 }
 
+/// Real answers for a few methods whose results the engine depends on
+/// (everything else gets a placeholder). Set up by the runtime.
+pub static KNOWN_STRINGS: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
+
+/// A known String answer for (class, method or field), e.g. the asset path.
+pub fn set_known_string(class: &str, member: &str, value: &str) {
+    KNOWN_STRINGS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((class.to_owned(), member.to_owned(), value.to_owned()));
+}
+
+fn known_string(class: &str, member: &str) -> Option<String> {
+    KNOWN_STRINGS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(c, m, _)| c == class && m == member)
+        .map(|(_, _, v)| v.clone())
+}
+
+/// (class, member) of a method or field ID.
+fn member_of(id: Handle) -> Option<(String, String, String)> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    index(id)
+        .and_then(|i| world.members.get(i))
+        .map(|(c, n, s, _)| (c.clone(), n.clone(), s.clone()))
+}
+
 /// The placeholder for an object-returning method: an empty String for
 /// `Ljava/lang/String;`, a fresh instance of the declared class for other
 /// objects (on Android, getters like `getResources()` never return null),
@@ -496,6 +589,27 @@ fn object_answer(method: Handle, kind: &str) -> Handle {
             .map(|(_, _, sig, _)| return_type(sig).to_owned())
             .unwrap_or_default()
     };
+    let (class, name, _) = member_of(method).unwrap_or_default();
+    if let Some(value) = known_string(&class, &name) {
+        answer(method, kind, &format!("\"{value}\""));
+        return new_string(&value);
+    }
+    // Objects that are null on a normal (non-VR) device.
+    if matches!(
+        (class.as_str(), name.as_str()),
+        (
+            "com/roblox/engine/jni/autovalue/StartAppParams",
+            "vrContext"
+        )
+    ) {
+        answer(method, kind, "null (not a VR device)");
+        return std::ptr::null_mut();
+    }
+    // The window's Surface, wherever the engine asks for "the surface".
+    if ret == "Landroid/view/Surface;" && crate::window::native_window().is_some() {
+        answer(method, kind, "the window's Surface");
+        return crate::window::surface_object();
+    }
     if ret == "Ljava/lang/String;" {
         answer(method, kind, "\"\"");
         add_object(Object::Str(CString::default()))
@@ -885,8 +999,21 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
         ("android/util/DisplayMetrics", "densityDpi" | "xdpi" | "ydpi") => 160.0,
         ("android/util/DisplayMetrics", "widthPixels") => 1920.0,
         ("android/util/DisplayMetrics", "heightPixels") => 1080.0,
+        // Android 13, matching ro.build.version.sdk.
+        ("android/os/Build$VERSION", "SDK_INT") => 33.0,
+        ("com/roblox/engine/jni/model/PlatformParams", "dpiScale") => 1.0,
+        // The window's physical size at 160 dpi: pixels / 160 * 25.4 mm.
+        ("com/roblox/engine/jni/model/PlatformParams", "viewportWidthMm") => window_mm(true),
+        ("com/roblox/engine/jni/model/PlatformParams", "viewportHeightMm") => window_mm(false),
         _ => return None,
     })
+}
+
+/// The window's width or height in millimetres at 160 dpi (1920x1080 if
+/// there's no window).
+fn window_mm(width: bool) -> f64 {
+    let (w, h) = crate::window::native_window().map_or((1920, 1080), |w| w.size());
+    f64::from(if width { w } else { h }) / 160.0 * 25.4
 }
 
 /// The value for a field ID, logged the first few times per field.
@@ -945,10 +1072,31 @@ field_getters! {
     get_double_field, get_static_double_field, f64, |v| v;
 }
 
+/// Object fields follow the same rule as object-returning methods: "" for
+/// Strings, a fresh instance of the declared class for objects, null for
+/// arrays.
 extern "C" fn get_object_field(_env: Handle, _object: Handle, field: Handle) -> Handle {
     trace("GetObjectField");
     field_value(field, "get");
-    std::ptr::null_mut()
+    let ty = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        index(field)
+            .and_then(|i| world.members.get(i))
+            .map(|(_, _, sig, _)| sig.clone())
+            .unwrap_or_default()
+    };
+    let (class, name, _) = member_of(field).unwrap_or_default();
+    if let Some(value) = known_string(&class, &name) {
+        log(format!("get {class}.{name} -> \"{value}\""));
+        return new_string(&value);
+    }
+    if ty == "Ljava/lang/String;" {
+        add_object(Object::Str(CString::default()))
+    } else if let Some(class) = ty.strip_prefix('L').and_then(|t| t.strip_suffix(';')) {
+        new_instance(class)
+    } else {
+        std::ptr::null_mut()
+    }
 }
 
 /// Set<Type>Field / SetStatic<Type>Field: nothing stores Java data, so the
@@ -1048,6 +1196,19 @@ fn implemented(name: &str) -> Option<usize> {
         "GetSuperclass" => get_superclass as extern "C" fn(Handle, Handle) -> Handle as usize,
         "IsInstanceOf" => {
             is_instance_of as extern "C" fn(Handle, Handle, Handle) -> JBoolean as usize
+        }
+        "NewDirectByteBuffer" => {
+            new_direct_byte_buffer as extern "C" fn(Handle, *mut c_void, i64) -> Handle as usize
+        }
+        "GetDirectBufferAddress" => {
+            get_direct_buffer_address as extern "C" fn(Handle, Handle) -> *mut c_void as usize
+        }
+        "GetDirectBufferCapacity" => {
+            get_direct_buffer_capacity as extern "C" fn(Handle, Handle) -> i64 as usize
+        }
+        "AllocObject" => alloc_object as extern "C" fn(Handle, Handle) -> Handle as usize,
+        "NewObject" | "NewObjectV" | "NewObjectA" => {
+            new_object as extern "C" fn(Handle, Handle, Handle) -> Handle as usize
         }
         "GetJavaVM" => get_java_vm as unsafe extern "C" fn(Handle, *mut Handle) -> JInt as usize,
         _ => return None,
@@ -1169,7 +1330,7 @@ pub fn summary() -> Summary {
         .iter()
         .filter_map(|o| match o {
             Object::Class(name) => Some(name.clone()),
-            Object::Str(_) | Object::Instance(_) => None,
+            Object::Str(_) | Object::Instance(_) | Object::Buffer { .. } => None,
         })
         .collect();
     classes.sort();

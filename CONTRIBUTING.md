@@ -64,6 +64,26 @@ of `crates/cordial-shell/src/shell_config.rs` (only the accepted values of a few
 `shell.json` keys) were read. No Cordial code is in Feline. Sober's public configuration
 documentation was read; Sober's code is not available.
 
+### Working with Roblox's app
+
+The runtime has to talk to Roblox's engine, so it reads what the engine
+**declares**, never how Roblox's code **works**:
+
+- **Native library (`libroblox.so`):** its import and export tables (symbol
+  names), and Feline's own records of what the engine calls at run time.
+  Disassembling or decompiling the engine is not part of Feline's development.
+- **Java part (`classes*.dex` in the APK):** only the declarations of
+  `native` methods, which are the Java side of the engine's `Java_*` exports:
+  class name, method name, type signature and access flags
+  (`crates/feline-runtime/src/dex.rs`, `feline-runtime --natives`). Method
+  bodies are never read, decompiled or reproduced. Where the engine needs an
+  answer from Java code, Feline writes its own answer from what the engine
+  asks for and from public Android documentation.
+- **The engine's own log** (`appData/logs/` in the runtime's data folder) may
+  be read: it's what the program reports about itself.
+- **Assets** in the APK are unpacked for the engine at run time on the user's
+  machine; they're never committed or redistributed.
+
 ## Before sending a change
 
 ```sh
