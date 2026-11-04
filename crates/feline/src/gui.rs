@@ -150,6 +150,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
             }
         }
     });
+    ui.on_set_link_handler({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |on| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_link_handler(&ui, &shared, on);
+            }
+        }
+    });
     ui.on_set_presence({
         let weak = ui.as_weak();
         let shared = shared.clone();
@@ -860,7 +869,6 @@ fn run_game(
     on_running: impl FnOnce(&str, &str),
 ) -> Outcome {
     let overrides = &settings.overrides;
-    let started_at = std::time::SystemTime::now();
     let name = installation.backend.name();
 
     // Write Feline's overrides into the runtime's settings first. A failure
@@ -887,23 +895,15 @@ fn run_game(
         (None, LaunchTarget::Home) => format!("Roblox is running in {name}"),
         (None, LaunchTarget::Game(_)) => format!("Joining the experience in {name}"),
     };
-    // Feline's Discord status follows this session's Roblox log.
+    // The Discord status runs in its own small process (`feline --presence`),
+    // so it keeps going after this window closes and ends with the game.
     let presence = overrides
         .discord_presence
-        .then(|| {
-            feline_core::presence::Session::start(
-                installation.roblox_log_roots(&DetectContext::host()),
-                started_at,
-                settings.presence,
-                on_presence,
-            )
-        })
-        .and_then(Result::ok);
-
-    let default_detail = if presence.is_some() {
-        "Off you pounce. Keep Feline open to show your Discord status."
-    } else {
-        "Off you pounce. You can close Feline; the game keeps running."
+        .then(crate::presence_helper::start)
+        .transpose();
+    let default_detail = match presence {
+        Ok(Some(())) => "Off you pounce. Your Discord status keeps going even if you close Feline.",
+        _ => "Off you pounce. You can close Feline; the game keeps running.",
     };
     let mut detail = plan
         .note
@@ -914,14 +914,13 @@ fn run_game(
     }
     on_running(&title, &detail);
 
-    let monitor = Monitor::start(game.pid(), on_stats);
+    if let Err(e) = presence {
+        on_presence(e);
+    }
+    let monitor = Monitor::start(game.pid(), on_stats, on_presence);
     let waited = game.wait();
     if let Some(monitor) = monitor {
         monitor.stop();
-    }
-    // Clears the Discord status.
-    if let Some(presence) = presence {
-        presence.stop();
     }
     match waited {
         Ok(exit) => describe_exit(name, exit),
@@ -950,7 +949,11 @@ impl Monitor {
 
     /// `None` if the thread couldn't start; the game runs anyway, just
     /// without numbers.
-    fn start(pid: u32, on_stats: impl Fn(Stats) + Send + 'static) -> Option<Self> {
+    fn start(
+        pid: u32,
+        on_stats: impl Fn(Stats) + Send + 'static,
+        on_presence: impl Fn(String) + Send + 'static,
+    ) -> Option<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_flag = stop.clone();
         let started = std::time::Instant::now();
@@ -965,6 +968,10 @@ impl Monitor {
                     let wake = std::time::Instant::now() + Self::INTERVAL;
                     while std::time::Instant::now() < wake && !stop_flag.load(Ordering::Relaxed) {
                         thread::sleep(Duration::from_millis(100));
+                    }
+                    // The Discord helper's status, shown on the Settings page.
+                    if let Some(status) = crate::presence_helper::status() {
+                        on_presence(status);
                     }
                     let Some(sample) = sampler.sample() else {
                         continue;

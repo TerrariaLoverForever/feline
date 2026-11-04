@@ -97,6 +97,55 @@ pub fn uninstall() -> Result<Vec<PathBuf>, String> {
     Ok(removed)
 }
 
+/// The file name of Feline's hidden link-handler entry. It's separate from
+/// the menu entry, so Feline only becomes a candidate for `roblox://` links
+/// when the user switches link handling on.
+pub const LINK_ENTRY: &str = "io.github.TerrariaLoverForever.Feline.links.desktop";
+
+fn link_entry_path() -> Result<PathBuf, String> {
+    let data = paths::data_home().ok_or("couldn't find your home folder ($HOME is not set)")?;
+    Ok(data.join("applications").join(LINK_ENTRY))
+}
+
+/// Adds the hidden entry that opens `roblox://` and `roblox-player:` links
+/// with this Feline binary.
+pub fn install_link_entry() -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("couldn't find the path of the running Feline program: {e}"))?;
+    let entry = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Feline\n\
+         Comment=Opens Roblox links with your chosen runtime\n\
+         Exec={} %u\n\
+         Icon={APP_ID}\n\
+         NoDisplay=true\n\
+         Terminal=false\n\
+         MimeType=x-scheme-handler/roblox;x-scheme-handler/roblox-player;\n",
+        quote_exec(&exe)?
+    );
+    let path = link_entry_path()?;
+    write(&path, entry.as_bytes())?;
+    if let Some(dir) = path.parent() {
+        // Optional: desktops usually notice new entries by themselves.
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    Ok(())
+}
+
+pub fn uninstall_link_entry() -> Result<(), String> {
+    let path = link_entry_path()?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("couldn't remove {}: {e}", path.display())),
+    }
+}
+
 fn icon_path(data: &Path, size: u32) -> PathBuf {
     data.join(format!("icons/hicolor/{size}x{size}/apps/{APP_ID}.png"))
 }

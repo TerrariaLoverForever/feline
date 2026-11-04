@@ -20,6 +20,8 @@ Options:
   --info         Print information about this system (for bug reports)
   --runtimes     List the runtimes found on this system, numbered
   --doctor <N>   Run the self-check of runtime number N from --runtimes
+  --presence     Show the Discord status for the game that is starting or
+                 running, then exit when it ends (Feline starts this itself)
   --install-desktop-entry
                  Add Feline to your app menu (and give its window an icon)
   --uninstall-desktop-entry
@@ -47,6 +49,17 @@ pub fn run(args: &[&str]) -> ExitCode {
                 "feline: --doctor needs a runtime number. Run `feline --runtimes` to see them."
             );
             ExitCode::from(2)
+        }
+        ["--presence"] => {
+            match feline_core::presence::service::run_for_game(|status| {
+                eprintln!("feline: {status}")
+            }) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("feline: {e}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         ["--install-desktop-entry"] => install_desktop_entry(),
         ["--uninstall-desktop-entry"] => uninstall_desktop_entry(),

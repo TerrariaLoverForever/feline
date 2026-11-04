@@ -57,7 +57,7 @@ All Feline code is licensed GPL-3.0-or-later.
 | `settings` | `~/.config/feline/settings.conf`: chosen runtime, accepted account-notice version |
 | `runtime::config` | Settings lists (`SettingDef`), safe editing of a runtime's JSON file (`ConfigFile`), Feline's overrides (`managed_value`), "is it running?" |
 | `monitor` | CPU and memory of the running game: every descendant of the started process, from `/proc` (CPU time from `stat`, memory as PSS from `smaps_rollup`). No FPS: that needs a graphics layer |
-| `presence` | Feline's Discord status: `log` (follows the Roblox client log), `roblox` (public web API lookups), `discord` (Discord's local socket protocol), `Session` (background thread per game) |
+| `presence` | Feline's Discord status: `log` (follows the Roblox client log), `roblox` (public web API lookups), `discord` (Discord's local socket protocol), `Session` (background thread per game), `service` (`feline --presence`: a helper process started next to each game, lives until the game ends, single instance through a lock file) |
 | `runtime::sober` | Optional adapter for the external Sober runtime (Flatpak only, closed source): `sober [link]` |
 | `runtime::stud` | Optional adapter for the external Stud runtime: Flatpak / `stud` on `PATH` (verified by its metainfo) / AppImage, `stud [link]` |
 | `runtime::cordial` | Optional adapter for the external Cordial runtime: finds Flatpak / `PATH` / AppImage installs, uses `--help`, `--doctor`, `--diagnostics` |

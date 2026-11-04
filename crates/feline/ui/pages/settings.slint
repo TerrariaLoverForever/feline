@@ -112,6 +112,9 @@ export component SettingsPage inherits PageBase {
     in property <bool> discord-join;
     in property <bool> discord-game;
     in property <bool> discord-menus;
+    in property <bool> link-handler;
+    in property <string> link-status;
+    callback set-link-handler(bool);
     in property <string> presence-status;
 
     in property <[RuntimeTab]> tabs;
@@ -221,7 +224,7 @@ export component SettingsPage inherits PageBase {
                 }
                 SettingLine {
                     label: "Show what you're playing on Discord";
-                    help: "Works with every runtime. Keep Feline open while you play: the status ends when Feline closes. Turns off Sober's and Stud's own Discord status, so they don't fight over it.";
+                    help: "Works with every runtime, and keeps going if you close Feline's window, until the game ends. Turns off Sober's and Stud's own Discord status, so they don't fight over it.";
                     Switch {
                         checked: root.discord-on;
                         toggled => {
@@ -290,6 +293,24 @@ export component SettingsPage inherits PageBase {
                         horizontal-stretch: 1;
                         text: root.presence-status;
                     }
+                }
+            }
+            if root.current == 0: Card {
+                Eyebrow {
+                    text: "ROBLOX LINKS";
+                }
+                SettingLine {
+                    label: "Open Roblox links from the website with Feline";
+                    help: "When you press Play on roblox.com, Feline starts your chosen runtime (with your Discord status, if it's on). Feline remembers which app opened these links before and gives them back when you switch this off.";
+                    Switch {
+                        checked: root.link-handler;
+                        toggled => {
+                            root.set-link-handler(self.checked);
+                        }
+                    }
+                }
+                if root.link-status != "": BodyText {
+                    text: root.link-status;
                 }
             }
             if root.current == 0: Card {

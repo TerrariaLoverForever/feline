@@ -129,6 +129,12 @@ pub struct Settings {
     pub account_notice: u32,
     pub overrides: Overrides,
     pub presence: PresenceOptions,
+    /// Feline opens `roblox://` links from the website (it's their default
+    /// handler).
+    pub link_handler: bool,
+    /// The desktop entry that handled `roblox://` links before Feline took
+    /// over, e.g. `froststrap.desktop`, so it can be given back.
+    pub previous_link_handler: Option<String>,
 }
 
 impl Settings {
@@ -166,6 +172,10 @@ impl Settings {
                 "discord" => settings.overrides.discord_presence = value == "on",
                 "discord_show_user" => settings.presence.show_user = value == "on",
                 "discord_join_button" => settings.presence.join_button = value == "on",
+                "link_handler" => settings.link_handler = value == "on",
+                "previous_link_handler" if !value.is_empty() => {
+                    settings.previous_link_handler = Some(value.to_owned())
+                }
                 // These two default to on, so only "off" changes them.
                 "discord_game_button" => settings.presence.game_button = value != "off",
                 "discord_in_menus" => settings.presence.in_menus = value != "off",
@@ -196,6 +206,12 @@ impl Settings {
         let on_off = |b: bool| if b { "on" } else { "off" };
         if o.discord_presence {
             text.push_str("discord = on\n");
+        }
+        if self.link_handler {
+            text.push_str("link_handler = on\n");
+        }
+        if let Some(previous) = &self.previous_link_handler {
+            text.push_str(&format!("previous_link_handler = {previous}\n"));
         }
         let p = &self.presence;
         let defaults = PresenceOptions::default();
@@ -299,6 +315,8 @@ mod tests {
                 game_button: false,
                 in_menus: false,
             },
+            link_handler: true,
+            previous_link_handler: Some("froststrap.desktop".into()),
         };
         settings.save_to(&path).unwrap();
         let loaded = Settings::load_from(&path).unwrap();

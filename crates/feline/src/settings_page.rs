@@ -52,6 +52,10 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     ui.set_discord_join(p.join_button);
     ui.set_discord_game(p.game_button);
     ui.set_discord_menus(p.in_menus);
+    ui.set_link_handler(state.settings.link_handler);
+    if let Some(status) = crate::presence_helper::status() {
+        ui.set_presence_status(status.into());
+    }
 
     let ctx = DetectContext::host();
     let tabs: Vec<RuntimeTab> = backends()
@@ -290,6 +294,32 @@ pub fn set_presence(ui: &AppWindow, shared: &Shared, which: &str, value: bool) {
             "in-menus" => settings.presence.in_menus = value,
             _ => return,
         }
+    }
+    save_and_apply(ui, shared);
+}
+
+/// Switches opening `roblox://` links with Feline on or off.
+pub fn set_link_handler(ui: &AppWindow, shared: &Shared, on: bool) {
+    let result = {
+        let mut state = lock(shared);
+        let result = if on {
+            crate::links::enable(&mut state.settings)
+        } else {
+            crate::links::disable(&mut state.settings)
+        };
+        if result.is_ok() {
+            state.settings.link_handler = on;
+        }
+        result
+    };
+    match result {
+        Ok(()) if on => {
+            ui.set_link_status("Roblox links from the website now open with Feline.".into())
+        }
+        Ok(()) => {
+            ui.set_link_status("Roblox links went back to the app that had them before.".into())
+        }
+        Err(e) => ui.set_link_status(format!("Not changed: {e}").into()),
     }
     save_and_apply(ui, shared);
 }

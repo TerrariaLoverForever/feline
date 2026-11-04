@@ -93,6 +93,9 @@ export component AppWindow inherits Window {
     in property <bool> discord-join;
     in property <bool> discord-game;
     in property <bool> discord-menus;
+    in property <bool> link-handler;
+    in property <string> link-status;
+    callback set-link-handler(bool);
     in property <string> presence-status;
     callback set-presence(string, bool);
     callback settings-opened();
@@ -271,6 +274,11 @@ export component AppWindow inherits Window {
             discord-join: root.discord-join;
             discord-game: root.discord-game;
             discord-menus: root.discord-menus;
+            link-handler: root.link-handler;
+            link-status: root.link-status;
+            set-link-handler(on) => {
+                root.set-link-handler(on);
+            }
             presence-status: root.presence-status;
             set-presence(which, value) => {
                 root.set-presence(which, value);

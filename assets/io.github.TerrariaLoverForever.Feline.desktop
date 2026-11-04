@@ -2,7 +2,7 @@
 Type=Application
 Name=Feline
 GenericName=Game Launcher
-Comment=Made for Linux. Built with care.
+Comment=Roblox on Linux. Always lands on its feet.
 Exec=feline
 Icon=io.github.TerrariaLoverForever.Feline
 Terminal=false

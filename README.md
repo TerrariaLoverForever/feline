@@ -34,6 +34,11 @@ account risks before using it.
   everything else in the file as it was, and makes a backup first.
 - **Discord status:** "Playing Feline" with the game's name, icon, creator and
   time played, for every runtime. Join button, username and avatar are opt-in.
+  It runs in its own small process next to the game, so it keeps going when
+  you close Feline's window, and ends with the game.
+- **Roblox links (opt-in):** "Play" on roblox.com can open your chosen runtime
+  through Feline. Feline gives the links back to the previous app when you
+  switch it off.
 - **Monitoring:** time played, CPU and memory of the whole game while it runs.
 - **System and Diagnostics pages:** your hardware and session, quick checks
   (such as a Flatpak NVIDIA driver mismatch), the runtime's self-check, and a

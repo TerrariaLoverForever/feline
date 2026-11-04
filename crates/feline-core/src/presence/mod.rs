@@ -15,6 +15,7 @@
 pub mod discord;
 pub mod log;
 pub mod roblox;
+pub mod service;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
