@@ -3,7 +3,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
+import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
 
 component Credit inherits VerticalLayout {
     in property <string> name;
@@ -20,7 +20,7 @@ component Credit inherits VerticalLayout {
     }
 }
 
-export component AboutPage inherits Rectangle {
+export component AboutPage inherits PageBase {
     in property <string> version;
     callback show-notice();
 
@@ -37,6 +37,7 @@ export component AboutPage inherits Rectangle {
                 Logo {
                     size: 96px;
                     glow: true;
+                    playful: true;
                 }
                 VerticalLayout {
                     alignment: center;
@@ -119,9 +120,20 @@ export component AboutPage inherits Rectangle {
                     Eyebrow {
                         text: "WORKS WITH";
                     }
+                    BodyText {
+                        text: "External runtimes by their own authors. Feline starts them through their command line and contains none of their code.";
+                    }
+                    Credit {
+                        name: "Sober";
+                        role: "By the Vinegar team (closed source, Flathub).";
+                    }
                     Credit {
                         name: "Cordial";
-                        role: "An external, third-party runtime by its own authors (GPL-3.0-or-later). Feline starts it through its public command line and contains none of its code.";
+                        role: "GPL-3.0-or-later, github.com/luohoa97/cordial.";
+                    }
+                    Credit {
+                        name: "Stud";
+                        role: "AGPL-3.0, github.com/CatPieLeaf/Stud.";
                     }
                 }
             }

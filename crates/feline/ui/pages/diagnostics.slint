@@ -6,7 +6,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { CheckRow, Level } from "../types.slint";
 import { Icons } from "../icons.slint";
-import { Pill, StatusDot, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, OutputBox } from "../components.slint";
+import { PageBase, Pill, StatusDot, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, OutputBox } from "../components.slint";
 
 component CheckLine inherits HorizontalLayout {
     in property <CheckRow> check;
@@ -36,7 +36,7 @@ component CheckLine inherits HorizontalLayout {
     }
 }
 
-export component DiagnosticsPage inherits Rectangle {
+export component DiagnosticsPage inherits PageBase {
     in property <[CheckRow]> checks;
     in property <bool> checks-loading;
 

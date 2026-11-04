@@ -6,12 +6,18 @@ import { LineEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { LaunchState } from "../types.slint";
 import { Icons } from "../icons.slint";
-import { Logo, Pill, StatusDot, PlayButton, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
+import { PageBase, Logo, Pill, StatusDot, PlayButton, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
 
 // One number in the monitoring row, e.g. "CPU 12%".
 component Stat inherits Rectangle {
     in property <string> label;
     in property <string> value;
+    property <bool> shown: false;
+    opacity: self.shown ? 1 : 0;
+    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+    init => {
+        self.shown = true;
+    }
     border-radius: Theme.radius-small;
     background: Theme.surface-raised;
     border-width: 1px;
@@ -34,7 +40,7 @@ component Stat inherits Rectangle {
     }
 }
 
-export component HomePage inherits Rectangle {
+export component HomePage inherits PageBase {
     // Selected runtime (set from Rust). Empty name = nothing selected.
     in property <string> selected-name;
     in property <string> selected-detail;
@@ -115,6 +121,7 @@ export component HomePage inherits Rectangle {
                     Logo {
                         size: 136px;
                         glow: true;
+                        playful: true;
                     }
                 }
                 VerticalLayout {
@@ -160,6 +167,7 @@ export component HomePage inherits Rectangle {
                                     StatusDot {
                                         tone: root.detecting ? Theme.text-faint
                                             : root.has-runtime ? Theme.success : Theme.warning;
+                                        pulse: root.detecting;
                                     }
                                 }
                                 VerticalLayout {
@@ -193,6 +201,15 @@ export component HomePage inherits Rectangle {
 
         // Launch status, only while something is happening or just happened
         if root.launch-state != LaunchState.idle: Rectangle {
+            property <bool> shown: false;
+            opacity: self.shown ? 1 : 0;
+            transform-scale: self.shown ? 1 : 0.98;
+            animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+            animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
+            animate background, border-color { duration: Theme.normal; }
+            init => {
+                self.shown = true;
+            }
             border-radius: Theme.radius;
             border-width: 1px;
             background: root.launch-state == LaunchState.failed ? #f27d8e12 : Theme.surface;
@@ -207,6 +224,7 @@ export component HomePage inherits Rectangle {
                         tone: root.launch-state == LaunchState.failed ? Theme.danger
                             : root.launch-state == LaunchState.ended ? Theme.text-faint
                             : root.launch-state == LaunchState.running ? Theme.success : Theme.accent;
+                        pulse: root.launch-state == LaunchState.starting;
                     }
                 }
                 VerticalLayout {

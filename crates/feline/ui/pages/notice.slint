@@ -32,8 +32,14 @@ export component AccountNotice inherits Rectangle {
     callback accepted();
     callback quit();
 
-    // Dim everything behind the dialog.
-    background: #05030acc;
+    property <bool> shown: false;
+    init => {
+        root.shown = true;
+    }
+
+    // Dim everything behind the dialog (fading in).
+    background: root.shown ? #05030acc : #05030a00;
+    animate background { duration: Theme.normal; easing: ease-out-quad; }
 
     // Swallow clicks so nothing behind the dialog can be used.
     TouchArea { }
@@ -49,6 +55,10 @@ export component AccountNotice inherits Rectangle {
         border-color: Theme.accent.with-alpha(0.35);
         drop-shadow-blur: 40px;
         drop-shadow-color: #00000099;
+        opacity: root.shown ? 1 : 0;
+        transform-scale: root.shown ? 1 : 0.94;
+        animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+        animate transform-scale { duration: Theme.slow; easing: ease-out-back; }
 
         layout := VerticalLayout {
             padding: 32px;

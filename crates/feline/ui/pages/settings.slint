@@ -5,7 +5,7 @@
 import { ScrollView, Switch, ComboBox, SpinBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Level, SettingKind, SettingRow, RuntimeTab } from "../types.slint";
-import { Pill, StatusDot, Card, Eyebrow, BodyText, PageTitle, Divider } from "../components.slint";
+import { PageBase, Pill, StatusDot, Card, Eyebrow, BodyText, PageTitle, Divider } from "../components.slint";
 
 // A tab in the tab bar.
 component Tab inherits Rectangle {
@@ -97,7 +97,7 @@ component OverrideLine inherits SettingLine {
     }
 }
 
-export component SettingsPage inherits Rectangle {
+export component SettingsPage inherits PageBase {
     // Feline's override settings (index into each options list).
     in property <int> renderer-index;
     in property <int> gamemode-index;
@@ -302,78 +302,79 @@ export component SettingsPage inherits Rectangle {
             }
 
             // ---------------- Runtime tabs
+            // `if` (not `visible`) so a tab's content is rebuilt, and its
+            // cards animate in, every time the tab is opened.
             for tab[i] in root.tabs: VerticalLayout {
-                visible: root.current == i + 1;
-                // Hidden tabs take no space.
-                height: root.current == i + 1 ? self.preferred-height : 0px;
-                spacing: 16px;
+                if root.current == i + 1: VerticalLayout {
+                    spacing: 16px;
 
-                if tab.source != "": BodyText {
-                    text: "Editing: " + tab.source;
-                }
-                if tab.status != "": Rectangle {
-                    border-radius: Theme.radius-small;
-                    background: Theme.level-color(tab.status-level).with-alpha(0.08);
-                    border-width: 1px;
-                    border-color: Theme.level-color(tab.status-level).with-alpha(0.35);
-                    HorizontalLayout {
-                        padding: 14px;
-                        spacing: 12px;
-                        VerticalLayout {
-                            alignment: start;
-                            padding-top: 5px;
-                            StatusDot {
-                                tone: Theme.level-color(tab.status-level);
+                    if tab.source != "": BodyText {
+                        text: "Editing: " + tab.source;
+                    }
+                    if tab.status != "": Rectangle {
+                        border-radius: Theme.radius-small;
+                        background: Theme.level-color(tab.status-level).with-alpha(0.08);
+                        border-width: 1px;
+                        border-color: Theme.level-color(tab.status-level).with-alpha(0.35);
+                        HorizontalLayout {
+                            padding: 14px;
+                            spacing: 12px;
+                            VerticalLayout {
+                                alignment: start;
+                                padding-top: 5px;
+                                StatusDot {
+                                    tone: Theme.level-color(tab.status-level);
+                                }
                             }
-                        }
-                        BodyText {
-                            horizontal-stretch: 1;
-                            text: tab.status;
-                            color: Theme.text;
+                            BodyText {
+                                horizontal-stretch: 1;
+                                text: tab.status;
+                                color: Theme.text;
+                            }
                         }
                     }
-                }
-                if tab.rows.length > 0: Card {
-                    for row[j] in tab.rows: VerticalLayout {
-                        if j > 0: Divider { }
-                        if row.kind == SettingKind.toggle: SettingLine {
-                            label: row.label;
-                            help: row.help;
-                            managed-reason: row.managed-reason;
-                            Switch {
-                                checked: row.on;
-                                enabled: tab.editable && !row.managed;
-                                toggled => {
-                                    root.set-bool(tab.id, row.key, self.checked);
+                    if tab.rows.length > 0: Card {
+                        for row[j] in tab.rows: VerticalLayout {
+                            if j > 0: Divider { }
+                            if row.kind == SettingKind.toggle: SettingLine {
+                                label: row.label;
+                                help: row.help;
+                                managed-reason: row.managed-reason;
+                                Switch {
+                                    checked: row.on;
+                                    enabled: tab.editable && !row.managed;
+                                    toggled => {
+                                        root.set-bool(tab.id, row.key, self.checked);
+                                    }
                                 }
                             }
-                        }
-                        if row.kind == SettingKind.choice: SettingLine {
-                            label: row.label;
-                            help: row.help;
-                            managed-reason: row.managed-reason;
-                            ComboBox {
-                                width: 230px;
-                                model: row.choices;
-                                current-index: row.choice-index;
-                                enabled: tab.editable && !row.managed;
-                                selected => {
-                                    root.set-choice(tab.id, row.key, self.current-index);
+                            if row.kind == SettingKind.choice: SettingLine {
+                                label: row.label;
+                                help: row.help;
+                                managed-reason: row.managed-reason;
+                                ComboBox {
+                                    width: 230px;
+                                    model: row.choices;
+                                    current-index: row.choice-index;
+                                    enabled: tab.editable && !row.managed;
+                                    selected => {
+                                        root.set-choice(tab.id, row.key, self.current-index);
+                                    }
                                 }
                             }
-                        }
-                        if row.kind == SettingKind.number: SettingLine {
-                            label: row.label;
-                            help: row.help;
-                            managed-reason: row.managed-reason;
-                            SpinBox {
-                                width: 130px;
-                                minimum: row.min;
-                                maximum: row.max;
-                                value: row.number;
-                                enabled: tab.editable && !row.managed;
-                                edited(v) => {
-                                    root.set-number(tab.id, row.key, v);
+                            if row.kind == SettingKind.number: SettingLine {
+                                label: row.label;
+                                help: row.help;
+                                managed-reason: row.managed-reason;
+                                SpinBox {
+                                    width: 130px;
+                                    minimum: row.min;
+                                    maximum: row.max;
+                                    value: row.number;
+                                    enabled: tab.editable && !row.managed;
+                                    edited(v) => {
+                                        root.set-number(tab.id, row.key, v);
+                                    }
                                 }
                             }
                         }

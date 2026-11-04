@@ -33,6 +33,9 @@ export global Theme {
     out property <length> radius: 14px;
     out property <length> radius-small: 9px;
     out property <duration> fast: 120ms;
+    // Pages and cards settling in.
+    out property <duration> normal: 260ms;
+    out property <duration> slow: 380ms;
 
     // The color for a status level (used by dots, pills and values).
     public pure function level-color(level: Level) -> color {

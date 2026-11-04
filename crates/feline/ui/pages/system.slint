@@ -6,9 +6,9 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { InfoRow, Level } from "../types.slint";
 import { Icons } from "../icons.slint";
-import { SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, InfoLine, OutputBox } from "../components.slint";
+import { PageBase, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, InfoLine, OutputBox } from "../components.slint";
 
-export component SystemPage inherits Rectangle {
+export component SystemPage inherits PageBase {
     in property <[InfoRow]> rows;
     in property <string> report;
     in property <bool> loading;

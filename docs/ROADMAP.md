@@ -8,7 +8,7 @@ will only be claimed once it has been, with reproducible evidence.
 
 | Milestone | Goal | Status |
 |---|---|---|
-| **M1: Launcher** | GUI with Feline branding, system info, diagnostics, runtime detection, Play button and game-link input, basic monitoring. Can start external runtimes the user chooses. | **In progress** |
+| **M1: Launcher** | GUI with Feline branding, system info, diagnostics, runtime detection, Play button and game-link input, settings, Discord status, basic monitoring. Can start external runtimes the user chooses. | **Done** |
 | **M2: Runtime research** | A written survey, no runtime code: which Android components the Roblox client needs; license verification of each candidate component, file by file; design of the Feline runtime protocol. | Planned |
 | **M3: Runtime prototype** | Load the engine library and resolve its imports, without graphics. Success means "loaded and imports resolved", not "a game runs". | Planned |
 | **M4: Runtime bring-up** | Windowing, Vulkan/GLES surfaces, input, audio. | Planned |
@@ -30,7 +30,7 @@ will only be claimed once it has been, with reproducible evidence.
 | 9 | Feline's own Discord Rich Presence (from the Roblox logs; username and Join button off by default; turns off the runtimes' own) | Done |
 | 10 | ~~Install and update Stud from Feline~~ | Dropped: users install Stud themselves, like Sober and Cordial |
 | 11 | Basic monitoring: time played, CPU and memory (PSS) of the whole game process tree, on the Home page | Done |
-| 12 | Polish and docs | Planned |
+| 12 | Polish: page and card animations, button feedback (event-driven only, nothing animates while idle), About credits, README with screenshots | Done |
 
 Out of scope for M1: registering as the `roblox://` link handler, a FastFlag
 editor, a global FPS limit (use Roblox's in-game Maximum Frame Rate; Cordial's

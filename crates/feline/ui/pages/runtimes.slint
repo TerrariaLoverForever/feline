@@ -5,7 +5,7 @@
 import { Theme } from "../theme.slint";
 import { RuntimeRow } from "../types.slint";
 import { Icon, Icons } from "../icons.slint";
-import { Logo, Pill, SecondaryButton, Card, CardTitle, Eyebrow, BodyText, PageTitle } from "../components.slint";
+import { PageBase, Logo, Pill, SecondaryButton, Card, CardTitle, Eyebrow, BodyText, PageTitle } from "../components.slint";
 
 component RuntimeItem inherits Rectangle {
     in property <RuntimeRow> entry;
@@ -71,7 +71,7 @@ component RuntimeItem inherits Rectangle {
     }
 }
 
-export component RuntimesPage inherits Rectangle {
+export component RuntimesPage inherits PageBase {
     in property <[RuntimeRow]> runtimes;
     in property <bool> detecting;
     in property <string> error;

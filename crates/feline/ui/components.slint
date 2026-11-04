@@ -2,22 +2,51 @@
 // Reusable building blocks with Feline's look.
 //
 // Performance note: there are no endless animations. Everything animates
-// only in response to the mouse (hover/press), so the launcher draws nothing
-// while idle and costs no GPU time while you play.
+// only in response to something happening (hover, press, a page or card
+// appearing), so the launcher draws nothing while idle and costs no GPU time
+// while you play. The only repeating animation, the "starting" pulse of a
+// StatusDot, runs only while a game is starting.
+//
+// How "appear" animations work: an element starts with `shown: false`
+// (transparent, slightly smaller); its `init` callback, which Slint runs when
+// the element is created, sets `shown: true`, and `animate` turns that change
+// into a smooth transition. Elements inside `if` are created each time the
+// condition becomes true, so they animate in every time.
+
+// The base of every page: fades in and settles to full size when opened.
+export component PageBase inherits Rectangle {
+    property <bool> shown: false;
+    opacity: root.shown ? 1 : 0;
+    transform-scale: root.shown ? 1 : 0.985;
+    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+    animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
+    init => {
+        root.shown = true;
+    }
+}
 
 import { TextEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icon, Icons } from "icons.slint";
 
 // The Feline logo with rounded corners and an optional purple glow.
+// With `playful`, the cat tilts its head when you hover over it.
 export component Logo inherits Rectangle {
     in property <length> size: 48px;
     in property <bool> glow: false;
+    in property <bool> playful: false;
     width: size;
     height: size;
     border-radius: size * 0.24;
-    drop-shadow-blur: glow ? size * 0.35 : 0px;
+    drop-shadow-blur: glow ? (hover.has-hover ? size * 0.5 : size * 0.35) : 0px;
     drop-shadow-color: #a974f080;
+    transform-rotation: hover.has-hover ? -6deg : 0deg;
+    transform-scale: hover.has-hover ? 1.04 : 1;
+    animate transform-rotation, transform-scale { duration: Theme.slow; easing: ease-out-back; }
+    animate drop-shadow-blur { duration: Theme.normal; }
+    hover := TouchArea {
+        enabled: root.playful;
+    }
     Rectangle {
         border-radius: root.border-radius;
         clip: true;
@@ -52,15 +81,28 @@ export component Pill inherits Rectangle {
     }
 }
 
-// A round status indicator with a soft glow.
+// A round status indicator with a soft glow. `pulse` makes it breathe
+// (used only while something is starting, so it never runs for long).
 export component StatusDot inherits Rectangle {
     in property <color> tone;
+    in property <bool> pulse: false;
+    property <bool> dim: false;
     width: 9px;
     height: 9px;
     border-radius: 4.5px;
     background: tone;
-    drop-shadow-blur: 8px;
+    opacity: root.pulse && root.dim ? 0.35 : 1;
+    drop-shadow-blur: root.pulse && root.dim ? 2px : 8px;
     drop-shadow-color: tone.with-alpha(0.7);
+    animate opacity, drop-shadow-blur { duration: 600ms; easing: ease-in-out-sine; }
+    animate background { duration: Theme.normal; }
+    Timer {
+        interval: 600ms;
+        running: root.pulse;
+        triggered => {
+            root.dim = !root.dim;
+        }
+    }
 }
 
 // A sidebar navigation entry with an icon.
@@ -79,7 +121,9 @@ export component NavItem inherits Rectangle {
     animate background { duration: Theme.fast; }
 
     HorizontalLayout {
-        padding-left: 12px;
+        // A small nudge to the right on hover.
+        padding-left: touch.has-hover && !root.active ? 15px : 12px;
+        animate padding-left { duration: Theme.normal; easing: ease-out-quint; }
         padding-right: 8px;
         spacing: 12px;
         VerticalLayout {
@@ -114,7 +158,7 @@ export component NavItem inherits Rectangle {
         height: root.active ? 20px : 0px;
         border-radius: 2px;
         background: Theme.accent;
-        animate height { duration: Theme.fast; }
+        animate height { duration: Theme.normal; easing: ease-out-back; }
     }
 
     touch := TouchArea {
@@ -140,7 +184,10 @@ export component PlayButton inherits Rectangle {
         : @linear-gradient(90deg, #b07cf5 0%, #8550e6 100%);
     drop-shadow-blur: root.enabled ? (touch.has-hover ? 28px : 18px) : 0px;
     drop-shadow-color: #9b5cf090;
+    transform-scale: !root.enabled ? 1 : touch.pressed ? 0.96 : touch.has-hover ? 1.03 : 1;
     animate drop-shadow-blur { duration: 180ms; }
+    animate transform-scale { duration: Theme.normal; easing: ease-out-back; }
+    animate background { duration: Theme.fast; }
 
     HorizontalLayout {
         padding-left: 26px;
@@ -191,7 +238,9 @@ export component SecondaryButton inherits Rectangle {
         : touch.has-hover ? Theme.surface-hover : Theme.surface-raised;
     border-width: 1px;
     border-color: touch.has-hover && root.enabled ? Theme.accent.with-alpha(0.5) : Theme.border;
+    transform-scale: root.enabled && touch.pressed ? 0.96 : 1;
     animate background, border-color { duration: Theme.fast; }
+    animate transform-scale { duration: Theme.fast; easing: ease-out-quad; }
 
     HorizontalLayout {
         padding-left: 16px;
@@ -225,12 +274,21 @@ export component SecondaryButton inherits Rectangle {
     }
 }
 
-// A bordered panel that stacks its children vertically.
+// A bordered panel that stacks its children vertically. Fades and settles in
+// when it appears.
 export component Card inherits Rectangle {
+    property <bool> shown: false;
     background: Theme.surface;
     border-radius: Theme.radius;
     border-width: 1px;
     border-color: Theme.border;
+    opacity: root.shown ? 1 : 0;
+    transform-scale: root.shown ? 1 : 0.98;
+    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+    animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
+    init => {
+        root.shown = true;
+    }
     VerticalLayout {
         padding: 22px;
         spacing: 12px;
