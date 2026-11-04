@@ -41,6 +41,18 @@ const JNI_OK: JInt = 0;
 enum Object {
     Class(String),
     Str(CString),
+    /// An instance of a class (e.g. the activity), with no fields.
+    Instance(String),
+}
+
+/// A Java String the runtime hands to the engine (e.g. a folder path).
+pub fn new_string(text: &str) -> Handle {
+    add_object(Object::Str(CString::new(text).unwrap_or_default()))
+}
+
+/// An object of class `class` (slash-separated, e.g. `android/os/Bundle`).
+pub fn new_instance(class: &str) -> Handle {
+    add_object(Object::Instance(class.to_owned()))
 }
 
 #[derive(Default)]
@@ -50,12 +62,15 @@ struct World {
     members: Vec<(String, String, String, bool)>,
     /// (class, method name, signature) of each registered native.
     natives: Vec<(String, String, String)>,
+    /// The function of each registered native, by method name.
+    native_functions: Vec<(String, usize)>,
 }
 
 static WORLD: Mutex<World> = Mutex::new(World {
     objects: Vec::new(),
     members: Vec::new(),
     natives: Vec::new(),
+    native_functions: Vec::new(),
 });
 
 /// Handles are `(index + 1) * 8`: never 0 (null means "none" in JNI) and
@@ -204,6 +219,9 @@ unsafe extern "C" fn register_natives(
         let m = unsafe { &*methods.add(i) };
         // SAFETY: valid C strings in each entry.
         let (name, sig) = unsafe { (text(m.name), text(m.signature)) };
+        world
+            .native_functions
+            .push((name.clone(), m.function as usize));
         world.natives.push((class.clone(), name, sig));
     }
     log(format!("RegisterNatives {class}: {count} natives"));
@@ -280,13 +298,14 @@ extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
     let name = {
         let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
         match index(object).and_then(|i| world.objects.get(i)) {
-            Some(Object::Class(_)) => "java/lang/Class",
-            Some(Object::Str(_)) => "java/lang/String",
-            None => "java/lang/Object",
+            Some(Object::Class(_)) => "java/lang/Class".to_owned(),
+            Some(Object::Str(_)) => "java/lang/String".to_owned(),
+            Some(Object::Instance(class)) => class.clone(),
+            None => "java/lang/Object".to_owned(),
         }
     };
     log(format!("GetObjectClass {object:p} -> {name}"));
-    class_handle(name)
+    class_handle(&name)
 }
 
 /// `GetSuperclass`: every Feline class extends java/lang/Object, which has
@@ -466,7 +485,9 @@ fn answer(method: Handle, kind: &str, value: &str) -> String {
 }
 
 /// The placeholder for an object-returning method: an empty String for
-/// `Ljava/lang/String;`, otherwise null.
+/// `Ljava/lang/String;`, a fresh instance of the declared class for other
+/// objects (on Android, getters like `getResources()` never return null),
+/// and null for arrays.
 fn object_answer(method: Handle, kind: &str) -> Handle {
     let ret = {
         let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
@@ -478,6 +499,9 @@ fn object_answer(method: Handle, kind: &str) -> Handle {
     if ret == "Ljava/lang/String;" {
         answer(method, kind, "\"\"");
         add_object(Object::Str(CString::default()))
+    } else if let Some(class) = ret.strip_prefix('L').and_then(|r| r.strip_suffix(';')) {
+        answer(method, kind, &format!("a new {class}"));
+        new_instance(class)
     } else {
         answer(method, kind, "null");
         std::ptr::null_mut()
@@ -834,12 +858,144 @@ fn call_function(name: &str) -> Option<usize> {
 }
 
 // ---------------------------------------------------------------------------
+// Fields: Get<Type>Field / GetStatic<Type>Field (and Set…, which are
+// accepted and logged). No Java objects hold data, so values come from a
+// small table describing a desktop "device" (for android.content.res.
+// Configuration, which AGDK reads), otherwise 0 / null, logged.
+// ---------------------------------------------------------------------------
+
+/// Known field values: (class, field) → value.
+fn known_field(class: &str, field: &str) -> Option<f64> {
+    Some(match (class, field) {
+        ("android/content/res/Configuration", "screenWidthDp") => 1920.0,
+        ("android/content/res/Configuration", "screenHeightDp") => 1080.0,
+        ("android/content/res/Configuration", "smallestScreenWidthDp") => 1080.0,
+        ("android/content/res/Configuration", "densityDpi") => 160.0,
+        ("android/content/res/Configuration", "fontScale") => 1.0,
+        // ORIENTATION_LANDSCAPE
+        ("android/content/res/Configuration", "orientation") => 2.0,
+        // TOUCHSCREEN_NOTOUCH, KEYBOARD_QWERTY, NAVIGATION_NONAV
+        ("android/content/res/Configuration", "touchscreen") => 1.0,
+        ("android/content/res/Configuration", "keyboard") => 2.0,
+        ("android/content/res/Configuration", "navigation") => 1.0,
+        // UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_NO
+        ("android/content/res/Configuration", "uiMode") => 0x11 as f64,
+        // A 1920x1080 desktop screen at Android's baseline density.
+        ("android/util/DisplayMetrics", "density" | "scaledDensity") => 1.0,
+        ("android/util/DisplayMetrics", "densityDpi" | "xdpi" | "ydpi") => 160.0,
+        ("android/util/DisplayMetrics", "widthPixels") => 1920.0,
+        ("android/util/DisplayMetrics", "heightPixels") => 1080.0,
+        _ => return None,
+    })
+}
+
+/// The value for a field ID, logged the first few times per field.
+fn field_value(field: Handle, kind: &str) -> f64 {
+    use std::collections::HashMap;
+    static SEEN: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
+    let (description, value) = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        match index(field).and_then(|i| world.members.get(i)) {
+            Some((class, name, sig, _)) => {
+                (format!("{class}.{name} {sig}"), known_field(class, name))
+            }
+            None => (format!("<unknown field {field:p}>"), None),
+        }
+    };
+    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    let count = seen
+        .get_or_insert_with(HashMap::new)
+        .entry(field as usize)
+        .or_insert(0);
+    *count += 1;
+    if *count <= 3 {
+        match value {
+            Some(v) => log(format!("{kind} {description} -> {v}")),
+            None => log(format!(
+                "{kind} {description} -> 0 (placeholder; no Java data)"
+            )),
+        }
+    }
+    value.unwrap_or(0.0)
+}
+
+macro_rules! field_getters {
+    ($($get:ident, $get_static:ident, $ty:ty, $convert:expr;)*) => {$(
+        extern "C" fn $get(_env: Handle, _object: Handle, field: Handle) -> $ty {
+            trace(stringify!($get));
+            let convert: fn(f64) -> $ty = $convert;
+            convert(field_value(field, "get"))
+        }
+        extern "C" fn $get_static(_env: Handle, _class: Handle, field: Handle) -> $ty {
+            trace(stringify!($get_static));
+            let convert: fn(f64) -> $ty = $convert;
+            convert(field_value(field, "get static"))
+        }
+    )*};
+}
+
+field_getters! {
+    get_bool_field, get_static_bool_field, JBoolean, |v| JBoolean::from(v != 0.0);
+    get_byte_field, get_static_byte_field, i8, |v| v as i8;
+    get_char_field, get_static_char_field, u16, |v| v as u16;
+    get_short_field, get_static_short_field, i16, |v| v as i16;
+    get_int_field, get_static_int_field, JInt, |v| v as JInt;
+    get_long_field, get_static_long_field, i64, |v| v as i64;
+    get_float_field, get_static_float_field, f32, |v| v as f32;
+    get_double_field, get_static_double_field, f64, |v| v;
+}
+
+extern "C" fn get_object_field(_env: Handle, _object: Handle, field: Handle) -> Handle {
+    trace("GetObjectField");
+    field_value(field, "get");
+    std::ptr::null_mut()
+}
+
+/// Set<Type>Field / SetStatic<Type>Field: nothing stores Java data, so the
+/// value is dropped (the call is traced).
+extern "C" fn set_field(_env: Handle, _object: Handle, _field: Handle, _value: u64) {
+    trace("Set…Field");
+}
+
+fn field_function(name: &str) -> Option<usize> {
+    type Getter<T> = extern "C" fn(Handle, Handle, Handle) -> T;
+    Some(match name {
+        "GetBooleanField" => get_bool_field as Getter<JBoolean> as usize,
+        "GetByteField" => get_byte_field as Getter<i8> as usize,
+        "GetCharField" => get_char_field as Getter<u16> as usize,
+        "GetShortField" => get_short_field as Getter<i16> as usize,
+        "GetIntField" => get_int_field as Getter<JInt> as usize,
+        "GetLongField" => get_long_field as Getter<i64> as usize,
+        "GetFloatField" => get_float_field as Getter<f32> as usize,
+        "GetDoubleField" => get_double_field as Getter<f64> as usize,
+        "GetObjectField" | "GetStaticObjectField" => get_object_field as Getter<Handle> as usize,
+        "GetStaticBooleanField" => get_static_bool_field as Getter<JBoolean> as usize,
+        "GetStaticByteField" => get_static_byte_field as Getter<i8> as usize,
+        "GetStaticCharField" => get_static_char_field as Getter<u16> as usize,
+        "GetStaticShortField" => get_static_short_field as Getter<i16> as usize,
+        "GetStaticIntField" => get_static_int_field as Getter<JInt> as usize,
+        "GetStaticLongField" => get_static_long_field as Getter<i64> as usize,
+        "GetStaticFloatField" => get_static_float_field as Getter<f32> as usize,
+        "GetStaticDoubleField" => get_static_double_field as Getter<f64> as usize,
+        // Float/double setters pass the value in a vector register, which a
+        // function that ignores it doesn't touch either.
+        n if n.starts_with("Set") && n.ends_with("Field") => {
+            set_field as extern "C" fn(Handle, Handle, Handle, u64) as usize
+        }
+        _ => return None,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // The tables
 // ---------------------------------------------------------------------------
 
 /// Feline's implementation for a slot, by its JNI name.
 fn implemented(name: &str) -> Option<usize> {
     if let Some(address) = call_function(name) {
+        return Some(address);
+    }
+    if let Some(address) = field_function(name) {
         return Some(address);
     }
     type MemberId = unsafe extern "C" fn(Handle, Handle, *const c_char, *const c_char) -> Handle;
@@ -983,6 +1139,22 @@ pub fn java_vm() -> Result<Handle, String> {
     Ok(tables().vm)
 }
 
+/// The function the engine registered for the native method `name` (e.g.
+/// `onResumeNative`), if it did.
+pub fn registered_native(name: &str) -> Option<usize> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    world
+        .native_functions
+        .iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, f)| *f)
+}
+
+/// This thread's JNIEnv (the loading thread counts as attached).
+pub fn current_env() -> Option<Handle> {
+    this_thread_env(false)
+}
+
 /// What the engine asked of the Java world so far.
 pub struct Summary {
     pub classes: Vec<String>,
@@ -997,7 +1169,7 @@ pub fn summary() -> Summary {
         .iter()
         .filter_map(|o| match o {
             Object::Class(name) => Some(name.clone()),
-            Object::Str(_) => None,
+            Object::Str(_) | Object::Instance(_) => None,
         })
         .collect();
     classes.sort();

@@ -136,6 +136,11 @@ const FORWARD_LIBC: &[&str] = &[
     "posix_fallocate",
     "utime",
     "utimes",
+    // struct stat: bionic's x86-64 layout (AOSP sys/stat.h) is the kernel's,
+    // field for field, as is glibc's (measured: 144 bytes, same offsets).
+    "stat",
+    "lstat",
+    "fstat",
     // Directories: DIR is opaque; struct dirent is the kernel's dirent64 on x86-64.
     "opendir",
     "readdir",
@@ -713,7 +718,7 @@ mod tests {
             "sem_destroy",
             "tcsetattr",
             "__assert",
-            "stat",
+            "statvfs",
             "tcgetattr",
             "mallinfo",
             "sem_post",

@@ -83,6 +83,11 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            // The APK next to the engine holds its assets.
+            let apk = std::path::Path::new(path).with_file_name("base.apk");
+            if let Err(e) = feline_runtime::assets::set_apk(&apk) {
+                eprintln!("feline-runtime: no assets: {e}");
+            }
             // The image and imports must stay alive while the engine's code
             // may run, so this never returns normally.
             run_init(&data)
@@ -178,6 +183,22 @@ fn run_init(data: &[u8]) -> ExitCode {
         }
         eprintln!("feline-runtime: calling JNI_OnLoad…");
         let version = feline_runtime::init::call_jni_onload(&elf, image)?;
+        // FELINE_START=1: continue like Android's GameActivity does (M4).
+        let started = if std::env::var_os("FELINE_START").is_some() {
+            eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
+            let handle = feline_runtime::init::call_initialize_native_code(&elf, image)?;
+            // Then what Android does next: start, resume, and the main loop.
+            eprintln!("feline-runtime: onStart, onResume, then 5 s of the main looper…");
+            feline_runtime::init::call_lifecycle("onStartNative", handle)?;
+            feline_runtime::init::call_lifecycle("onResumeNative", handle)?;
+            let callbacks = feline_runtime::init::run_main_loop(std::time::Duration::from_secs(5));
+            format!(
+                "initializeNativeCode returned handle {handle:#x}\n\
+                 Lifecycle       onStart, onResume; main looper ran 5 s, {callbacks} callbacks\n"
+            )
+        } else {
+            String::new()
+        };
         let world = feline_runtime::jni::summary();
         let mut per_class: std::collections::BTreeMap<&str, usize> = Default::default();
         for (class, _, _) in &world.natives {
@@ -194,6 +215,7 @@ fn run_init(data: &[u8]) -> ExitCode {
         for (class, n) in per_class {
             text.push_str(&format!("  natives {n:>4}  {class}\n"));
         }
+        text.push_str(&started);
         Ok(text)
     })();
     match result {

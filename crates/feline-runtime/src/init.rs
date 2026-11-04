@@ -348,6 +348,126 @@ pub fn call_jni_onload(elf: &Elf, image: &Image) -> Result<i32, String> {
     Ok(version)
 }
 
+/// Folders the engine gets as its app's data directories, under
+/// `$XDG_DATA_HOME/feline/runtime/` (created if needed).
+fn data_dirs() -> Result<[String; 3], String> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        })
+        .ok_or("no home folder")?
+        .join("feline/runtime");
+    let dirs = ["files", "obb", "external"].map(|d| base.join(d));
+    for dir in &dirs {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    }
+    Ok(dirs.map(|d| d.to_string_lossy().into_owned()))
+}
+
+/// Starts the engine the way Android's GameActivity does (AGDK, Apache-2.0):
+/// `initializeNativeCode(activity, internalDataDir, obbDir, externalDataDir,
+/// assetManager, savedState, configuration)`. Returns the native handle the
+/// later lifecycle calls (`onSurfaceCreatedNative`, …) take.
+pub fn call_initialize_native_code(elf: &Elf, image: &Image) -> Result<i64, String> {
+    const NAME: &str = "Java_com_google_androidgamesdk_GameActivity_initializeNativeCode";
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let entry = symbols
+        .iter()
+        .find(|s| s.defined && s.name == NAME)
+        .ok_or("the library has no GameActivity.initializeNativeCode")?;
+    crate::jni::java_vm()?; // makes sure the JNI tables exist
+    // Like Android's main thread, this one has a looper.
+    crate::looper::set_main_thread();
+    let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")?;
+    let [files, obb, external] = data_dirs()?;
+    let activity = crate::jni::new_instance("com/roblox/client/startup/MainGameActivity");
+    let (files, obb, external) = (
+        crate::jni::new_string(&files),
+        crate::jni::new_string(&obb),
+        crate::jni::new_string(&external),
+    );
+    let assets = crate::jni::new_instance("android/content/res/AssetManager");
+    let config = crate::jni::new_instance("android/content/res/Configuration");
+    type Init = extern "C" fn(
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+        *mut c_void,
+    ) -> i64;
+    *ACTIVITY.lock().unwrap_or_else(|p| p.into_inner()) = activity as usize;
+    stubs::set_phase("GameActivity.initializeNativeCode".to_owned());
+    // SAFETY: the engine's exported JNI function, with the signature AGDK
+    // declares for it.
+    let function: Init = unsafe { std::mem::transmute(image.bias() + entry.value) };
+    let handle = function(
+        env,
+        activity,
+        files,
+        obb,
+        external,
+        assets,
+        std::ptr::null_mut(),
+        config,
+    );
+    stubs::set_phase(String::new());
+    Ok(handle)
+}
+
+/// The activity object handed to initializeNativeCode (later lifecycle
+/// calls pass it as `this`).
+static ACTIVITY: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+
+/// Calls one of GameActivity's registered lifecycle natives that take only
+/// the native handle: `void name(JNIEnv*, jobject thiz, jlong handle)`.
+pub fn call_lifecycle(name: &str, handle: i64) -> Result<(), String> {
+    let function =
+        crate::jni::registered_native(name).ok_or_else(|| format!("{name} wasn't registered"))?;
+    let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")?;
+    let activity = *ACTIVITY.lock().unwrap_or_else(|p| p.into_inner()) as *mut c_void;
+    stubs::set_phase(format!("GameActivity.{name}"));
+    // SAFETY: a native the engine registered with signature "(J)V".
+    let call: extern "C" fn(*mut c_void, *mut c_void, i64) =
+        unsafe { std::mem::transmute(function) };
+    call(env, activity, handle);
+    stubs::set_phase(String::new());
+    Ok(())
+}
+
+/// Runs this (main) thread's looper for `duration`, as Android's main
+/// thread does between events. Returns how many callbacks ran.
+pub fn run_main_loop(duration: std::time::Duration) -> usize {
+    stubs::set_phase("the main looper".to_owned());
+    let end = std::time::Instant::now() + duration;
+    let mut callbacks = 0;
+    while std::time::Instant::now() < end {
+        let left = end
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis()
+            .min(100) as c_int;
+        // SAFETY: NULL out pointers are allowed.
+        let r = unsafe {
+            crate::looper::ALooper_pollOnce(
+                left,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if r == -2 {
+            callbacks += 1;
+        }
+    }
+    stubs::set_phase(String::new());
+    callbacks
+}
+
 /// Ends the process right away, without running exit handlers: the engine
 /// registered some with glibc during its constructors, and they would run
 /// more of its code.

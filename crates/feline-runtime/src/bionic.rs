@@ -218,6 +218,54 @@ pub extern "C" fn signal(signum: c_int, handler: libc::sighandler_t) -> libc::si
 }
 
 // ---------------------------------------------------------------------------
+// Android system properties (`__system_property_get`). Feline describes
+// itself honestly: Android 13 (SDK 33) on x86-64, made by "Feline", model
+// "Linux"; not a specific real phone. Unknown properties are empty, as on
+// Android. Every property asked for is logged.
+// ---------------------------------------------------------------------------
+
+/// Android's limit for property values (PROP_VALUE_MAX), including the NUL.
+const PROP_VALUE_MAX: usize = 92;
+
+const PROPERTIES: &[(&str, &str)] = &[
+    ("ro.build.version.sdk", "33"),
+    ("ro.build.version.release", "13"),
+    ("ro.product.manufacturer", "Feline"),
+    ("ro.product.brand", "Feline"),
+    ("ro.product.model", "Linux"),
+    ("ro.product.device", "feline"),
+    ("ro.product.name", "feline"),
+    ("ro.hardware", "feline"),
+    ("ro.product.cpu.abi", "x86_64"),
+    ("ro.product.cpu.abilist", "x86_64"),
+    ("ro.kernel.qemu", "0"),
+];
+
+/// `int __system_property_get(const char* name, char* value)`: writes the
+/// value (at most 91 characters + NUL) and returns its length.
+///
+/// # Safety
+/// `name` is a valid C string; `value` has room for PROP_VALUE_MAX bytes.
+pub unsafe extern "C" fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int {
+    // SAFETY: the engine passes a valid property name.
+    let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_string_lossy();
+    let found = PROPERTIES
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| *v)
+        .unwrap_or("");
+    eprintln!("feline-runtime: property {name} -> \"{found}\"");
+    let bytes = &found.as_bytes()[..found.len().min(PROP_VALUE_MAX - 1)];
+    // SAFETY: `value` has room for PROP_VALUE_MAX bytes (Android's contract);
+    // we write at most PROP_VALUE_MAX - 1 bytes plus the NUL.
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr().cast(), value, bytes.len());
+        *value.add(bytes.len()) = 0;
+    }
+    bytes.len() as c_int
+}
+
+// ---------------------------------------------------------------------------
 // Thread-specific data, traced (FELINE_CALL_TRACE=1 only): forwarded to
 // glibc unchanged, but the first calls log their keys and values.
 // ---------------------------------------------------------------------------
@@ -292,6 +340,12 @@ pub fn implementation(name: &str) -> Option<u64> {
     if let Some(address) = crate::liblog::implementation(name) {
         return Some(address);
     }
+    if let Some(address) = crate::looper::implementation(name) {
+        return Some(address);
+    }
+    if let Some(address) = crate::assets::implementation(name) {
+        return Some(address);
+    }
     if crate::trace::enabled() {
         type KeyCreate = unsafe extern "C" fn(
             *mut libc::pthread_key_t,
@@ -316,6 +370,7 @@ pub fn implementation(name: &str) -> Option<u64> {
     type FdOp = unsafe extern "C" fn(c_int, *mut u64, usize);
     let address = match name {
         "sysconf" => sysconf as extern "C" fn(c_int) -> c_long as usize,
+        "__system_property_get" => __system_property_get as *const () as usize,
         "signal" => {
             signal as extern "C" fn(c_int, libc::sighandler_t) -> libc::sighandler_t as usize
         }

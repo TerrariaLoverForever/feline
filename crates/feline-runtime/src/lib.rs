@@ -18,6 +18,7 @@
 // `bionic` and `dl` (Feline's implementations calling glibc) and `jni`
 // (the fake Java world the engine calls into). Each use says why it's sound.
 
+pub mod assets;
 pub mod bionic;
 pub mod check;
 pub mod dl;
@@ -29,6 +30,7 @@ pub mod jni;
 pub mod jni_names;
 pub mod liblog;
 pub mod load;
+pub mod looper;
 pub mod packed;
 pub mod stubs;
 pub mod sysconf_table;

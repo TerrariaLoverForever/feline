@@ -84,6 +84,8 @@ permission in [`LICENSE.exception`](../LICENSE.exception). See
 | `dl` | `dlopen`/`dlsym`/`dlclose`/`dlerror`/`dladdr`/`dl_iterate_phdr` for the engine |
 | `init` | `feline-runtime --init <lib>`: runs the constructors and `JNI_OnLoad`; crash reports (alternate signal stack) give the engine offset, faulting address, engine return addresses, recent import calls and a thread snapshot |
 | `jni`, `jni_names` | Feline's Java world: JavaVM (8 slots) and JNIEnv (233 slots, order generated from AOSP's `jni.h`); a JNIEnv per thread with Android-like attach state; classes, member IDs, strings, logged placeholder answers for the 90 `Call*Method` functions |
+| `looper` | Android's `ALooper` on epoll; the loading thread gets one automatically, like Android's main thread |
+| `assets` | `AAssetManager`/`AAsset` over the APK's `assets/` (mapped zip, stored or deflated entries) and `AConfiguration` (desktop screen, language from `LANG`) |
 | `liblog` | Android's `__android_log_*`: the engine's own log lines, formatted with glibc's `vsnprintf` |
 | `trace` | `FELINE_CALL_TRACE=1`: recording trampolines in front of every bound import function |
 

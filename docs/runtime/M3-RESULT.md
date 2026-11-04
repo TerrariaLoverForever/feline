@@ -98,3 +98,32 @@ Placeholders today: no Java code runs, so method calls return 0 / false / an emp
 
 - `D/JNIMain: TelemetryProtocol::setProcessTimeOverride: 0`
 - `W/JNIMain: DeviceStaticParams is null.`
+
+## M4 progress: the Android lifecycle
+
+With `FELINE_START=1`, after `JNI_OnLoad` the runtime does what Android's
+GameActivity (AGDK, Apache-2.0, open source) does, as read in AGDK's
+published `GameActivity.cpp`:
+
+1. `GameActivity.initializeNativeCode(activity, dataDir, obbDir, externalDir,
+   assetManager, savedState, configuration)`: AGDK registers its 24 natives
+   (`onStartNative`, `onSurfaceCreatedNative`, `onTouchEventNative`, …),
+   creates the main looper, reads the configuration and calls Roblox's
+   `GameActivity_onCreate`. It returns the native handle.
+2. `onStartNative`, `onResumeNative`: Roblox's start-up asks for resources,
+   display metrics, its `NativeHelper`, and calls `bootstrapTheApp()`.
+3. The main looper runs AGDK's `mainWorkCallback` (window flags, input
+   fields).
+4. The engine reports `NativeHelper.gameActivity_onFlagsFailed()`: on
+   Android, the Java side loads FastFlags here.
+
+New pieces: system properties (Android 13 / SDK 33, "Feline" / "Linux"),
+`ALooper` (epoll), the APK asset manager, `AConfiguration`, JNI field
+access (desktop `Configuration` and `DisplayMetrics` values), object
+getters returning instances of the declared class, `stat`/`lstat`/`fstat`
+forwarded (bionic's x86-64 `struct stat` is the kernel's layout, as is
+glibc's).
+
+**Next:** the window: `onSurfaceCreatedNative(surface)` with an
+`ANativeWindow` backed by a real Wayland/X11 window, and Vulkan/EGL
+surfaces on it.
