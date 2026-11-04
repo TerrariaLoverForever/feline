@@ -488,9 +488,129 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
             focus(env, activity, handle, u8::from(focused));
         }
         WindowChange::CloseRequested => {}
+        WindowChange::Touch(touch) => {
+            use crate::window::TouchAction;
+            /// AINPUT_SOURCE_TOUCHSCREEN.
+            const SOURCE_TOUCHSCREEN: c_int = 0x1002;
+            static DOWN_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+            let now = uptime_millis();
+            if touch.action == TouchAction::Down {
+                DOWN_TIME.store(now, std::sync::atomic::Ordering::Relaxed);
+            }
+            let down_time = DOWN_TIME.load(std::sync::atomic::Ordering::Relaxed);
+            let event = crate::jni::motion_event(touch.x, touch.y);
+            stubs::set_phase("GameActivity.onTouchEventNative".to_owned());
+            // SAFETY: AGDK's native with signature
+            // (JLandroid/view/MotionEvent;IIIIIJJIIIIIIFF)Z: pointer count,
+            // history size, device, source, action, event time, down time,
+            // flags, meta state, action button, button state,
+            // classification, edge flags, x/y precision.
+            let touch_native: extern "C" fn(
+                *mut c_void,
+                *mut c_void,
+                i64,
+                *mut c_void,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                i64,
+                i64,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                f32,
+                f32,
+            ) -> u8 = unsafe { std::mem::transmute(native("onTouchEventNative")?) };
+            touch_native(
+                env,
+                activity,
+                handle,
+                event,
+                1,
+                0,
+                1,
+                SOURCE_TOUCHSCREEN,
+                touch.action as c_int,
+                now,
+                down_time,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1.0,
+                1.0,
+            );
+        }
+        WindowChange::Key(key) => {
+            static DOWN_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+            let now = uptime_millis();
+            if key.down && !key.repeat {
+                DOWN_TIME.store(now, std::sync::atomic::Ordering::Relaxed);
+            }
+            let event = crate::jni::key_event(
+                key,
+                now,
+                DOWN_TIME.load(std::sync::atomic::Ordering::Relaxed),
+            );
+            let name = if key.down {
+                "onKeyDownNative"
+            } else {
+                "onKeyUpNative"
+            };
+            stubs::set_phase(format!("GameActivity.{name}"));
+            // SAFETY: AGDK's natives with signature (JLandroid/view/KeyEvent;)Z.
+            let key_native: extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void) -> u8 =
+                unsafe { std::mem::transmute(native(name)?) };
+            key_native(env, activity, handle, event);
+        }
     }
     stubs::set_phase(String::new());
     Ok(())
+}
+
+/// The FELINE_INPUT_TEST events: tap, drag a little, release; W down, up.
+fn synthetic_input() -> Vec<crate::window::WindowChange> {
+    use crate::window::{Key, Touch, TouchAction, WindowChange};
+    let (w, h) = crate::window::native_window().map_or((1280, 720), |n| n.size());
+    let (x, y) = (w as f32 / 2.0, h as f32 / 2.0);
+    eprintln!("feline-runtime: input test: tap at {x}x{y}, then W");
+    let touch = |action, x| WindowChange::Touch(Touch { action, x, y });
+    let key = |down| {
+        WindowChange::Key(Key {
+            down,
+            code: 51, // KEYCODE_W
+            scan_code: 17,
+            meta: 0,
+            unicode: 'w' as i32,
+            repeat: false,
+        })
+    };
+    vec![
+        touch(TouchAction::Down, x),
+        touch(TouchAction::Move, x + 5.0),
+        touch(TouchAction::Up, x + 5.0),
+        key(true),
+        key(false),
+    ]
+}
+
+/// Milliseconds since boot, like Android's `SystemClock.uptimeMillis()`
+/// (which event times use).
+fn uptime_millis() -> i64 {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid timespec to fill.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    now.tv_sec * 1000 + now.tv_nsec / 1_000_000
 }
 
 /// The main loop with a window: window events (forwarded to the engine)
@@ -500,10 +620,18 @@ pub fn run_window_loop(
     handle: i64,
     duration: std::time::Duration,
 ) -> Result<&'static str, String> {
-    let end = std::time::Instant::now() + duration;
+    let start = std::time::Instant::now();
+    let end = start + duration;
     let mut first = true;
+    // FELINE_INPUT_TEST=1: after 8 s, a tap in the middle of the window and
+    // a press of W, to test input without anyone at the keyboard.
+    let mut input_test = std::env::var_os("FELINE_INPUT_TEST").is_some();
     while std::time::Instant::now() < end {
         let mut changes = window.pump(std::time::Duration::from_millis(1));
+        if input_test && start.elapsed() >= std::time::Duration::from_secs(8) {
+            input_test = false;
+            changes.extend(synthetic_input());
+        }
         if first {
             // The window already exists when the loop starts.
             if let Some(native) = crate::window::native_window() {

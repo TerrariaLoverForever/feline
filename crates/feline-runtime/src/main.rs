@@ -334,15 +334,23 @@ fn run_init(data: &[u8]) -> ExitCode {
             }
             let lifecycle = match window.as_mut() {
                 Some(window) => {
+                    // FELINE_SECONDS: how long the window stays open (15 s).
+                    let seconds = std::env::var("FELINE_SECONDS")
+                        .ok()
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .filter(|&s| s > 0)
+                        .unwrap_or(15);
+                    let opened = std::time::Instant::now();
                     let why = feline_runtime::init::run_window_loop(
                         window,
                         handle,
-                        std::time::Duration::from_secs(15),
+                        std::time::Duration::from_secs(seconds),
                     )?;
+                    let open = opened.elapsed().as_secs_f64().max(1.0);
                     let frames = feline_runtime::egl::frames();
                     format!(
-                        "window open 15 s with the engine ({why}), {frames} frames presented (about {} per second)",
-                        frames / 15
+                        "window open {open:.0} s with the engine ({why}), {frames} frames presented (about {:.0} per second)",
+                        frames as f64 / open
                     )
                 }
                 None => {

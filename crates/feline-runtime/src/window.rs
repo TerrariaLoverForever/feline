@@ -70,18 +70,61 @@ pub fn native_window() -> Option<&'static NativeWindow> {
 }
 
 /// Something that happened to the window, for the lifecycle code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WindowChange {
-    Created { width: i32, height: i32 },
-    Resized { width: i32, height: i32 },
+    Created {
+        width: i32,
+        height: i32,
+    },
+    Resized {
+        width: i32,
+        height: i32,
+    },
     Focus(bool),
     CloseRequested,
+    /// The left mouse button as one finger on a touch screen.
+    Touch(Touch),
+    Key(Key),
+}
+
+/// Android's MotionEvent actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchAction {
+    Down = 0,
+    Up = 1,
+    Move = 2,
+}
+
+/// One touch event (window pixels, physical).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Touch {
+    pub action: TouchAction,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// One key event, in Android's terms (`KeyEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Key {
+    pub down: bool,
+    /// Android `KEYCODE_*`.
+    pub code: i32,
+    /// The evdev scan code (what Android reports too).
+    pub scan_code: i32,
+    /// Android `META_*` bits for Shift/Ctrl/Alt.
+    pub meta: i32,
+    /// The character the key types, or 0.
+    pub unicode: i32,
+    pub repeat: bool,
 }
 
 struct App {
     window: Option<Window>,
     changes: Vec<WindowChange>,
     error: Option<String>,
+    cursor: (f32, f32),
+    pressed: bool,
+    modifiers: winit::keyboard::ModifiersState,
 }
 
 fn handles(window: &Window) -> Result<NativeHandles, String> {
@@ -102,6 +145,14 @@ fn handles(window: &Window) -> Result<NativeHandles, String> {
         },
         other => return Err(format!("unsupported window system: {other:?}")),
     })
+}
+
+impl App {
+    fn touch(&mut self, action: TouchAction) {
+        let (x, y) = self.cursor;
+        self.changes
+            .push(WindowChange::Touch(Touch { action, x, y }));
+    }
 }
 
 impl ApplicationHandler for App {
@@ -156,8 +207,41 @@ impl ApplicationHandler for App {
                     height: size.height as i32,
                 });
             }
-            WindowEvent::Focused(focused) => self.changes.push(WindowChange::Focus(focused)),
             WindowEvent::CloseRequested => self.changes.push(WindowChange::CloseRequested),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x as f32, position.y as f32);
+                if self.pressed {
+                    self.touch(TouchAction::Move);
+                }
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                let down = state == winit::event::ElementState::Pressed;
+                if down != self.pressed {
+                    self.pressed = down;
+                    self.touch(if down {
+                        TouchAction::Down
+                    } else {
+                        TouchAction::Up
+                    });
+                }
+            }
+            WindowEvent::Focused(false) if self.pressed => {
+                // Don't leave a finger "down" when the window loses focus.
+                self.pressed = false;
+                self.touch(TouchAction::Up);
+                self.changes.push(WindowChange::Focus(false));
+            }
+            WindowEvent::Focused(focused) => self.changes.push(WindowChange::Focus(focused)),
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(key) = crate::keys::android_key(&event, self.modifiers) {
+                    self.changes.push(WindowChange::Key(key));
+                }
+            }
             _ => {}
         }
     }
@@ -178,6 +262,9 @@ impl DesktopWindow {
                 window: None,
                 changes: Vec::new(),
                 error: None,
+                cursor: (0.0, 0.0),
+                pressed: false,
+                modifiers: Default::default(),
             },
         };
         // The window is created on the first `resumed` event.

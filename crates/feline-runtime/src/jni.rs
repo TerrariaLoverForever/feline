@@ -25,6 +25,7 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, CString, c_char, c_void};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::jni_names::{JAVA_VM, JNI_ENV};
@@ -230,6 +231,7 @@ unsafe extern "C" fn register_natives(
         let m = unsafe { &*methods.add(i) };
         // SAFETY: valid C strings in each entry.
         let (name, sig) = unsafe { (text(m.name), text(m.signature)) };
+        log(format!("  native {name} {sig}"));
         world
             .native_functions
             .push((name.clone(), m.function as usize));
@@ -624,42 +626,176 @@ fn object_answer(method: Handle, kind: &str) -> Handle {
 
 /// One family: `$v` (…), `$vv` (va_list) and `$va` (jvalue array) for an
 /// instance (`obj`), static (`class`) or non-virtual (`obj, class`) call.
+/// Reads the next integer argument from a C `va_list` (x86-64 System V:
+/// six register slots saved in `reg_save_area`, then the stack).
+///
+/// # Safety
+/// `list` is a live `va_list` whose next argument is an integer or pointer.
+unsafe fn va_list_int(list: *mut c_void) -> i64 {
+    #[repr(C)]
+    struct VaListTag {
+        gp_offset: u32,
+        fp_offset: u32,
+        overflow_arg_area: *mut u8,
+        reg_save_area: *mut u8,
+    }
+    // SAFETY: the caller's promise; this is the ABI's va_list layout.
+    unsafe {
+        let tag = &mut *list.cast::<VaListTag>();
+        if tag.gp_offset < 48 {
+            let v = *tag.reg_save_area.add(tag.gp_offset as usize).cast::<i64>();
+            tag.gp_offset += 8;
+            v
+        } else {
+            let v = *tag.overflow_arg_area.cast::<i64>();
+            tag.overflow_arg_area = tag.overflow_arg_area.add(8);
+            v
+        }
+    }
+}
+
+/// Turning an answer (kept as f64, exact for the values used) into a JNI
+/// return type.
+trait FromAnswer {
+    fn from_answer(value: f64) -> Self;
+}
+macro_rules! from_answer {
+    ($($ty:ty),*) => {$(
+        impl FromAnswer for $ty {
+            fn from_answer(value: f64) -> Self { value as $ty }
+        }
+    )*};
+}
+from_answer!(u8, i8, u16, i16, i32, i64, f32, f64);
+impl FromAnswer for () {
+    fn from_answer(_value: f64) -> Self {}
+}
+
+// ---------------------------------------------------------------------------
+// Input events: one reusable MotionEvent and one KeyEvent object, whose
+// getters answer from the event being delivered (AGDK copies the values
+// before the native call returns, so reusing them is safe).
+// ---------------------------------------------------------------------------
+
+static MOTION_EVENT: AtomicUsize = AtomicUsize::new(0);
+static KEY_EVENT: AtomicUsize = AtomicUsize::new(0);
+static MOTION: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
+static KEY: Mutex<Option<(crate::window::Key, i64, i64)>> = Mutex::new(None);
+
+fn event_object(slot: &AtomicUsize, class: &str) -> Handle {
+    let mut object = slot.load(Ordering::Relaxed);
+    if object == 0 {
+        object = new_instance(class) as usize;
+        slot.store(object, Ordering::Relaxed);
+    }
+    object as Handle
+}
+
+/// The `android.view.MotionEvent` for one pointer at (x, y).
+pub fn motion_event(x: f32, y: f32) -> Handle {
+    *MOTION.lock().unwrap_or_else(|p| p.into_inner()) = (x, y);
+    event_object(&MOTION_EVENT, "android/view/MotionEvent")
+}
+
+/// The `android.view.KeyEvent` for `key` (times in milliseconds of uptime,
+/// as `SystemClock.uptimeMillis()`).
+pub fn key_event(key: crate::window::Key, event_time: i64, down_time: i64) -> Handle {
+    *KEY.lock().unwrap_or_else(|p| p.into_inner()) = Some((key, event_time, down_time));
+    event_object(&KEY_EVENT, "android/view/KeyEvent")
+}
+
+/// Answers a getter of the current input event (None for other objects).
+fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -> Option<f64> {
+    let object = object as usize;
+    if object == 0 {
+        return None;
+    }
+    if object == MOTION_EVENT.load(Ordering::Relaxed) {
+        let (_, name, _) = member_of(method)?;
+        let (x, y) = *MOTION.lock().unwrap_or_else(|p| p.into_inner());
+        return Some(match name.as_str() {
+            "getPointerId" => 0.0,
+            "getToolType" => 1.0, // TOOL_TYPE_FINGER
+            "getRawX" | "getX" => f64::from(x),
+            "getRawY" | "getY" => f64::from(y),
+            "getAxisValue" => match read() as i32 {
+                0 => f64::from(x), // AXIS_X
+                1 => f64::from(y), // AXIS_Y
+                2 => 1.0,          // AXIS_PRESSURE
+                _ => 0.0,
+            },
+            _ => return None,
+        });
+    }
+    if object == KEY_EVENT.load(Ordering::Relaxed) {
+        let (_, name, _) = member_of(method)?;
+        let (key, event_time, down_time) = (*KEY.lock().unwrap_or_else(|p| p.into_inner()))?;
+        return Some(match name.as_str() {
+            "getDeviceId" => 1.0,
+            "getSource" => f64::from(0x101), // SOURCE_KEYBOARD
+            "getAction" => f64::from(u8::from(!key.down)), // ACTION_DOWN 0 / UP 1
+            "getEventTime" => event_time as f64,
+            "getDownTime" => down_time as f64,
+            "getFlags" => 0.0,
+            "getMetaState" | "getModifiers" => f64::from(key.meta),
+            "getRepeatCount" => f64::from(u8::from(key.repeat)),
+            "getKeyCode" => f64::from(key.code),
+            "getScanCode" => f64::from(key.scan_code),
+            "getUnicodeChar" => f64::from(key.unicode),
+            _ => return None,
+        });
+    }
+    None
+}
+
 macro_rules! calls {
     ($kind:ident, $ty:ty, $zero:expr, $label:literal, $m:ident, $mv:ident, $ma:ident, $s:ident, $sv:ident, $sa:ident, $n:ident, $nv:ident, $na:ident) => {
-        unsafe extern "C" fn $m(_env: Handle, _obj: Handle, method: Handle, _args: ...) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+        unsafe extern "C" fn $m(_env: Handle, obj: Handle, method: Handle, mut args: ...) -> $ty {
+            // SAFETY: the engine passed the method's arguments.
+            calls!(@body $kind, obj, method, $label, $zero, &mut || unsafe { args.next_arg::<i64>() })
         }
-        unsafe extern "C" fn $mv(_env: Handle, _obj: Handle, method: Handle, _args: *mut c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+        unsafe extern "C" fn $mv(_env: Handle, obj: Handle, method: Handle, args: *mut c_void) -> $ty {
+            // SAFETY: the engine passed a live va_list with the arguments.
+            calls!(@body $kind, obj, method, $label, $zero, &mut || unsafe { va_list_int(args) })
         }
-        unsafe extern "C" fn $ma(_env: Handle, _obj: Handle, method: Handle, _args: *const c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+        unsafe extern "C" fn $ma(_env: Handle, obj: Handle, method: Handle, args: *const c_void) -> $ty {
+            let mut at = 0;
+            calls!(@body $kind, obj, method, $label, $zero, &mut || {
+                // SAFETY: the engine passed one jvalue (8 bytes) per argument.
+                let v = unsafe { *args.cast::<i64>().add(at) };
+                at += 1;
+                v
+            })
         }
         unsafe extern "C" fn $s(_env: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
         unsafe extern "C" fn $sv(_env: Handle, _class: Handle, method: Handle, _args: *mut c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
         unsafe extern "C" fn $sa(_env: Handle, _class: Handle, method: Handle, _args: *const c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
         unsafe extern "C" fn $n(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
         unsafe extern "C" fn $nv(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: *mut c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
         unsafe extern "C" fn $na(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: *const c_void) -> $ty {
-            calls!(@body $kind, method, $label, $zero)
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
         }
     };
-    (@body object, $method:ident, $label:literal, $zero:expr) => {{
+    (@body object, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
         trace("Call…ObjectMethod");
+        let _ = ($obj, $read);
         object_answer($method, "call")
     }};
-    (@body value, $method:ident, $label:literal, $zero:expr) => {{
+    (@body value, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
         trace(concat!("Call…", $label, "Method"));
+        if let Some(value) = event_answer($obj, $method, $read) {
+            return FromAnswer::from_answer(value);
+        }
         answer($method, "call", &format!("{:?}", $zero));
         $zero
     }};
@@ -1345,6 +1481,32 @@ pub fn summary() -> Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads `count` integers from its own variadic arguments through a C
+    /// `va_list`, the way an engine's `Call…MethodV` hands them over.
+    unsafe extern "C" fn sum_through_va_list(count: i64, args: ...) -> i64 {
+        unsafe extern "C" fn reader(count: i64, list: *mut c_void) -> i64 {
+            // SAFETY (test): `list` holds `count` integer arguments.
+            (0..count)
+                .map(|_| unsafe { va_list_int(list) })
+                .fold(0, |a, v| a * 10 + v)
+        }
+        // A VaList is passed exactly as C passes a va_list (a pointer).
+        // SAFETY (test): same ABI, as with vsnprintf in liblog.rs.
+        let reader: unsafe extern "C" fn(i64, std::ffi::VaList) -> i64 =
+            unsafe { std::mem::transmute(reader as unsafe extern "C" fn(i64, *mut c_void) -> i64) };
+        // SAFETY (test): as above.
+        unsafe { reader(count, args) }
+    }
+
+    #[test]
+    fn va_list_integers_from_registers_and_stack() {
+        // 1 fixed + 8 variadic: five in registers, three on the stack.
+        // SAFETY (test): eight integer arguments, as declared.
+        let digits =
+            unsafe { sum_through_va_list(8, 1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64) };
+        assert_eq!(digits, 12_345_678);
+    }
 
     #[test]
     fn tables_have_every_slot_in_the_right_place() {
