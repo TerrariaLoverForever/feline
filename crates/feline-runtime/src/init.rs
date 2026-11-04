@@ -440,6 +440,102 @@ pub fn call_lifecycle(name: &str, handle: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Tells the engine about a window change, through the natives AGDK
+/// registered: `onSurfaceCreatedNative(J, Surface)`, `onSurfaceChangedNative
+/// (J, Surface, format, width, height)`, `onWindowFocusChangedNative(J, Z)`.
+pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Result<(), String> {
+    use crate::window::WindowChange;
+    /// Android's PixelFormat.RGBA_8888.
+    const RGBA_8888: c_int = 1;
+    let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")?;
+    let activity = *ACTIVITY.lock().unwrap_or_else(|p| p.into_inner()) as *mut c_void;
+    let surface = crate::window::surface_object();
+    let native = |name: &str| {
+        crate::jni::registered_native(name).ok_or_else(|| format!("{name} wasn't registered"))
+    };
+    match change {
+        WindowChange::Created { width, height } => {
+            eprintln!("feline-runtime: onSurfaceCreated, onSurfaceChanged {width}x{height}");
+            stubs::set_phase("GameActivity.onSurfaceCreatedNative".to_owned());
+            // SAFETY: AGDK's native with signature (JLandroid/view/Surface;)V.
+            let created: extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void) =
+                unsafe { std::mem::transmute(native("onSurfaceCreatedNative")?) };
+            created(env, activity, handle, surface);
+            window_changed(handle, WindowChange::Resized { width, height })?;
+        }
+        WindowChange::Resized { width, height } => {
+            stubs::set_phase("GameActivity.onSurfaceChangedNative".to_owned());
+            // SAFETY: AGDK's native with signature (JLandroid/view/Surface;III)V.
+            let changed: extern "C" fn(
+                *mut c_void,
+                *mut c_void,
+                i64,
+                *mut c_void,
+                c_int,
+                c_int,
+                c_int,
+            ) = unsafe { std::mem::transmute(native("onSurfaceChangedNative")?) };
+            changed(env, activity, handle, surface, RGBA_8888, width, height);
+        }
+        WindowChange::Focus(focused) => {
+            stubs::set_phase("GameActivity.onWindowFocusChangedNative".to_owned());
+            // SAFETY: AGDK's native with signature (JZ)V.
+            let focus: extern "C" fn(*mut c_void, *mut c_void, i64, u8) =
+                unsafe { std::mem::transmute(native("onWindowFocusChangedNative")?) };
+            focus(env, activity, handle, u8::from(focused));
+        }
+        WindowChange::CloseRequested => {}
+    }
+    stubs::set_phase(String::new());
+    Ok(())
+}
+
+/// The main loop with a window: window events (forwarded to the engine)
+/// and the main looper, until `duration` passes or the window is closed.
+pub fn run_window_loop(
+    window: &mut crate::window::DesktopWindow,
+    handle: i64,
+    duration: std::time::Duration,
+) -> Result<&'static str, String> {
+    let end = std::time::Instant::now() + duration;
+    let mut first = true;
+    while std::time::Instant::now() < end {
+        let mut changes = window.pump(std::time::Duration::from_millis(1));
+        if first {
+            // The window already exists when the loop starts.
+            if let Some(native) = crate::window::native_window() {
+                let (w, h) = native.size();
+                changes.insert(
+                    0,
+                    crate::window::WindowChange::Created {
+                        width: w,
+                        height: h,
+                    },
+                );
+            }
+            first = false;
+        }
+        for change in changes {
+            if change == crate::window::WindowChange::CloseRequested {
+                return Ok("the window was closed");
+            }
+            window_changed(handle, change)?;
+        }
+        stubs::set_phase("the main looper".to_owned());
+        // SAFETY: NULL out pointers are allowed.
+        unsafe {
+            crate::looper::ALooper_pollOnce(
+                15,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+        }
+        stubs::set_phase(String::new());
+    }
+    Ok("time is up")
+}
+
 /// Runs this (main) thread's looper for `duration`, as Android's main
 /// thread does between events. Returns how many callbacks ran.
 pub fn run_main_loop(duration: std::time::Duration) -> usize {

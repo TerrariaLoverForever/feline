@@ -70,6 +70,7 @@ reviewed before the first release. Not legal advice.
 | Rust standard library | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [serde_json](https://github.com/serde-rs/json) 1 (+ `serde`, `indexmap` for key order) | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [ureq](https://github.com/algesten/ureq) 3 with `rustls` (+ `rustls`, `ring`, `webpki-roots`, `http` and small helpers) | MIT / Apache-2.0 / ISC / BSD-3-Clause / Zlib; `ring`: Apache-2.0 AND ISC; `webpki-roots`: CDLA-Permissive-2.0 (certificate data; keep its license text) | Compiled in. All compatible with GPL-3.0. Checked with `cargo metadata` |
+| [winit](https://github.com/rust-windowing/winit) 0.30 (runtime: the engine's window; also used by Slint in the launcher) | Apache-2.0 (its Wayland/X11 helpers: MIT / Apache-2.0) | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [miniz_oxide](https://github.com/Frommi/miniz_oxide) 0.9 (runtime only: unpacking deflated APK assets; + `adler2`) | MIT OR Zlib OR Apache-2.0 | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [libc](https://github.com/rust-lang/libc) 0.2 (runtime only: `dlopen`/`dlsym`) | MIT OR Apache-2.0 | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [rustix](https://github.com/bytecodealliance/rustix) 1.1 (runtime only: `mm`, `param`; + `linux-raw-sys`, `bitflags`) | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Compiled into `feline-runtime`. Compatible with GPL-3.0 |

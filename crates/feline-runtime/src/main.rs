@@ -187,14 +187,40 @@ fn run_init(data: &[u8]) -> ExitCode {
         let started = if std::env::var_os("FELINE_START").is_some() {
             eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
             let handle = feline_runtime::init::call_initialize_native_code(&elf, image)?;
+            // FELINE_WINDOW=1: open the window first (refused while a game
+            // runs, so it can't take focus from it).
+            let mut window = if std::env::var_os("FELINE_WINDOW").is_some() {
+                if let Some(running) = runtime_running() {
+                    return Err(format!(
+                        "not opening a window while {running} is running (it could take focus from your game)"
+                    ));
+                }
+                Some(feline_runtime::window::DesktopWindow::open()?)
+            } else {
+                None
+            };
             // Then what Android does next: start, resume, and the main loop.
-            eprintln!("feline-runtime: onStart, onResume, then 5 s of the main looper…");
+            eprintln!("feline-runtime: onStart, onResume, then the main loop…");
             feline_runtime::init::call_lifecycle("onStartNative", handle)?;
             feline_runtime::init::call_lifecycle("onResumeNative", handle)?;
-            let callbacks = feline_runtime::init::run_main_loop(std::time::Duration::from_secs(5));
+            let lifecycle = match window.as_mut() {
+                Some(window) => {
+                    let why = feline_runtime::init::run_window_loop(
+                        window,
+                        handle,
+                        std::time::Duration::from_secs(15),
+                    )?;
+                    format!("window open 15 s with the engine ({why})")
+                }
+                None => {
+                    let callbacks =
+                        feline_runtime::init::run_main_loop(std::time::Duration::from_secs(5));
+                    format!("main looper ran 5 s, {callbacks} callbacks")
+                }
+            };
             format!(
                 "initializeNativeCode returned handle {handle:#x}\n\
-                 Lifecycle       onStart, onResume; main looper ran 5 s, {callbacks} callbacks\n"
+                 Lifecycle       onStart, onResume; {lifecycle}\n"
             )
         } else {
             String::new()
@@ -228,4 +254,23 @@ fn run_init(data: &[u8]) -> ExitCode {
             feline_runtime::init::exit_now(1)
         }
     }
+}
+
+/// The name of a running Roblox runtime (Sober, Cordial, Stud), if any:
+/// test windows aren't opened then, so they can't take focus from a game.
+fn runtime_running() -> Option<String> {
+    const NAMES: &[&str] = &[
+        "sober",
+        "cordial",
+        "cordial-run",
+        "stud",
+        "stud-runtime-bi",
+        "stud-render-hos",
+    ];
+    let entries = std::fs::read_dir("/proc").ok()?;
+    entries.filter_map(Result::ok).find_map(|entry| {
+        let comm = std::fs::read_to_string(entry.path().join("comm")).ok()?;
+        let comm = comm.trim();
+        NAMES.contains(&comm).then(|| comm.to_owned())
+    })
 }

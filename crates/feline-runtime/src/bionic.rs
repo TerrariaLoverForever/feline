@@ -346,6 +346,9 @@ pub fn implementation(name: &str) -> Option<u64> {
     if let Some(address) = crate::assets::implementation(name) {
         return Some(address);
     }
+    if let Some(address) = crate::window::implementation(name) {
+        return Some(address);
+    }
     if crate::trace::enabled() {
         type KeyCreate = unsafe extern "C" fn(
             *mut libc::pthread_key_t,

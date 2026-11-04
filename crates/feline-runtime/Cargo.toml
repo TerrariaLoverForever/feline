@@ -22,4 +22,7 @@ rustix = { version = "1.1", default-features = false, features = ["std", "mm", "
 # `dlopen`/`dlsym`, to find the host's (glibc, GLES) functions the engine's
 # imports are forwarded to. MIT OR Apache-2.0.
 libc = "0.2"
+# The window the engine draws into (Wayland, X11 fallback), the same
+# windowing library the launcher uses through Slint. Apache-2.0.
+winit = "0.30"
 miniz_oxide = "0.9.1"

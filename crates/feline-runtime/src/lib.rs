@@ -35,3 +35,4 @@ pub mod packed;
 pub mod stubs;
 pub mod sysconf_table;
 pub mod trace;
+pub mod window;
