@@ -10,7 +10,7 @@ will only be claimed once it has been, with reproducible evidence.
 |---|---|---|
 | **M1: Launcher** | GUI with Feline branding, system info, diagnostics, runtime detection, Play button and game-link input, settings, Discord status, basic monitoring. Can start external runtimes the user chooses. | **Done** |
 | **M2: Runtime research** | A written survey, no runtime code: which Android components the Roblox client needs; license choice; architecture. See [runtime/M2-RESEARCH.md](runtime/M2-RESEARCH.md). | Done (component license checks happen per component, when one is chosen) |
-| **M3: Runtime prototype** | Load the engine library and resolve its imports, without graphics. Success means "loaded and imports resolved", not "a game runs". | In progress (steps 1–3 of 5 done: reading the engine, mapping and relocating it, binding all 576 imports) |
+| **M3: Runtime prototype** | Load the engine library and resolve its imports, without graphics. Success means "loaded and imports resolved", not "a game runs". | In progress (steps 1–4 of 5 done: reading, mapping and relocating the engine, binding all 576 imports, running all 3,678 constructors) |
 | **M4: Runtime bring-up** | Windowing, Vulkan/GLES surfaces, input, audio. | Planned |
 | **M5: Compatibility** | Sign-in and joining an experience. | Not started |
 

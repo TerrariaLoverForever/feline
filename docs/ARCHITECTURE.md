@@ -79,7 +79,10 @@ permission in [`LICENSE.exception`](../LICENSE.exception). See
 | `load` | `feline-runtime --load <lib>`: maps the segments, applies all relocations (imports from `imports`), sets permissions (W^X, RELRO) |
 | `imports` | Binds each import: forwarded to glibc / OpenGL ES (only where the binary interface matches), Feline-owned variables, stubs, or weak-empty. `--imports` lists them |
 | `host` | Opens `libc.so.6`, `libm.so.6`, `libGLESv2.so.2` by name and looks symbols up there |
-| `stubs` | Generated x86-64 stubs: each names the missing function and stops the process |
+| `stubs` | Generated x86-64 stubs: each names the missing function (and the calling thread) and stops the process |
+| `bionic` | Feline's implementations where bionic and glibc differ: `sysconf` (generated `_SC_*` table in `sysconf_table`), bionic-only fortify functions |
+| `dl` | `dlopen`/`dlsym`/`dlclose`/`dlerror`/`dladdr`/`dl_iterate_phdr` for the engine |
+| `init` | `feline-runtime --init <lib>`: runs the constructors, reports crashes by constructor number, exits without running exit handlers |
 
 `unsafe` is allowed only in `load`, `host` and `stubs`, each use with a
 `SAFETY` comment.

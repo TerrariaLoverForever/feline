@@ -240,6 +240,140 @@ const FORWARD_LIBC: &[&str] = &[
     "getentropy",
 ];
 
+/// POSIX threads. On x86-64, bionic's and glibc's objects have the same
+/// sizes (mutex 40, cond 48, rwlock 56, attr 56 bytes; glibc's 4-byte
+/// mutexattr/condattr fit bionic's 8), their default static initializers are
+/// all zeros in both, and the engine only touches them through these
+/// functions; with all of them forwarded, glibc alone interprets the bytes.
+/// glibc's sizes were measured on the target system (gcc, `sizeof`).
+///
+/// Not here: `sem_*` (`sem_t` is 16 bytes in bionic, 32 in glibc),
+/// `pthread_sigmask` (8- vs 128-byte `sigset_t`). Known gap: bionic's
+/// non-default static initializers (recursive / error-checking mutexes)
+/// aren't zero, and glibc wouldn't recognise them.
+const FORWARD_PTHREAD: &[&str] = &[
+    "pthread_attr_destroy",
+    "pthread_attr_getstack",
+    "pthread_attr_init",
+    "pthread_attr_setdetachstate",
+    "pthread_attr_setschedparam",
+    "pthread_attr_setstacksize",
+    "pthread_cond_broadcast",
+    "pthread_cond_destroy",
+    "pthread_cond_init",
+    "pthread_cond_signal",
+    "pthread_cond_timedwait",
+    "pthread_cond_wait",
+    "pthread_condattr_destroy",
+    "pthread_condattr_init",
+    "pthread_condattr_setclock",
+    "pthread_create",
+    "pthread_detach",
+    "pthread_equal",
+    "pthread_exit",
+    "pthread_getattr_np",
+    "pthread_getschedparam",
+    "pthread_getspecific",
+    "pthread_join",
+    "pthread_key_create",
+    "pthread_key_delete",
+    "pthread_mutex_destroy",
+    "pthread_mutex_init",
+    "pthread_mutex_lock",
+    "pthread_mutex_trylock",
+    "pthread_mutex_unlock",
+    "pthread_mutexattr_destroy",
+    "pthread_mutexattr_init",
+    "pthread_mutexattr_settype",
+    "pthread_once",
+    "pthread_rwlock_destroy",
+    "pthread_rwlock_init",
+    "pthread_rwlock_rdlock",
+    "pthread_rwlock_unlock",
+    "pthread_rwlock_wrlock",
+    "pthread_self",
+    "pthread_setname_np",
+    "pthread_setschedparam",
+    "pthread_setspecific",
+];
+
+/// stdio. `FILE` is opaque to Android apps (the NDK exposes no fields, and
+/// even `getc` is imported as a function), so with every stdio function
+/// forwarded, a `FILE*` is simply a glibc `FILE*`, and `stdin`/`stdout`/
+/// `stderr` are glibc's own (see [`FORWARD_DATA`]). `SEEK_*`, `_IOFBF`/
+/// `_IOLBF`/`_IONBF` and `EOF` have the same values, and `off_t` is 64-bit
+/// in both. `__fread_chk` has the same arguments in glibc; bionic's
+/// `__fwrite_chk` doesn't exist there and is Feline's (`bionic.rs`).
+const FORWARD_STDIO: &[&str] = &[
+    "fopen",
+    "fdopen",
+    "fclose",
+    "fflush",
+    "fread",
+    "fwrite",
+    "fseek",
+    "fseeko",
+    "ftell",
+    "ftello",
+    "fgets",
+    "fputs",
+    "fputc",
+    "getc",
+    "ungetc",
+    "feof",
+    "ferror",
+    "clearerr",
+    "fileno",
+    "setvbuf",
+    "fprintf",
+    "vfprintf",
+    "fscanf",
+    "getwc",
+    "ungetwc",
+    "fputwc",
+    "__fread_chk",
+];
+
+/// Locales and multibyte text. `locale_t` is an opaque pointer in both
+/// libraries, so with every function that takes one forwarded, glibc alone
+/// interprets it. The `LC_*` category numbers, their `_MASK` bits and
+/// `LC_GLOBAL_LOCALE` (-1) are the same in bionic and glibc. `mbstate_t` is
+/// 8 bytes in both on 64-bit, zero-initialized and opaque. `struct lconv`
+/// uses the POSIX field order in both. Not here: `strtold_l` (128- vs 80-bit
+/// `long double`).
+const FORWARD_LOCALE: &[&str] = &[
+    "newlocale",
+    "freelocale",
+    "uselocale",
+    "localeconv",
+    "iswalpha_l",
+    "iswblank_l",
+    "iswcntrl_l",
+    "iswdigit_l",
+    "iswlower_l",
+    "iswprint_l",
+    "iswpunct_l",
+    "iswspace_l",
+    "iswupper_l",
+    "iswxdigit_l",
+    "towlower_l",
+    "towupper_l",
+    "strcoll_l",
+    "strxfrm_l",
+    "strftime_l",
+    "strtoll_l",
+    "strtoull_l",
+    "wcscoll_l",
+    "wcsxfrm_l",
+    "mbrlen",
+    "mbrtowc",
+    "mbsnrtowcs",
+    "mbsrtowcs",
+    "mbtowc",
+    "wcrtomb",
+    "wcsnrtombs",
+];
+
 /// bionic functions forwarded to a glibc function with another name.
 const ALIASES: &[(&str, &str)] = &[
     // bionic's errno accessor; glibc's returns the same thread's errno, so
@@ -322,6 +456,10 @@ const FORWARD_LIBM: &[&str] = &[
 
 /// Imported variables forwarded to glibc's variable of the same name and type.
 const FORWARD_DATA: &[&str] = &[
+    // `FILE*` variables: glibc's own, since every stdio function is glibc's.
+    "stdin",
+    "stdout",
+    "stderr",
     "environ",
     "optarg",
     "optind",
@@ -355,6 +493,7 @@ pub enum Kind {
     ForwardGles,
     ForwardData,
     FelineData,
+    Feline,
     Stub,
     WeakEmpty,
 }
@@ -367,6 +506,7 @@ impl Kind {
             Self::ForwardGles => "forwarded to the system's OpenGL ES",
             Self::ForwardData => "glibc variables",
             Self::FelineData => "Feline-owned variables",
+            Self::Feline => "implemented by Feline (translated from bionic to glibc)",
             Self::Stub => "stubs (Feline implements them in later steps)",
             Self::WeakEmpty => "optional, left empty",
         }
@@ -427,7 +567,12 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
         let name = symbol.name.as_str();
         let found =
             |kind: Kind, address: Option<u64>| address.map(|address| Binding { kind, address });
-        let binding = if let Some((_, value)) = MEDIA_KEYS.iter().find(|(k, _)| *k == name) {
+        let binding = if let Some(address) = crate::bionic::implementation(name) {
+            Some(Binding {
+                kind: Kind::Feline,
+                address,
+            })
+        } else if let Some((_, value)) = MEDIA_KEYS.iter().find(|(k, _)| *k == name) {
             let text = CString::new(*value).expect("no NUL in key names");
             let pointer = text.as_ptr() as u64;
             strings.push(text);
@@ -445,16 +590,9 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
                 kind: Kind::FelineData,
                 address: owned(&mut data, 1, guard),
             })
-        } else if matches!(name, "stdin" | "stdout" | "stderr") {
-            // `FILE*` variables. bionic's FILE differs from glibc's, so these
-            // point at placeholder FILE objects until Feline's stdio exists.
-            let file = owned(&mut data, 32, 0);
-            Some(Binding {
-                kind: Kind::FelineData,
-                address: owned(&mut data, 1, file),
-            })
         } else if name == "__sF" {
-            // bionic's legacy array of three FILE objects.
+            // bionic's legacy array of three FILE objects. glibc has no such
+            // array, so this is a placeholder until something uses it.
             Some(Binding {
                 kind: Kind::FelineData,
                 address: owned(&mut data, 3 * 32, 0),
@@ -463,7 +601,11 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
             found(Kind::ForwardData, host.libc(name))
         } else if FORWARD_LIBM.contains(&name) {
             found(Kind::ForwardLibm, host.libc(name))
-        } else if FORWARD_LIBC.contains(&name) {
+        } else if FORWARD_LIBC.contains(&name)
+            || FORWARD_PTHREAD.contains(&name)
+            || FORWARD_LOCALE.contains(&name)
+            || FORWARD_STDIO.contains(&name)
+        {
             found(Kind::ForwardLibc, host.libc(name))
         } else if let Some((_, glibc)) = ALIASES.iter().find(|(b, _)| *b == name) {
             found(Kind::ForwardLibc, host.libc(glibc))
@@ -516,6 +658,9 @@ mod tests {
     fn tables_have_no_duplicates_or_overlaps() {
         let mut all: Vec<&str> = FORWARD_LIBC
             .iter()
+            .chain(FORWARD_PTHREAD)
+            .chain(FORWARD_LOCALE)
+            .chain(FORWARD_STDIO)
             .chain(FORWARD_LIBM)
             .chain(FORWARD_DATA)
             .copied()
@@ -539,19 +684,23 @@ mod tests {
             "sysconf",
             "fmal",
             "powl",
-            "pthread_mutex_lock",
+            "sem_wait",
             "sem_init",
-            "fopen",
-            "fprintf",
+            "sem_destroy",
+            "tcsetattr",
             "__assert",
             "stat",
             "tcgetattr",
             "mallinfo",
-            "newlocale",
-            "mbrtowc",
+            "sem_post",
+            "strtold_l",
         ] {
             assert!(
-                !FORWARD_LIBC.contains(&name) && !FORWARD_LIBM.contains(&name),
+                !FORWARD_LIBC.contains(&name)
+                    && !FORWARD_LIBM.contains(&name)
+                    && !FORWARD_PTHREAD.contains(&name)
+                    && !FORWARD_LOCALE.contains(&name)
+                    && !FORWARD_STDIO.contains(&name),
                 "{name}"
             );
             assert!(!ALIASES.iter().any(|(b, _)| *b == name), "{name}");
@@ -574,6 +723,7 @@ mod tests {
             symbol("__errno", 1),
             symbol("AMEDIAFORMAT_KEY_MIME", 1),
             symbol("pthread_mutex_lock", 1),
+            symbol("sem_init", 1),
             symbol("ZSTD_trace_compress_begin", 2),
         ];
         let imports = bind(&symbols, &Host::open()).unwrap();
@@ -581,9 +731,10 @@ mod tests {
         assert_eq!(kind("strlen"), Kind::ForwardLibc);
         assert_eq!(kind("__errno"), Kind::ForwardLibc);
         assert_eq!(kind("AMEDIAFORMAT_KEY_MIME"), Kind::FelineData);
-        assert_eq!(kind("pthread_mutex_lock"), Kind::Stub);
+        assert_eq!(kind("pthread_mutex_lock"), Kind::ForwardLibc);
+        assert_eq!(kind("sem_init"), Kind::Stub);
         assert_eq!(kind("ZSTD_trace_compress_begin"), Kind::WeakEmpty);
-        assert_eq!(imports.bindings.len(), 5);
+        assert_eq!(imports.bindings.len(), 6);
         // The media key variable holds a pointer to the string "mime".
         let variable = imports.bindings["AMEDIAFORMAT_KEY_MIME"].address as *const *const u8;
         // SAFETY (test): the binding points at a live Feline-owned u64 that

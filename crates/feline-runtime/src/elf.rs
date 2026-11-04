@@ -30,6 +30,7 @@ pub const DT_RELASZ: i64 = 8;
 pub const DT_STRSZ: i64 = 10;
 pub const DT_SONAME: i64 = 14;
 pub const DT_JMPREL: i64 = 23;
+pub const DT_INIT_ARRAY: i64 = 25;
 pub const DT_INIT_ARRAYSZ: i64 = 27;
 pub const DT_GNU_HASH: i64 = 0x6fff_fef5;
 pub const DT_VERSYM: i64 = 0x6fff_fff0;
@@ -191,6 +192,8 @@ pub struct Elf<'a> {
     data: &'a [u8],
     pub segments: Vec<Segment>,
     dynamic: Vec<(i64, u64)>,
+    /// File offset of the program headers (`e_phoff`).
+    pub phoff: u64,
 }
 
 impl<'a> Elf<'a> {
@@ -240,6 +243,7 @@ impl<'a> Elf<'a> {
             data,
             segments,
             dynamic: Vec::new(),
+            phoff,
         };
         let dyn_seg = elf
             .segments
@@ -287,6 +291,16 @@ impl<'a> Elf<'a> {
             ));
         }
         bytes(self.data, segment.offset, segment.filesz, "segment data")
+    }
+
+    /// The library address of the program headers once loaded (they sit in
+    /// a loadable segment), as `dl_iterate_phdr` reports them.
+    pub fn phdr_vaddr(&self) -> Option<u64> {
+        self.segments
+            .iter()
+            .filter(|s| s.kind == PT_LOAD)
+            .find(|s| self.phoff >= s.offset && self.phoff < s.offset + s.filesz)
+            .map(|s| self.phoff - s.offset + s.vaddr)
     }
 
     /// True if `addr` lies in the memory of some loadable segment (including

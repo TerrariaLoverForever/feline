@@ -37,6 +37,15 @@ const STUB_SIZE: usize = 32;
 /// `Stubs` sets, e.g. in tests, get distinct indexes).
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// What the runtime is doing (e.g. "constructor 12 of 3678"), for the message.
+static PHASE: Mutex<String> = Mutex::new(String::new());
+
+pub fn set_phase(phase: String) {
+    if let Ok(mut current) = PHASE.lock() {
+        *current = phase;
+    }
+}
+
 /// Tests can make a stub return 0 instead of stopping the process.
 static RETURN_INSTEAD_OF_ABORT: AtomicBool = AtomicBool::new(false);
 static LAST_CALLED: Mutex<Option<String>> = Mutex::new(None);
@@ -54,8 +63,19 @@ extern "C" fn stub_called(index: u32) -> u64 {
         }
         return 0;
     }
+    let phase = PHASE.lock().map(|p| p.clone()).unwrap_or_default();
+    // Which thread: the engine names its threads (pthread_setname_np).
+    let thread = std::fs::read_to_string("/proc/thread-self/comm")
+        .map(|t| t.trim().to_owned())
+        .unwrap_or_default();
+    let during = match (phase.is_empty(), thread.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => format!(" (thread \"{thread}\")"),
+        (false, true) => format!(" (while the main thread runs {phase})"),
+        (false, false) => format!(" (thread \"{thread}\", while the main thread runs {phase})"),
+    };
     eprintln!(
-        "feline-runtime: the engine called `{name}`, which Feline doesn't provide yet. Stopping."
+        "feline-runtime: the engine called `{name}`{during}, which Feline doesn't provide yet. Stopping."
     );
     std::process::abort();
 }

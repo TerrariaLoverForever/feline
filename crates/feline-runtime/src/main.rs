@@ -14,14 +14,19 @@ feline-runtime: Feline's own runtime for Roblox's Android client (in development
 Usage: feline-runtime --check <libroblox.so>
        feline-runtime --load <libroblox.so>
        feline-runtime --imports <libroblox.so>
+       feline-runtime --init <libroblox.so>
 
 --check  reads the engine library and reports what loading it would involve.
 --load   also puts it into memory: binds every import (forwarded to glibc
          or OpenGL ES, Feline data, or a stub), applies all relocations and
          sets memory permissions. Then it frees the memory and exits.
 --imports  like --load, and lists every import by how it was bound.
+--init   like --load, then RUNS the engine's constructors (its start-up code),
+         the first of its code to run. Stops at the first function Feline
+         doesn't provide yet, and names it. Run it without network access,
+         e.g. `unshare -rn feline-runtime --init …`.
 
-Neither runs any of the library's code. Roblox's code isn't disassembled;
+Only --init runs any of the library's code. Roblox's code isn't disassembled;
 only its ELF interface is read.
 ";
 
@@ -70,6 +75,18 @@ fn main() -> ExitCode {
                 }
             }
         }
+        [flag, path] if flag == "--init" => {
+            let data = match std::fs::read(path) {
+                Ok(data) => data,
+                Err(e) => {
+                    eprintln!("feline-runtime: couldn't read {path}: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            // The image and imports must stay alive while the engine's code
+            // may run, so this never returns normally.
+            run_init(&data)
+        }
         [flag] if flag == "-h" || flag == "--help" => {
             print!("{HELP}");
             ExitCode::SUCCESS
@@ -100,6 +117,7 @@ fn load_with_imports(data: &[u8], list: bool) -> Result<String, String> {
         Kind::ForwardGles,
         Kind::ForwardData,
         Kind::FelineData,
+        Kind::Feline,
         Kind::Stub,
         Kind::WeakEmpty,
     ];
@@ -128,4 +146,39 @@ fn load_with_imports(data: &[u8], list: bool) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+/// `--init`: load, bind, run the constructors, report, and exit without
+/// running the engine's exit handlers.
+fn run_init(data: &[u8]) -> ExitCode {
+    let result = (|| -> Result<String, String> {
+        let elf = feline_runtime::elf::Elf::parse(data).map_err(|e| e.to_string())?;
+        let symbols = elf.symbols().map_err(|e| e.to_string())?;
+        let host = feline_runtime::host::Host::open();
+        // Leaked on purpose: the engine's code and its pointers into Feline's
+        // data must stay valid until the process ends.
+        let imports = Box::leak(Box::new(feline_runtime::imports::bind(&symbols, &host)?));
+        let (image, _) =
+            feline_runtime::load::load(&elf, Some(imports)).map_err(|e| e.to_string())?;
+        let image = Box::leak(Box::new(image));
+        eprintln!(
+            "feline-runtime: running {} constructors…",
+            elf.init_array_len()
+        );
+        let ran = feline_runtime::init::run_constructors(&elf, image)?;
+        Ok(format!(
+            "Constructors    all {ran} ran and returned\n\
+             Next            JNI_OnLoad (M3 step 5)\n"
+        ))
+    })();
+    match result {
+        Ok(text) => {
+            print!("{text}");
+            feline_runtime::init::exit_now(0)
+        }
+        Err(e) => {
+            eprintln!("feline-runtime: {e}");
+            feline_runtime::init::exit_now(1)
+        }
+    }
 }

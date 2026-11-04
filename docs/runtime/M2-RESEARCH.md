@@ -197,6 +197,18 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
   80-bit `long double`, `_SC_*` numbers, `__assert` argument order, …) are
   stubs until Feline implements them. Each stub is generated code that
   names the missing function and stops (`--imports` lists them all).
+- Step 4 done: `feline-runtime --init` runs the engine's constructors (its
+  first code to run), without network (`unshare -rn`). **All 3,678 ran and
+  returned.** Getting there, in the order the engine needed them: pthreads
+  (forwarded: same object sizes and all-zero initializers on x86-64,
+  measured with gcc), locales and multibyte text (opaque `locale_t`, same
+  `LC_*` numbers, 8-byte `mbstate_t` in both), `sysconf` (Feline's: 145 of
+  146 `_SC_*` numbers differ, table generated from AOSP's header and
+  glibc's), stdio (opaque `FILE*`, so all forwarded, `stdin`/`stdout`/
+  `stderr` are glibc's), bionic's own fortify functions (Feline's), and the
+  `dl*` family (Feline's: `dl_iterate_phdr` reports the engine for C++
+  unwinding; `dlopen` logs requests, so far only `libc.so`). The engine
+  starts its own threads during the constructors.
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

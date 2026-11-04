@@ -13,13 +13,18 @@
 //! through its ELF interface, never disassembled.
 
 // `unsafe` is denied everywhere (workspace lint) except where a module opts
-// in explicitly: `load` (mapping the engine), `host` (dlopen/dlsym) and
-// `stubs` (generated stub code). Each use says why it's sound.
+// in explicitly: `load` (mapping the engine), `host` (dlopen/dlsym),
+// `stubs` (generated stub code), `init` (running the engine's constructors)
+// `bionic` and `dl` (Feline's implementations calling glibc). Each use says why it's sound.
 
+pub mod bionic;
 pub mod check;
+pub mod dl;
 pub mod elf;
 pub mod host;
 pub mod imports;
+pub mod init;
 pub mod load;
 pub mod packed;
 pub mod stubs;
+pub mod sysconf_table;

@@ -98,6 +98,9 @@ impl Activity {
     }
 }
 
+/// How Feline names itself in the status (image hover texts, menus line).
+pub const FELINE_LABEL: &str = "🐱 Feline 🐾";
+
 /// Discord limits text fields to 128 characters (and wants at least 2).
 fn clamp(text: &str) -> String {
     let mut out: String = text.chars().take(128).collect();
@@ -120,8 +123,8 @@ pub fn build_activity(
         Activity::Menu if !options.in_menus => None,
         Activity::Menu => Some(json!({
             "type": 0,
-            "details": "In the Roblox menus",
-            "assets": { "large_image": "feline", "large_text": "Feline" },
+            "details": "In the Roblox menus 🐾",
+            "assets": { "large_image": "feline", "large_text": FELINE_LABEL },
         })),
         Activity::Game {
             place_id,
@@ -143,7 +146,8 @@ pub fn build_activity(
                 }
                 None => {
                     value["details"] = Value::from("Joining a game");
-                    value["assets"] = json!({ "large_image": "feline", "large_text": "Feline" });
+                    value["assets"] =
+                        json!({ "large_image": "feline", "large_text": FELINE_LABEL });
                 }
             }
             // Small corner image: the player's avatar if allowed, else Feline.
@@ -158,7 +162,7 @@ pub fn build_activity(
                 }
                 _ if game.is_some() => {
                     value["assets"]["small_image"] = Value::from("feline");
-                    value["assets"]["small_text"] = Value::from("Feline");
+                    value["assets"]["small_text"] = Value::from(FELINE_LABEL);
                 }
                 _ => {}
             }
@@ -407,7 +411,7 @@ mod tests {
         assert_eq!(v["state"], "by Fisching");
         assert_eq!(v["assets"]["large_image"], "https://tr.rbxcdn.com/icon.png");
         assert_eq!(
-            v["assets"]["small_text"], "Feline",
+            v["assets"]["small_text"], FELINE_LABEL,
             "no username by default"
         );
         assert_eq!(v["timestamps"]["start"], 1_793_780_695);
