@@ -224,6 +224,14 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
   `FELINE_SKIP_ONLOAD=1`; crash reports give the engine offset, the faulting
   address and the engine return addresses on the stack (on an alternate
   signal stack, so stack overflows are reported too).
+  `FELINE_CALL_TRACE=1` routes every imported function through a recording
+  trampoline (no stack, only r10/r11) and logs thread-specific-data keys.
+  Result: in the loop the engine calls **only `pthread_getspecific`**, and
+  those lookups **succeed** (key 1, a valid pointer; just 30 NULL results in
+  total, all early). So the recursion isn't a failed per-thread lookup; its
+  stop condition depends on something no import call shows. Observing the
+  interface alone doesn't explain it further (open question, see the
+  options in the M3 status).
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

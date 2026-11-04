@@ -631,6 +631,30 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
         bindings.insert(name.to_owned(), binding);
     }
 
+    // FELINE_CALL_TRACE=1: route every imported *function* that goes to a
+    // real implementation through a recording trampoline (see trace.rs).
+    // Variables are never wrapped.
+    if crate::trace::enabled() {
+        let functions: Vec<(String, u64)> = imports
+            .iter()
+            .filter(|s| s.kind == 2)
+            .filter_map(|s| {
+                let b = bindings.get(&s.name)?;
+                matches!(
+                    b.kind,
+                    Kind::ForwardLibc | Kind::ForwardLibm | Kind::ForwardGles | Kind::Feline
+                )
+                .then(|| (s.name.clone(), b.address))
+            })
+            .collect();
+        let tracer = Box::leak(Box::new(crate::trace::Tracer::new(functions)?));
+        for (name, trampoline) in &tracer.entries {
+            if let Some(binding) = bindings.get_mut(name) {
+                binding.address = *trampoline;
+            }
+        }
+    }
+
     let stubs = Stubs::new(stub_names)?;
     for (name, address) in stubs.addresses() {
         bindings.insert(

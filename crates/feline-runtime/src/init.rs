@@ -152,6 +152,7 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, context
             }
         }
         write_bytes(b"\n");
+        crate::trace::report();
         let len = SNAPSHOT_LEN.load(Ordering::Acquire);
         let snapshot = SNAPSHOT.load(Ordering::Acquire);
         if !snapshot.is_null() && len > 0 {

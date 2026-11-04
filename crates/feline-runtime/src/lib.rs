@@ -31,3 +31,4 @@ pub mod load;
 pub mod packed;
 pub mod stubs;
 pub mod sysconf_table;
+pub mod trace;

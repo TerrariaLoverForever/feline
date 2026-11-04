@@ -217,10 +217,98 @@ pub extern "C" fn signal(signum: c_int, handler: libc::sighandler_t) -> libc::si
     unsafe { libc::signal(signum, handler) }
 }
 
+// ---------------------------------------------------------------------------
+// Thread-specific data, traced (FELINE_CALL_TRACE=1 only): forwarded to
+// glibc unchanged, but the first calls log their keys and values.
+// ---------------------------------------------------------------------------
+
+fn tls_trace(line: std::fmt::Arguments) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    if CALLS.fetch_add(1, Ordering::Relaxed) < 60 {
+        eprintln!("feline-runtime: tls: {line}");
+    }
+}
+
+/// # Safety
+/// As for `pthread_key_create`.
+pub unsafe extern "C" fn traced_key_create(
+    key: *mut libc::pthread_key_t,
+    destructor: Option<unsafe extern "C" fn(*mut c_void)>,
+) -> c_int {
+    // SAFETY: the engine's own call, passed through.
+    let result = unsafe { libc::pthread_key_create(key, destructor) };
+    // SAFETY: on success, glibc wrote the key.
+    let created = if result == 0 {
+        (unsafe { *key }) as i64
+    } else {
+        -1
+    };
+    tls_trace(format_args!(
+        "pthread_key_create -> {result}, key {created}"
+    ));
+    result
+}
+
+/// The last `pthread_getspecific` key and result, and per key how often it
+/// returned NULL, for crash reports (atomics only: signal-safe to read).
+pub static LAST_GET_KEY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+pub static LAST_GET_VALUE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub static NULL_GETS: [std::sync::atomic::AtomicU64; 64] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 64];
+
+pub extern "C" fn traced_getspecific(key: libc::pthread_key_t) -> *mut c_void {
+    use std::sync::atomic::Ordering;
+    // SAFETY: the engine's own call, passed through.
+    let value = unsafe { libc::pthread_getspecific(key) };
+    LAST_GET_KEY.store(key, Ordering::Relaxed);
+    LAST_GET_VALUE.store(value as usize, Ordering::Relaxed);
+    if value.is_null() && (key as usize) < NULL_GETS.len() {
+        NULL_GETS[key as usize].fetch_add(1, Ordering::Relaxed);
+    }
+    tls_trace(format_args!("pthread_getspecific(key {key}) -> {value:p}"));
+    value
+}
+
+/// # Safety
+/// As for `pthread_setspecific`.
+pub unsafe extern "C" fn traced_setspecific(
+    key: libc::pthread_key_t,
+    value: *const c_void,
+) -> c_int {
+    // SAFETY: the engine's own call, passed through.
+    let result = unsafe { libc::pthread_setspecific(key, value) };
+    tls_trace(format_args!(
+        "pthread_setspecific(key {key}, {value:p}) -> {result}"
+    ));
+    result
+}
+
 /// The address of Feline's implementation of `name`, if there is one.
 pub fn implementation(name: &str) -> Option<u64> {
     if let Some(address) = crate::dl::implementation(name) {
         return Some(address);
+    }
+    if crate::trace::enabled() {
+        type KeyCreate = unsafe extern "C" fn(
+            *mut libc::pthread_key_t,
+            Option<unsafe extern "C" fn(*mut c_void)>,
+        ) -> c_int;
+        let traced = match name {
+            "pthread_key_create" => Some(traced_key_create as KeyCreate as usize),
+            "pthread_getspecific" => Some(
+                traced_getspecific as extern "C" fn(libc::pthread_key_t) -> *mut c_void as usize,
+            ),
+            "pthread_setspecific" => Some(
+                traced_setspecific
+                    as unsafe extern "C" fn(libc::pthread_key_t, *const c_void) -> c_int
+                    as usize,
+            ),
+            _ => None,
+        };
+        if let Some(address) = traced {
+            return Some(address as u64);
+        }
     }
     type FdOp = unsafe extern "C" fn(c_int, *mut u64, usize);
     let address = match name {
