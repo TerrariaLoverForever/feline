@@ -3,22 +3,30 @@
 //! Call tracing (`FELINE_CALL_TRACE=1`): which imported functions the engine
 //! calls, in order, so a crash report can show what it was doing.
 //!
-//! Each traced import gets a 64-byte trampoline in front of its real
-//! function. It records the import's number in a ring of the last 4,096
-//! calls and jumps on. It uses no stack and only `r10`/`r11`, which the
-//! x86-64 calling convention leaves free at every call, so the call itself
-//! is unchanged:
+//! Each traced import gets a trampoline (78 bytes, in 96-byte slots) in
+//! front of its real function. It records the import's number and the
+//! calling thread in a ring of the last 4,096 calls and jumps on. It uses no
+//! stack and only `r10`/`r11`, which the x86-64 calling convention leaves
+//! free at every call, so the call itself is unchanged:
 //!
 //! ```text
 //! 49 bb <&POSITION:u64>     movabs r11, &POSITION
 //! 41 ba 01 00 00 00         mov    r10d, 1
 //! f0 4d 0f c1 13            lock xadd [r11], r10      ; r10 = this call's number
 //! 41 81 e2 ff 0f 00 00      and    r10d, 4095         ; wrap around the ring
+//! 49 c1 e2 03               shl    r10, 3             ; 8-byte entries
 //! 49 bb <&RING:u64>         movabs r11, &RING
-//! 43 c7 04 93 <id:u32>      mov    dword [r11 + r10*4], id
+//! 4d 01 da                  add    r10, r11           ; r10 = &RING[i]
+//! 64 4c 8b 1c 25 00000000   mov    r11, fs:[0]        ; the thread's control block
+//! 45 89 5a 04               mov    [r10 + 4], r11d    ; its low half: the thread tag
+//! 41 c7 02 <id:u32>         mov    dword [r10], id
 //! 49 bb <target:u64>        movabs r11, target
 //! 41 ff e3                  jmp    r11
 //! ```
+//!
+//! `fs:[0]` is the thread control block's own address on x86-64 Linux
+//! (glibc's `tcbhead_t`), different for every thread; the crash report uses
+//! it to show the crashing thread's own last calls.
 //!
 //! Only interface activity is recorded: which imports are called, never
 //! anything about the engine's own code.
@@ -32,15 +40,16 @@
 
 use std::ffi::c_void;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustix::mm::{self, MapFlags, MprotectFlags, ProtFlags};
 
 const RING_SIZE: usize = 4096;
-const STUB_SIZE: usize = 64;
+const STUB_SIZE: usize = 96;
 
 static POSITION: AtomicU64 = AtomicU64::new(0);
-static RING: [AtomicU32; RING_SIZE] = [const { AtomicU32::new(0) }; RING_SIZE];
+/// Low half: the import's id; high half: the calling thread's tag.
+static RING: [AtomicU64; RING_SIZE] = [const { AtomicU64::new(0) }; RING_SIZE];
 /// Names by trace id (id 0 = unused). Set once; read-only afterwards, so the
 /// signal handler can read it without locks.
 static NAMES: OnceLock<Vec<String>> = OnceLock::new();
@@ -57,7 +66,7 @@ pub struct Tracer {
     pub entries: Vec<(String, u64)>,
 }
 
-/// The 64 bytes of one trampoline.
+/// One trampoline (padded to its slot).
 fn encode(id: u32, target: u64) -> [u8; STUB_SIZE] {
     let mut code = [0xccu8; STUB_SIZE]; // int3 padding
     let mut at = 0;
@@ -71,9 +80,13 @@ fn encode(id: u32, target: u64) -> [u8; STUB_SIZE] {
     put(&[0xf0, 0x4d, 0x0f, 0xc1, 0x13]);
     put(&[0x41, 0x81, 0xe2]);
     put(&(RING_SIZE as u32 - 1).to_le_bytes());
+    put(&[0x49, 0xc1, 0xe2, 0x03]);
     put(&[0x49, 0xbb]);
     put(&(RING.as_ptr() as u64).to_le_bytes());
-    put(&[0x43, 0xc7, 0x04, 0x93]);
+    put(&[0x4d, 0x01, 0xda]);
+    put(&[0x64, 0x4c, 0x8b, 0x1c, 0x25, 0, 0, 0, 0]);
+    put(&[0x45, 0x89, 0x5a, 0x04]);
+    put(&[0x41, 0xc7, 0x02]);
     put(&id.to_le_bytes());
     put(&[0x49, 0xbb]);
     put(&target.to_le_bytes());
@@ -124,6 +137,23 @@ impl Tracer {
     }
 }
 
+/// This thread's tag, as the trampolines record it (the low half of the
+/// thread control block's address, `fs:[0]`).
+fn thread_tag() -> u32 {
+    let tcb: u64;
+    // SAFETY: reading fs:[0], the control block's self pointer, which every
+    // thread created by glibc (all of them here) has.
+    unsafe {
+        std::arch::asm!("mov {}, fs:[0]", out(reg) tcb, options(nostack, readonly, preserves_flags))
+    };
+    tcb as u32
+}
+
+fn entry(i: usize) -> (usize, u32) {
+    let value = RING[i % RING_SIZE].load(Ordering::Relaxed);
+    ((value & 0xffff_ffff) as usize, (value >> 32) as u32)
+}
+
 fn write_bytes(bytes: &[u8]) {
     // SAFETY: write(2) is async-signal-safe; the buffer is valid.
     unsafe {
@@ -162,7 +192,7 @@ pub fn report() {
     // Most frequent among the last calls.
     let mut counts = [0u32; 1024];
     for i in 0..recorded {
-        let id = RING[(total as usize - 1 - i) % RING_SIZE].load(Ordering::Relaxed) as usize;
+        let (id, _) = entry(total as usize - 1 - i);
         if id < counts.len() {
             counts[id] += 1;
         }
@@ -205,9 +235,37 @@ pub fn report() {
     }
     write_bytes(b"\nfeline-runtime: last calls, oldest first:");
     for i in (0..recorded.min(40)).rev() {
-        let id = RING[(total as usize - 1 - i) % RING_SIZE].load(Ordering::Relaxed) as usize;
+        let (id, _) = entry(total as usize - 1 - i);
         write_bytes(b" ");
         write_bytes(names.get(id).map_or(b"?".as_slice(), |s| s.as_bytes()));
+    }
+    // The calling (crashing) thread's own last calls, repeats folded
+    // ("memcpy x12"), so the report reaches further back.
+    let mine = thread_tag();
+    let mut own = [(0usize, 0u32); 40];
+    let mut found = 0;
+    for i in 0..recorded {
+        let (id, tag) = entry(total as usize - 1 - i);
+        if tag != mine {
+            continue;
+        }
+        if found > 0 && own[found - 1].0 == id {
+            own[found - 1].1 += 1;
+        } else if found < own.len() {
+            own[found] = (id, 1);
+            found += 1;
+        } else {
+            break;
+        }
+    }
+    write_bytes(b"\nfeline-runtime: this thread's last calls, oldest first:");
+    for &(id, n) in own[..found].iter().rev() {
+        write_bytes(b" ");
+        write_bytes(names.get(id).map_or(b"?".as_slice(), |s| s.as_bytes()));
+        if n > 1 {
+            write_bytes(b" x");
+            write_number(u64::from(n));
+        }
     }
     write_bytes(b"\n");
 }
@@ -238,15 +296,9 @@ mod tests {
         assert_eq!(call(0, 0, 0, 0, 0, 7), 700_000);
         let after = POSITION.load(Ordering::Relaxed);
         assert_eq!(after - before, 2);
-        // Both calls recorded id 2 ("other").
-        assert_eq!(
-            RING[(after as usize - 1) % RING_SIZE].load(Ordering::Relaxed),
-            2
-        );
-        assert_eq!(
-            RING[(after as usize - 2) % RING_SIZE].load(Ordering::Relaxed),
-            2
-        );
+        // Both calls recorded id 2 ("other"), tagged with this thread.
+        assert_eq!(entry(after as usize - 1), (2, thread_tag()));
+        assert_eq!(entry(after as usize - 2), (2, thread_tag()));
         assert_eq!(NAMES.get().unwrap()[2], "other");
     }
 }

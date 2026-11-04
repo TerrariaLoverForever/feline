@@ -320,7 +320,10 @@ const FORWARD_PTHREAD: &[&str] = &[
 /// stdio. `FILE` is opaque to Android apps (the NDK exposes no fields, and
 /// even `getc` is imported as a function), so with every stdio function
 /// forwarded, a `FILE*` is simply a glibc `FILE*`, and `stdin`/`stdout`/
-/// `stderr` are glibc's own (see [`FORWARD_DATA`]). `SEEK_*`, `_IOFBF`/
+/// `stderr` are glibc's own (see [`FORWARD_DATA`]). The functions taking a
+/// `FILE*` are Feline's thin wrappers (stdio.rs), which also accept bionic's
+/// legacy `&__sF[n]` streams; this list covers the rest and documents why
+/// forwarding is right. `SEEK_*`, `_IOFBF`/
 /// `_IOLBF`/`_IONBF` and `EOF` have the same values, and `off_t` is 64-bit
 /// in both. `__fread_chk` has the same arguments in glibc; bionic's
 /// `__fwrite_chk` doesn't exist there and is Feline's (`bionic.rs`).
@@ -615,11 +618,16 @@ pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
                 address: owned(&mut data, 1, guard),
             })
         } else if name == "__sF" {
-            // bionic's legacy array of three FILE objects. glibc has no such
-            // array, so this is a placeholder until something uses it.
+            // bionic's legacy array of three FILE objects (152 bytes each).
+            // glibc has no such array: Feline owns it, and stdio.rs turns
+            // pointers into it into glibc's stdin/stdout/stderr.
+            let mut block = vec![0u64; 3 * crate::stdio::BIONIC_FILE_SIZE / 8].into_boxed_slice();
+            crate::stdio::set_sf(&mut block);
+            let address = block.as_ptr() as u64;
+            data.push(block); // owned as long as the bindings, never moved
             Some(Binding {
                 kind: Kind::FelineData,
-                address: owned(&mut data, 3 * 32, 0),
+                address,
             })
         } else if FORWARD_DATA.contains(&name) {
             found(Kind::ForwardData, host.libc(name))

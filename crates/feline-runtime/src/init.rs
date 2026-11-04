@@ -129,6 +129,39 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, context
             libc::write(2, part.as_ptr().cast(), part.len());
         }
     }
+    // Outside the engine: which host library (and nearest exported symbol).
+    // dladdr isn't formally async-signal-safe, but the process is ending
+    // and it only reads the loader's tables.
+    if !(bias != 0 && rip >= bias && rip < bias + len) {
+        // SAFETY: a zeroed Dl_info for dladdr to fill; the strings it
+        // returns belong to the loader and stay valid.
+        unsafe {
+            let mut info: libc::Dl_info = std::mem::zeroed();
+            if libc::dladdr(rip as *const c_void, &mut info) != 0 {
+                write_bytes(b"feline-runtime: in ");
+                if !info.dli_fname.is_null() {
+                    write_bytes(std::ffi::CStr::from_ptr(info.dli_fname).to_bytes());
+                }
+                if !info.dli_sname.is_null() {
+                    let mut h = [0u8; 18];
+                    write_bytes(b" (");
+                    write_bytes(std::ffi::CStr::from_ptr(info.dli_sname).to_bytes());
+                    write_bytes(b" + ");
+                    write_bytes(format_hex(rip - info.dli_saddr as usize, &mut h));
+                    write_bytes(b")");
+                }
+                write_bytes(b"\n");
+            }
+        }
+    }
+    // The crashing thread's name: prctl is a plain system call, safe here.
+    let mut thread = [0u8; 17];
+    // SAFETY: PR_GET_NAME writes at most 16 bytes plus NUL into `thread`.
+    unsafe { libc::prctl(libc::PR_GET_NAME, thread.as_mut_ptr()) };
+    let end = thread.iter().position(|&b| b == 0).unwrap_or(16);
+    write_bytes(b"feline-runtime: on thread \"");
+    write_bytes(&thread[..end]);
+    write_bytes(b"\"\n");
     // A rough backtrace: values on the stack just above the stack pointer
     // that point into the engine are mostly return addresses. Runaway
     // recursion shows up as the same few repeating.
@@ -667,52 +700,96 @@ pub fn run_window_loop(
     Ok("time is up")
 }
 
-/// Calls one of the engine's exported static natives of
-/// `com.roblox.engine.jni.NativeGLInterface`, as Roblox's Java code would:
-/// `Java_…_<method>(JNIEnv*, jclass, args…)`. Argument and return types come
-/// from the method's DEX declaration (see dex.rs); all are passed and
-/// returned as machine words here (objects, ints and longs are all word
-/// sized in registers on x86-64).
-pub fn call_gl_native(
+/// The exported symbol of a JNI native (the JNI specification's short
+/// name): `Java_` + class and method with `/` as `_`, `_` as `_1` and `$`
+/// as `_00024`.
+pub fn jni_symbol(class: &str, method: &str) -> String {
+    let mangle = |text: &str| {
+        let mut out = String::new();
+        for c in text.chars() {
+            match c {
+                '/' => out.push('_'),
+                '_' => out.push_str("_1"),
+                '$' => out.push_str("_00024"),
+                c => out.push(c),
+            }
+        }
+        out
+    };
+    format!("Java_{}_{}", mangle(class), mangle(method))
+}
+
+/// Calls one of the engine's exported natives as Roblox's Java code would:
+/// `Java_<class>_<method>(JNIEnv*, jclass or this, args…)`. For an instance
+/// method, `this` is a new (empty) instance of the class. Argument and
+/// return types come from the method's DEX declaration (see dex.rs); all
+/// are passed and returned as machine words here (objects, ints and longs
+/// are all word sized in registers on x86-64).
+pub fn call_java_native(
     elf: &Elf,
     image: &Image,
+    class: &str,
     method: &str,
+    is_static: bool,
     args: &[usize],
 ) -> Result<usize, String> {
-    let name = format!("Java_com_roblox_engine_jni_NativeGLInterface_{method}");
+    let name = jni_symbol(class, method);
     let symbols = elf.symbols().map_err(|e| e.to_string())?;
     let entry = symbols
         .iter()
         .find(|s| s.defined && s.name == name)
         .ok_or_else(|| format!("no {name}"))?;
     let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")? as usize;
-    let class = crate::jni::new_class("com/roblox/engine/jni/NativeGLInterface") as usize;
+    let receiver = if is_static {
+        crate::jni::new_class(class)
+    } else {
+        crate::jni::new_instance(class)
+    } as usize;
     let address = (image.bias() + entry.value) as usize;
-    eprintln!("feline-runtime: calling NativeGLInterface.{method}");
-    stubs::set_phase(format!("NativeGLInterface.{method}"));
+    let short = class.rsplit('/').next().unwrap_or(class);
+    eprintln!("feline-runtime: calling {short}.{method}");
+    stubs::set_phase(format!("{short}.{method}"));
     // SAFETY: the engine's exported JNI function; the arguments follow its
     // DEX declaration (all word-sized).
     let result = unsafe {
         match args {
             [] => std::mem::transmute::<usize, extern "C" fn(usize, usize) -> usize>(address)(
-                env, class,
+                env, receiver,
             ),
             [a] => std::mem::transmute::<usize, extern "C" fn(usize, usize, usize) -> usize>(
                 address,
-            )(env, class, *a),
+            )(env, receiver, *a),
             [a, b] => std::mem::transmute::<
                 usize,
                 extern "C" fn(usize, usize, usize, usize) -> usize,
-            >(address)(env, class, *a, *b),
+            >(address)(env, receiver, *a, *b),
             [a, b, c] => std::mem::transmute::<
                 usize,
                 extern "C" fn(usize, usize, usize, usize, usize) -> usize,
-            >(address)(env, class, *a, *b, *c),
+            >(address)(env, receiver, *a, *b, *c),
             _ => return Err("too many arguments".into()),
         }
     };
     stubs::set_phase(String::new());
     Ok(result)
+}
+
+/// [`call_java_native`] for `com.roblox.engine.jni.NativeGLInterface`'s
+/// static natives.
+pub fn call_gl_native(
+    elf: &Elf,
+    image: &Image,
+    method: &str,
+    args: &[usize],
+) -> Result<usize, String> {
+    call_java_native(
+        elf,
+        image,
+        "com/roblox/engine/jni/NativeGLInterface",
+        method,
+        true,
+        args,
+    )
 }
 
 /// Runs this (main) thread's looper for `duration`, as Android's main
@@ -757,6 +834,18 @@ pub fn exit_now(code: i32) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jni_symbols_are_mangled() {
+        assert_eq!(
+            jni_symbol(
+                "com/roblox/engine/jni/NativeGLInterface",
+                "nativeGameGlobalInit"
+            ),
+            "Java_com_roblox_engine_jni_NativeGLInterface_nativeGameGlobalInit"
+        );
+        assert_eq!(jni_symbol("a/B$C", "do_it"), "Java_a_B_00024C_do_1it");
+    }
 
     #[test]
     fn signal_safe_number_formatting() {

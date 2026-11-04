@@ -213,6 +213,45 @@ fn run_init(data: &[u8]) -> ExitCode {
         }
         eprintln!("feline-runtime: calling JNI_OnLoad…");
         let version = feline_runtime::init::call_jni_onload(&elf, image)?;
+        // The engine's cache folder (Android's Context.getCacheDir()), set
+        // right after loading the engine, before the activity starts. With
+        // Roblox's real client settings the engine requires it ("Path does
+        // not exist"). Known issue: with it, the engine's HttpClient thread
+        // crashes in about half the runs (docs/runtime/M3-RESULT.md).
+        if std::env::var_os("FELINE_APP").is_some() {
+            let cache = runtime_data()?.join("cache");
+            std::fs::create_dir_all(&cache)
+                .map_err(|e| format!("couldn't create {}: {e}", cache.display()))?;
+            feline_runtime::init::call_java_native(
+                &elf,
+                image,
+                "com/roblox/engine/jni/NativeSettingsInterface",
+                "nativeSetCacheDirectory",
+                true,
+                &[feline_runtime::jni::new_string(&cache.to_string_lossy()) as usize],
+            )?;
+            // FELINE_STORAGE_INIT=1 (experiment): LocalStorageManager's
+            // initStorageManagerNativeV3(AssetManager, String, String), here
+            // with the files and cache folders (the parameter names aren't
+            // in the declaration; a guess, which didn't change the
+            // HttpClient crash rate).
+            if std::env::var_os("FELINE_STORAGE_INIT").is_some() {
+                let files = runtime_data()?.join("files");
+                feline_runtime::init::call_java_native(
+                    &elf,
+                    image,
+                    "com/roblox/client/LocalStorageManager",
+                    "initStorageManagerNativeV3",
+                    false,
+                    &[
+                        feline_runtime::jni::new_instance("android/content/res/AssetManager")
+                            as usize,
+                        feline_runtime::jni::new_string(&files.to_string_lossy()) as usize,
+                        feline_runtime::jni::new_string(&cache.to_string_lossy()) as usize,
+                    ],
+                )?;
+            }
+        }
         // FELINE_START=1: continue like Android's GameActivity does (M4).
         let started = if std::env::var_os("FELINE_START").is_some() {
             eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
@@ -307,8 +346,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                 // empty `applicationSettings` object (returns 0; "" or "{}"
                 // return 1) and keeps its built-in defaults. Fetching Roblox's
                 // real settings comes later. FELINE_SETTINGS overrides it.
-                let settings = std::env::var("FELINE_SETTINGS")
-                    .unwrap_or_else(|_| r#"{"applicationSettings":{}}"#.to_owned());
+                let settings = client_settings(&data.join("feline/runtime"));
                 let first = new_string(&settings) as usize;
                 let r = call_gl_native(
                     &elf,
@@ -440,4 +478,45 @@ fn link_certificates(runtime: &std::path::Path, assets: &std::path::Path) -> Res
             target.display()
         )
     })
+}
+
+/// The client settings ("FastFlags") JSON for `nativeInitClientSettings`:
+/// `FELINE_SETTINGS` (the JSON itself), else the file `FELINE_SETTINGS_FILE`
+/// or `<runtime>/ClientSettings.json` (Roblox's published settings for the
+/// Android app, as the app downloads them), else an empty set, which the
+/// engine accepts and fills with its built-in defaults.
+fn client_settings(runtime: &std::path::Path) -> String {
+    if let Ok(json) = std::env::var("FELINE_SETTINGS") {
+        return json;
+    }
+    let file = std::env::var_os("FELINE_SETTINGS_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| runtime.join("ClientSettings.json"));
+    match std::fs::read_to_string(&file) {
+        Ok(json) => {
+            eprintln!(
+                "feline-runtime: client settings from {} ({} KB)",
+                file.display(),
+                json.len() / 1024
+            );
+            json
+        }
+        Err(_) => {
+            eprintln!("feline-runtime: no client settings file, using the engine's defaults");
+            r#"{"applicationSettings":{}}"#.to_owned()
+        }
+    }
+}
+
+/// Feline's runtime data folder: `$XDG_DATA_HOME/feline/runtime` (or
+/// `~/.local/share/feline/runtime`).
+fn runtime_data() -> Result<std::path::PathBuf, String> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        })
+        .ok_or("no home folder")?;
+    Ok(base.join("feline/runtime"))
 }

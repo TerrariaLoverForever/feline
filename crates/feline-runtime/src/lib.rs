@@ -39,6 +39,7 @@ pub mod net;
 pub mod packed;
 pub mod sem;
 pub mod sig;
+pub mod stdio;
 pub mod stubs;
 pub mod sysconf_table;
 pub mod trace;

@@ -66,7 +66,7 @@ pub unsafe extern "C" fn __fwrite_chk(
     }
     // SAFETY: the caller's buffer holds size * count bytes (checked), and
     // `stream` is a glibc FILE* (all stdio is forwarded to glibc).
-    unsafe { libc::fwrite(buf, size, count, stream) }
+    unsafe { libc::fwrite(buf, size, count, crate::stdio::stream(stream)) }
 }
 
 /// `size_t __strlen_chk(const char* s, size_t s_len)`.
@@ -359,6 +359,9 @@ pub fn implementation(name: &str) -> Option<u64> {
         return Some(address);
     }
     if let Some(address) = crate::files::implementation(name) {
+        return Some(address);
+    }
+    if let Some(address) = crate::stdio::implementation(name) {
         return Some(address);
     }
     if let Some(address) = crate::sem::implementation(name) {

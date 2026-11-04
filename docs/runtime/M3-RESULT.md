@@ -183,5 +183,32 @@ network fail to load, as expected offline.
   variables, like curl does: if they point to a proxy that isn't running,
   every request fails.
 
-**Next:** confirm input and downloads in the window, audio (FMOD's Java
-`AudioDevice`), a release-build performance check.
+### Client settings, storage, and the login screen
+
+- Without Roblox's client settings the app picks its *native* (Java) login
+  screen (`APP_READY (LoginNative)`), which doesn't exist here: a white
+  screen with a loading bar. Roblox's published settings for the Android
+  app (`clientsettingscdn.roblox.com/v2/settings/application/AndroidApp`,
+  as the app downloads them) enable the Lua login (`FFlagEnableLuaLoginRevamp8`,
+  `FIntLuaAppLoginRollout = 100`). The runtime reads them from
+  `<runtime>/ClientSettings.json` (or `FELINE_SETTINGS_FILE`); with them
+  the app reaches `APP_READY (Landing)`, the engine-drawn landing page.
+- With those settings the engine needs its cache folder:
+  `NativeSettingsInterface.nativeSetCacheDirectory`, called right after
+  `JNI_OnLoad`. TLS certificates: the APK's `ssl/cacert.pem`, linked to
+  `files/exe/ssl` where the engine reads it.
+- bionic's legacy `__sF` standard streams (`&__sF[1]` = stdout, 152-byte
+  `FILE`s) are mapped to glibc's streams in `stdio.rs`.
+- **Known issue:** with the cache folder set, the engine's `HttpClient`
+  thread crashes in about half the runs (SIGSEGV at one engine location,
+  reading small multiples of 0x2000, i.e. an uninitialised table). Its last
+  imported calls (thread-tagged call trace) are `recvfrom`, `inet_pton`,
+  `realpath`, then copies. Not yet explained; calling
+  `LocalStorageManager.initStorageManagerNativeV3(files, cache)`
+  (`FELINE_STORAGE_INIT=1`, a guess) doesn't change the rate.
+- Diagnostics added: crash reports name the crashing thread and, outside
+  the engine, the host library and symbol; the call trace records the
+  calling thread and shows the crashing thread's own last calls.
+
+**Next:** the HttpClient crash, the launcher downloading the client
+settings, confirming input in the window, login, audio.
