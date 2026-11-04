@@ -259,6 +259,63 @@ extern "C" fn get_object_ref_type(_env: Handle, _object: Handle) -> JInt {
     1
 }
 
+/// A class handle for `name` (one per name, so the same class compares
+/// equal with IsSameObject).
+fn class_handle(name: &str) -> Handle {
+    let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(i) = world
+        .objects
+        .iter()
+        .position(|o| matches!(o, Object::Class(n) if n == name))
+    {
+        return handle(i);
+    }
+    world.objects.push(Object::Class(name.to_owned()));
+    handle(world.objects.len() - 1)
+}
+
+/// `GetObjectClass`: Feline's objects are classes or strings.
+extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
+    trace("GetObjectClass");
+    let name = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        match index(object).and_then(|i| world.objects.get(i)) {
+            Some(Object::Class(_)) => "java/lang/Class",
+            Some(Object::Str(_)) => "java/lang/String",
+            None => "java/lang/Object",
+        }
+    };
+    log(format!("GetObjectClass {object:p} -> {name}"));
+    class_handle(name)
+}
+
+/// `GetSuperclass`: every Feline class extends java/lang/Object, which has
+/// no superclass.
+extern "C" fn get_superclass(_env: Handle, class: Handle) -> Handle {
+    trace("GetSuperclass");
+    let name = class_name(class);
+    if name == "java/lang/Object" {
+        return std::ptr::null_mut();
+    }
+    log(format!("GetSuperclass {name} -> java/lang/Object"));
+    class_handle("java/lang/Object")
+}
+
+/// `IsInstanceOf`: true when the object's class (see GetObjectClass) is the
+/// class asked about or java/lang/Object; logged, since it's a guess about
+/// a Java world that doesn't exist.
+extern "C" fn is_instance_of(env: Handle, object: Handle, class: Handle) -> JBoolean {
+    trace("IsInstanceOf");
+    if object.is_null() {
+        return 1; // JNI: NULL is an instance of every class
+    }
+    let actual = class_name(get_object_class(env, object));
+    let wanted = class_name(class);
+    let result = actual == wanted || wanted == "java/lang/Object";
+    log(format!("IsInstanceOf {actual} of {wanted} -> {result}"));
+    JBoolean::from(result)
+}
+
 unsafe extern "C" fn new_string_utf(_env: Handle, s: *const c_char) -> Handle {
     trace("NewStringUTF");
     if s.is_null() {
@@ -310,17 +367,470 @@ unsafe extern "C" fn get_java_vm(_env: Handle, vm: *mut Handle) -> JInt {
 // JavaVM functions
 // ---------------------------------------------------------------------------
 
-/// GetEnv, AttachCurrentThread(AsDaemon): every thread gets the same env;
-/// Feline's functions keep no per-thread state.
-unsafe extern "C" fn vm_get_env(_vm: Handle, env: *mut Handle, _arg: *mut c_void) -> JInt {
-    trace("JavaVM::GetEnv/AttachCurrentThread");
+const JNI_EDETACHED: JInt = -2;
+
+/// The thread that first asked for the JavaVM (the one that loads the
+/// engine), which counts as attached from the start, like Android's main
+/// thread. Other threads are attached once they call AttachCurrentThread.
+static MAIN_THREAD: OnceLock<std::thread::ThreadId> = OnceLock::new();
+
+thread_local! {
+    /// This thread's own JNIEnv: a pointer to the shared function table, at
+    /// a different address on every thread, as a real VM's are. None until
+    /// the thread is attached.
+    static THREAD_ENV: std::cell::Cell<Option<Handle>> = const { std::cell::Cell::new(None) };
+}
+
+fn this_thread_env(attach: bool) -> Option<Handle> {
+    THREAD_ENV.with(|cell| {
+        if cell.get().is_none()
+            && (attach || MAIN_THREAD.get() == Some(&std::thread::current().id()))
+        {
+            let table = tables().table;
+            let env: &'static mut *const usize = Box::leak(Box::new(table));
+            cell.set(Some((env as *mut *const usize).cast()));
+        }
+        cell.get()
+    })
+}
+
+/// `GetEnv`: this thread's env, or JNI_EDETACHED if it isn't attached.
+unsafe extern "C" fn vm_get_env(_vm: Handle, env: *mut Handle, _version: *mut c_void) -> JInt {
+    trace("JavaVM::GetEnv");
+    let current = this_thread_env(false);
     // SAFETY: the engine passes a writable JNIEnv* slot.
-    unsafe { *env = tables().env };
+    unsafe { *env = current.unwrap_or(std::ptr::null_mut()) };
+    if current.is_some() {
+        JNI_OK
+    } else {
+        JNI_EDETACHED
+    }
+}
+
+/// `AttachCurrentThread(AsDaemon)`: attaches (if needed) and returns the env.
+unsafe extern "C" fn vm_attach(_vm: Handle, env: *mut Handle, _args: *mut c_void) -> JInt {
+    trace("JavaVM::AttachCurrentThread");
+    // SAFETY: the engine passes a writable JNIEnv* slot.
+    unsafe { *env = this_thread_env(true).unwrap_or(std::ptr::null_mut()) };
     JNI_OK
 }
+
 extern "C" fn vm_detach(_vm: Handle) -> JInt {
     trace("JavaVM::DetachCurrentThread");
+    THREAD_ENV.with(|cell| cell.set(None));
     JNI_OK
+}
+
+// ---------------------------------------------------------------------------
+// Calling Java methods: Call<Type>Method, CallStatic…, CallNonvirtual…, each
+// with `...`, `va_list` (V) and array (A) arguments. No Java code exists,
+// so each call gets a placeholder answer from the method's signature
+// (0/false, an empty String, null), logged the first few times per method.
+// ---------------------------------------------------------------------------
+
+/// The return type at the end of a JNI signature, e.g. `J` in `()J`.
+fn return_type(signature: &str) -> &str {
+    signature.rsplit_once(')').map_or("V", |(_, r)| r)
+}
+
+/// Logs a placeholder answer (first 3 calls per method) and returns the
+/// method's return type.
+fn answer(method: Handle, kind: &str, value: &str) -> String {
+    use std::collections::HashMap;
+    static SEEN: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
+    let (description, ret) = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        match index(method).and_then(|i| world.members.get(i)) {
+            Some((class, name, sig, is_static)) => (
+                format!(
+                    "{}{class}.{name} {sig}",
+                    if *is_static { "static " } else { "" }
+                ),
+                return_type(sig).to_owned(),
+            ),
+            None => (format!("<unknown method {method:p}>"), "V".to_owned()),
+        }
+    };
+    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    let count = seen
+        .get_or_insert_with(HashMap::new)
+        .entry(method as usize)
+        .or_insert(0);
+    *count += 1;
+    if *count <= 3 {
+        log(format!(
+            "{kind} {description} -> {value} (placeholder; no Java code runs)"
+        ));
+    }
+    ret
+}
+
+/// The placeholder for an object-returning method: an empty String for
+/// `Ljava/lang/String;`, otherwise null.
+fn object_answer(method: Handle, kind: &str) -> Handle {
+    let ret = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        index(method)
+            .and_then(|i| world.members.get(i))
+            .map(|(_, _, sig, _)| return_type(sig).to_owned())
+            .unwrap_or_default()
+    };
+    if ret == "Ljava/lang/String;" {
+        answer(method, kind, "\"\"");
+        add_object(Object::Str(CString::default()))
+    } else {
+        answer(method, kind, "null");
+        std::ptr::null_mut()
+    }
+}
+
+/// One family: `$v` (…), `$vv` (va_list) and `$va` (jvalue array) for an
+/// instance (`obj`), static (`class`) or non-virtual (`obj, class`) call.
+macro_rules! calls {
+    ($kind:ident, $ty:ty, $zero:expr, $label:literal, $m:ident, $mv:ident, $ma:ident, $s:ident, $sv:ident, $sa:ident, $n:ident, $nv:ident, $na:ident) => {
+        unsafe extern "C" fn $m(_env: Handle, _obj: Handle, method: Handle, _args: ...) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $mv(_env: Handle, _obj: Handle, method: Handle, _args: *mut c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $ma(_env: Handle, _obj: Handle, method: Handle, _args: *const c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $s(_env: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $sv(_env: Handle, _class: Handle, method: Handle, _args: *mut c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $sa(_env: Handle, _class: Handle, method: Handle, _args: *const c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $n(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $nv(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: *mut c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+        unsafe extern "C" fn $na(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: *const c_void) -> $ty {
+            calls!(@body $kind, method, $label, $zero)
+        }
+    };
+    (@body object, $method:ident, $label:literal, $zero:expr) => {{
+        trace("Call…ObjectMethod");
+        object_answer($method, "call")
+    }};
+    (@body value, $method:ident, $label:literal, $zero:expr) => {{
+        trace(concat!("Call…", $label, "Method"));
+        answer($method, "call", &format!("{:?}", $zero));
+        $zero
+    }};
+}
+
+calls!(
+    object,
+    Handle,
+    std::ptr::null_mut::<c_void>(),
+    "Object",
+    call_obj,
+    call_obj_v,
+    call_obj_a,
+    call_s_obj,
+    call_s_obj_v,
+    call_s_obj_a,
+    call_n_obj,
+    call_n_obj_v,
+    call_n_obj_a
+);
+calls!(
+    value,
+    JBoolean,
+    0u8,
+    "Boolean",
+    call_bool,
+    call_bool_v,
+    call_bool_a,
+    call_s_bool,
+    call_s_bool_v,
+    call_s_bool_a,
+    call_n_bool,
+    call_n_bool_v,
+    call_n_bool_a
+);
+calls!(
+    value,
+    i8,
+    0i8,
+    "Byte",
+    call_byte,
+    call_byte_v,
+    call_byte_a,
+    call_s_byte,
+    call_s_byte_v,
+    call_s_byte_a,
+    call_n_byte,
+    call_n_byte_v,
+    call_n_byte_a
+);
+calls!(
+    value,
+    u16,
+    0u16,
+    "Char",
+    call_char,
+    call_char_v,
+    call_char_a,
+    call_s_char,
+    call_s_char_v,
+    call_s_char_a,
+    call_n_char,
+    call_n_char_v,
+    call_n_char_a
+);
+calls!(
+    value,
+    i16,
+    0i16,
+    "Short",
+    call_short,
+    call_short_v,
+    call_short_a,
+    call_s_short,
+    call_s_short_v,
+    call_s_short_a,
+    call_n_short,
+    call_n_short_v,
+    call_n_short_a
+);
+calls!(
+    value,
+    JInt,
+    0i32,
+    "Int",
+    call_int,
+    call_int_v,
+    call_int_a,
+    call_s_int,
+    call_s_int_v,
+    call_s_int_a,
+    call_n_int,
+    call_n_int_v,
+    call_n_int_a
+);
+calls!(
+    value,
+    i64,
+    0i64,
+    "Long",
+    call_long,
+    call_long_v,
+    call_long_a,
+    call_s_long,
+    call_s_long_v,
+    call_s_long_a,
+    call_n_long,
+    call_n_long_v,
+    call_n_long_a
+);
+calls!(
+    value,
+    f32,
+    0f32,
+    "Float",
+    call_float,
+    call_float_v,
+    call_float_a,
+    call_s_float,
+    call_s_float_v,
+    call_s_float_a,
+    call_n_float,
+    call_n_float_v,
+    call_n_float_a
+);
+calls!(
+    value,
+    f64,
+    0f64,
+    "Double",
+    call_double,
+    call_double_v,
+    call_double_a,
+    call_s_double,
+    call_s_double_v,
+    call_s_double_a,
+    call_n_double,
+    call_n_double_v,
+    call_n_double_a
+);
+calls!(
+    value,
+    (),
+    (),
+    "Void",
+    call_void,
+    call_void_v,
+    call_void_a,
+    call_s_void,
+    call_s_void_v,
+    call_s_void_a,
+    call_n_void,
+    call_n_void_v,
+    call_n_void_a
+);
+
+/// The address of a Call* function by its JNI name, e.g. `CallStaticLongMethodV`.
+fn call_function(name: &str) -> Option<usize> {
+    let rest = name
+        .strip_prefix("Call")?
+        .strip_suffix("Method")
+        .map(|r| (r, ""))
+        .or_else(|| {
+            name.strip_prefix("Call")?
+                .strip_suffix("MethodV")
+                .map(|r| (r, "V"))
+        })
+        .or_else(|| {
+            name.strip_prefix("Call")?
+                .strip_suffix("MethodA")
+                .map(|r| (r, "A"))
+        })?;
+    let (middle, style) = rest;
+    let (scope, ty) = if let Some(t) = middle.strip_prefix("Static") {
+        ("s", t)
+    } else if let Some(t) = middle.strip_prefix("Nonvirtual") {
+        ("n", t)
+    } else {
+        ("", middle)
+    };
+    macro_rules! pick {
+        ($i:ident, $iv:ident, $ia:ident, $s:ident, $sv:ident, $sa:ident, $n:ident, $nv:ident, $na:ident) => {
+            Some(match (scope, style) {
+                ("", "") => $i as *const () as usize,
+                ("", "V") => $iv as *const () as usize,
+                ("", "A") => $ia as *const () as usize,
+                ("s", "") => $s as *const () as usize,
+                ("s", "V") => $sv as *const () as usize,
+                ("s", "A") => $sa as *const () as usize,
+                ("n", "") => $n as *const () as usize,
+                ("n", "V") => $nv as *const () as usize,
+                ("n", "A") => $na as *const () as usize,
+                _ => return None,
+            })
+        };
+    }
+    match ty {
+        "Object" => pick!(
+            call_obj,
+            call_obj_v,
+            call_obj_a,
+            call_s_obj,
+            call_s_obj_v,
+            call_s_obj_a,
+            call_n_obj,
+            call_n_obj_v,
+            call_n_obj_a
+        ),
+        "Boolean" => pick!(
+            call_bool,
+            call_bool_v,
+            call_bool_a,
+            call_s_bool,
+            call_s_bool_v,
+            call_s_bool_a,
+            call_n_bool,
+            call_n_bool_v,
+            call_n_bool_a
+        ),
+        "Byte" => pick!(
+            call_byte,
+            call_byte_v,
+            call_byte_a,
+            call_s_byte,
+            call_s_byte_v,
+            call_s_byte_a,
+            call_n_byte,
+            call_n_byte_v,
+            call_n_byte_a
+        ),
+        "Char" => pick!(
+            call_char,
+            call_char_v,
+            call_char_a,
+            call_s_char,
+            call_s_char_v,
+            call_s_char_a,
+            call_n_char,
+            call_n_char_v,
+            call_n_char_a
+        ),
+        "Short" => pick!(
+            call_short,
+            call_short_v,
+            call_short_a,
+            call_s_short,
+            call_s_short_v,
+            call_s_short_a,
+            call_n_short,
+            call_n_short_v,
+            call_n_short_a
+        ),
+        "Int" => pick!(
+            call_int,
+            call_int_v,
+            call_int_a,
+            call_s_int,
+            call_s_int_v,
+            call_s_int_a,
+            call_n_int,
+            call_n_int_v,
+            call_n_int_a
+        ),
+        "Long" => pick!(
+            call_long,
+            call_long_v,
+            call_long_a,
+            call_s_long,
+            call_s_long_v,
+            call_s_long_a,
+            call_n_long,
+            call_n_long_v,
+            call_n_long_a
+        ),
+        "Float" => pick!(
+            call_float,
+            call_float_v,
+            call_float_a,
+            call_s_float,
+            call_s_float_v,
+            call_s_float_a,
+            call_n_float,
+            call_n_float_v,
+            call_n_float_a
+        ),
+        "Double" => pick!(
+            call_double,
+            call_double_v,
+            call_double_a,
+            call_s_double,
+            call_s_double_v,
+            call_s_double_a,
+            call_n_double,
+            call_n_double_v,
+            call_n_double_a
+        ),
+        "Void" => pick!(
+            call_void,
+            call_void_v,
+            call_void_a,
+            call_s_void,
+            call_s_void_v,
+            call_s_void_a,
+            call_n_void,
+            call_n_void_v,
+            call_n_void_a
+        ),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +839,9 @@ extern "C" fn vm_detach(_vm: Handle) -> JInt {
 
 /// Feline's implementation for a slot, by its JNI name.
 fn implemented(name: &str) -> Option<usize> {
+    if let Some(address) = call_function(name) {
+        return Some(address);
+    }
     type MemberId = unsafe extern "C" fn(Handle, Handle, *const c_char, *const c_char) -> Handle;
     type RefFn = extern "C" fn(Handle, Handle) -> Handle;
     type DelFn = extern "C" fn(Handle, Handle);
@@ -375,16 +888,21 @@ fn implemented(name: &str) -> Option<usize> {
         "GetStringUTFLength" => {
             get_string_utf_length as extern "C" fn(Handle, Handle) -> JInt as usize
         }
+        "GetObjectClass" => get_object_class as extern "C" fn(Handle, Handle) -> Handle as usize,
+        "GetSuperclass" => get_superclass as extern "C" fn(Handle, Handle) -> Handle as usize,
+        "IsInstanceOf" => {
+            is_instance_of as extern "C" fn(Handle, Handle, Handle) -> JBoolean as usize
+        }
         "GetJavaVM" => get_java_vm as unsafe extern "C" fn(Handle, *mut Handle) -> JInt as usize,
         _ => return None,
     })
 }
 
 struct Tables {
-    /// The `JNIEnv*` / `JavaVM*` values handed to the engine: each points to
-    /// a pointer to its function table.
-    env: Handle,
+    /// The `JavaVM*` handed to the engine: points to a pointer to its table.
     vm: Handle,
+    /// The JNIEnv function table itself (shared by every thread's env).
+    table: *const usize,
 }
 
 // The pointers point at leaked, never-freed memory, read-only after setup.
@@ -431,20 +949,19 @@ fn build() -> Result<Tables, String> {
         }
     }
     // JNIEnv* → (pointer to table) → table; likewise JavaVM*.
-    let env_ptr: &'static mut *const usize = Box::leak(Box::new(Box::leak(env_table).as_ptr()));
+    let table: *const usize = Box::leak(env_table).as_ptr();
     let vm_ptr: &'static mut *const usize = Box::leak(Box::new(Box::leak(vm_table).as_ptr()));
     Ok(Tables {
-        env: (env_ptr as *mut *const usize).cast(),
         vm: (vm_ptr as *mut *const usize).cast(),
+        table,
     })
 }
 
 fn vm_implemented(name: &str) -> Option<usize> {
     type GetEnv = unsafe extern "C" fn(Handle, *mut Handle, *mut c_void) -> JInt;
     Some(match name {
-        "GetEnv" | "AttachCurrentThread" | "AttachCurrentThreadAsDaemon" => {
-            vm_get_env as GetEnv as usize
-        }
+        "GetEnv" => vm_get_env as GetEnv as usize,
+        "AttachCurrentThread" | "AttachCurrentThreadAsDaemon" => vm_attach as GetEnv as usize,
         "DetachCurrentThread" => vm_detach as extern "C" fn(Handle) -> JInt as usize,
         _ => return None,
     })
@@ -458,6 +975,7 @@ fn tables() -> &'static Tables {
 
 /// The `JavaVM*` for the engine (builds the tables on first use).
 pub fn java_vm() -> Result<Handle, String> {
+    let _ = MAIN_THREAD.set(std::thread::current().id());
     if TABLES.get().is_none() {
         let built = build()?;
         let _ = TABLES.set(built);
@@ -524,5 +1042,13 @@ mod tests {
         assert_eq!(JNI_ENV[6], "FindClass");
         assert_eq!(JNI_ENV[215], "RegisterNatives");
         assert_eq!(JAVA_VM[6], "GetEnv");
+
+        // Every one of the 90 Call* slots is implemented.
+        let calls: Vec<&&str> = JNI_ENV.iter().filter(|n| n.starts_with("Call")).collect();
+        assert_eq!(calls.len(), 90);
+        assert!(
+            calls.iter().all(|n| call_function(n).is_some()),
+            "a Call* slot is missing"
+        );
     }
 }

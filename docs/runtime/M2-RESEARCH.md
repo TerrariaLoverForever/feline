@@ -230,8 +230,13 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
   those lookups **succeed** (key 1, a valid pointer; just 30 NULL results in
   total, all early). So the recursion isn't a failed per-thread lookup; its
   stop condition depends on something no import call shows. Observing the
-  interface alone doesn't explain it further (open question, see the
-  options in the M3 status).
+  interface alone doesn't explain it further.
+  **Solved:** the cause was Feline handing every thread the same `JNIEnv`.
+  With a `JNIEnv` per thread and Android-like attach state (`GetEnv` gives
+  `JNI_EDETACHED` until a thread attaches), the recursion disappeared; with
+  the `Call*Method` family (logged placeholders), `liblog`, and
+  `GetObjectClass`/`GetSuperclass`/`IsInstanceOf`, **`JNI_OnLoad` returns
+  `JNI_VERSION_1_6`**. M3 is complete: see `M3-RESULT.md`.
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

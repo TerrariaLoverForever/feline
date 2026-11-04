@@ -27,6 +27,7 @@ pub mod imports;
 pub mod init;
 pub mod jni;
 pub mod jni_names;
+pub mod liblog;
 pub mod load;
 pub mod packed;
 pub mod stubs;

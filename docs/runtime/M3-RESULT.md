@@ -1,0 +1,100 @@
+# M3 result: the engine loads and initialises on Feline's runtime
+
+Roblox Android client 2.742.0.1059 (x86-64), `feline-runtime --init`, no network.
+
+| Step | Result |
+|---|---|
+| 1. Read the engine | 572,759 relocations decoded and checked |
+| 2. Map and relocate | 128.4 MB mapped, W^X, RELRO read-only |
+| 3. Bind imports | 576/576 (forwarded, Feline's own, stubs) |
+| 4. Constructors | all 3,678 ran and returned |
+| 5. `JNI_OnLoad` | **returned `JNI_VERSION_1_6`** (reproducible) |
+
+## What fixed `JNI_OnLoad`
+
+Every thread got the same `JNIEnv`, and the engine's main thread then recursed forever (only `pthread_getspecific` in the loop, found with `FELINE_CALL_TRACE=1`). A real Java VM gives every thread its own `JNIEnv`, and threads that never attached get `JNI_EDETACHED` from `GetEnv`. With that behaviour the recursion disappeared. Found by observing the interface only; no engine code was disassembled.
+
+## The Java world the engine asked for (M4 to-do list)
+
+Placeholders today: no Java code runs, so method calls return 0 / false / an empty String / null by signature, and each is logged. The engine copes (it logs warnings such as "DeviceStaticParams is null").
+
+- `com/roblox/engine/jni/locale/NativeLocaleJavaInterface`
+  - static `getLocale` `()Ljava/lang/String;`
+  - static `getRobloxLocale` `()Ljava/lang/String;`
+  - static `getGameLocale` `()Ljava/lang/String;`
+- `com/roblox/engine/jni/user/NativeUserJavaInterface`
+  - static `getUserId` `()J`
+  - static `getIsUnder13` `()Z`
+  - static `getUsername` `()Ljava/lang/String;`
+  - static `getDisplayName` `()Ljava/lang/String;`
+  - static `getAlternateName` `()Ljava/lang/String;`
+  - static `getPlatformName` `()Ljava/lang/String;`
+  - static `getMembershipType` `()I`
+  - static `getHasRobloxSubscription` `()Z`
+  - static `getTheme` `()Ljava/lang/String;`
+- `com/roblox/universalapp/logging/LoggingProtocol`
+  - static `getProcessTimestamp` `()J`
+- `com/roblox/engine/jni/NativeGLJavaInterface`
+  - static `getDeviceStaticParams` `()Lcom/roblox/engine/jni/model/DeviceStaticParams;`
+  - static `showKeyboard` `(JZ[BLcom/roblox/engine/jni/model/NativeTextBoxInfo;)V`
+  - static `hideKeyboard` `()V`
+  - static `promptNativePurchase` `(JLjava/lang/String;Ljava/lang/String;)V`
+  - static `promptNativePurchase` `(JLjava/lang/String;)V`
+  - static `promptNativePurchaseWithPayload` `(JLjava/lang/String;Ljava/lang/String;)V`
+  - static `promptNativePurchaseWithPaymentSessionId` `(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V`
+  - static `promptNativePurchaseWithPaymentSessionId` `(JLjava/lang/String;Ljava/lang/String;)V`
+  - static `exitGameWithError` `(I)V`
+  - static `gameDidLeave` `()V`
+  - static `onAppShellReloadNeeded` `()V`
+  - static `listenToMotionEvents` `(Ljava/lang/String;)V`
+  - static `screenOrientationChanged` `(I)V`
+  - static `openNativeOverlay` `(Ljava/lang/String;Ljava/lang/String;)V`
+  - static `onDataModelNotificationCallback` `(Ljava/lang/String;Ljava/lang/String;)V`
+  - static `gameLoadedCallback` `(J)V`
+  - static `onLuaTextBoxChangedCallback` `(Ljava/lang/String;)V`
+  - static `onLuaTextBoxPropertyChangedCallback` `()V`
+  - static `onAppBridgeNotification` `(Ljava/lang/String;Ljava/lang/String;)V`
+  - static `onExtendedAnalyticsRecvCallback` `([BI)V`
+  - static `saveImageToAlbum` `(Ljava/lang/String;)V`
+  - static `onVrSessionStateUpdate` `(I)V`
+  - static `getWebViewUserAgent` `()V`
+  - static `getMobileAdvertisingId` `()V`
+- `com/snapchat/djinni/NativeObjectManager` (looked up only)
+- `java/lang/Class`
+  - `getClassLoader` `()Ljava/lang/ClassLoader;`
+  - `getClassLoader` `()Ljava/lang/ClassLoader;`
+- `java/lang/ClassLoader`
+  - `loadClass` `(Ljava/lang/String;)Ljava/lang/Class;`
+  - `findClass` `(Ljava/lang/String;)Ljava/lang/Class;`
+- `com/roblox/engine/jni/reporter/SessionReporterJavaInterface`
+  - static `getFilesDir` `()Ljava/lang/String;`
+  - static `setEventTrackingGoogleAnalytics` `(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J)V`
+  - static `getAppVersion` `()Ljava/lang/String;`
+  - static `getLastLoggedInUser` `()Ljava/lang/String;`
+  - static `getLastLoggedInUserId` `()Ljava/lang/String;`
+  - static `sendSessionReport` `(Ljava/lang/String;Ljava/lang/String;)V`
+- `com/roblox/audio/AppRtcDeviceWrapper` (looked up only)
+- `org/fmod/AudioDevice` (looked up only)
+- `org/fmod/MediaCodec` (looked up only)
+- `org/fmod/FMOD` (looked up only)
+- `com/roblox/engine/jni/video/MediaCodecInfoUtils`
+  - static `getVideoCodecs` `()[Lcom/roblox/engine/jni/video/VideoCodecCapability;`
+  - static `hevcHardwareEncodingSupported` `(III)Z`
+- `com/roblox/engine/jni/util/NetworkUtils`
+  - static `getPublicIPv4Addresseses` `()Ljava/lang/String;`
+- `com/roblox/engine/jni/memstorage/Connection` (looked up only)
+- `com/roblox/universalapp/messagebus/Connection` (looked up only)
+- `com/roblox/engine/jni/model/NativeTextBoxInfo` (looked up only)
+- `org/webrtc/voiceengine/WebRtcAudioManager` (looked up only)
+
+### Calls answered with placeholders
+
+- `static com/roblox/universalapp/logging/LoggingProtocol.getProcessTimestamp ()J -> 0`
+- `static com/roblox/engine/jni/NativeGLJavaInterface.getDeviceStaticParams ()Lcom/roblox/engine/jni/model/DeviceStaticParams; -> null`
+- `java/lang/Class.getClassLoader ()Ljava/lang/ClassLoader; -> null`
+- `java/lang/Class.getClassLoader ()Ljava/lang/ClassLoader; -> null`
+
+### The engine's own log lines (liblog)
+
+- `D/JNIMain: TelemetryProtocol::setProcessTimeOverride: 0`
+- `W/JNIMain: DeviceStaticParams is null.`
