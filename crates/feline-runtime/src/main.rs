@@ -248,6 +248,10 @@ fn run_init(data: &[u8]) -> ExitCode {
                     });
                 let assets =
                     feline_runtime::assets::unpack_assets(&data.join("feline/runtime/assets"))?;
+                // The engine reads its TLS certificate bundle from
+                // `./exe/ssl/cacert.pem` (relative to its data folder, where it
+                // runs); the APK ships it as `assets/ssl/`. Link it there.
+                link_certificates(&data.join("feline/runtime"), &assets)?;
                 // The APK's assets hold `content/` (the asset folder) next to
                 // `android/`, `fonts/`, …, which the engine finds relative to it.
                 let assets = assets.join("content");
@@ -413,5 +417,27 @@ fn runtime_running() -> Option<String> {
         let comm = std::fs::read_to_string(entry.path().join("comm")).ok()?;
         let comm = comm.trim();
         NAMES.contains(&comm).then(|| comm.to_owned())
+    })
+}
+
+/// Makes `<runtime>/files/exe/ssl` point to the unpacked `<assets>/ssl`.
+fn link_certificates(runtime: &std::path::Path, assets: &std::path::Path) -> Result<(), String> {
+    let exe = runtime.join("files/exe");
+    std::fs::create_dir_all(&exe).map_err(|e| format!("couldn't create {}: {e}", exe.display()))?;
+    let link = exe.join("ssl");
+    let target = assets.join("ssl");
+    if std::fs::read_link(&link).ok().as_deref() == Some(target.as_path()) {
+        return Ok(());
+    }
+    // Replace whatever is there (an old link); never a real folder's files.
+    if link.is_symlink() {
+        let _ = std::fs::remove_file(&link);
+    }
+    std::os::unix::fs::symlink(&target, &link).map_err(|e| {
+        format!(
+            "couldn't link {} to {}: {e}",
+            link.display(),
+            target.display()
+        )
     })
 }

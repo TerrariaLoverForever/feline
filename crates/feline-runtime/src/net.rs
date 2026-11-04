@@ -95,11 +95,11 @@ fn bionic_error(glibc: c_int) -> c_int {
         .map_or(4, |(b, _)| *b)
 }
 
-/// Logs the first lookups (host name and glibc's result), so it's visible
-/// what the engine connects to.
+/// With FELINE_NET_LOG, logs the first lookups (host name and glibc's
+/// result), so it's visible what the engine connects to.
 fn log_lookup(node: *const c_char, error: c_int) {
     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    if COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 30 {
+    if !traffic_log() || COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 30 {
         return;
     }
     let name = if node.is_null() {
@@ -282,9 +282,10 @@ pub unsafe extern "C" fn getnameinfo(
     bionic_error(error)
 }
 
-/// Logs the first sockets and connections (diagnostics for the network
-/// step); the calls themselves go to glibc unchanged (same arguments and
-/// kernel structures in both).
+/// With FELINE_NET_LOG=1, the first sockets, connections and transfers are
+/// logged (sizes and results, never contents); the calls themselves go to
+/// glibc unchanged (same arguments and kernel structures in both). Without
+/// it, these functions aren't used: the imports are forwarded directly.
 fn first_few(counter: &std::sync::atomic::AtomicU32) -> bool {
     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 30
 }
@@ -294,7 +295,7 @@ pub extern "C" fn socket(domain: c_int, kind: c_int, protocol: c_int) -> c_int {
     // SAFETY: the engine's own call, passed through.
     let fd = unsafe { libc::socket(domain, kind, protocol) };
     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    if first_few(&COUNT) {
+    if traffic_log() && first_few(&COUNT) {
         eprintln!(
             "feline-runtime: socket(family {domain}, type {:#x}) -> {fd}",
             kind
@@ -315,7 +316,7 @@ pub unsafe extern "C" fn connect(
     // SAFETY: the engine's own call, passed through.
     let result = unsafe { libc::connect(fd, address, length) };
     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    if first_few(&COUNT) {
+    if traffic_log() && first_few(&COUNT) {
         let errno = std::io::Error::last_os_error();
         // SAFETY: a socket address of `length` bytes, from the engine.
         let target = unsafe { describe(address, length) };
@@ -325,6 +326,94 @@ pub unsafe extern "C" fn connect(
             errno.to_string()
         };
         eprintln!("feline-runtime: connect({fd}, {target}) -> {outcome}");
+    }
+    result
+}
+
+/// Whether socket traffic is logged (FELINE_NET_LOG=1): the first calls'
+/// sizes and results, never their contents.
+fn traffic_log() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("FELINE_NET_LOG").is_some())
+}
+
+/// `ssize_t sendto(...)`, forwarded; sizes logged with FELINE_NET_LOG.
+///
+/// # Safety
+/// As C's.
+pub unsafe extern "C" fn sendto(
+    fd: c_int,
+    buf: *const std::ffi::c_void,
+    len: usize,
+    flags: c_int,
+    address: *const libc::sockaddr,
+    address_len: libc::socklen_t,
+) -> isize {
+    // SAFETY: the engine's own call, passed through.
+    let n = unsafe { libc::sendto(fd, buf, len, flags, address, address_len) };
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if traffic_log() && first_few(&COUNT) {
+        let errno = std::io::Error::last_os_error();
+        let outcome = if n < 0 {
+            errno.to_string()
+        } else {
+            format!("{n} bytes")
+        };
+        eprintln!("feline-runtime: send({fd}, {len} bytes) -> {outcome}");
+    }
+    n
+}
+
+/// `ssize_t recvfrom(...)`, forwarded; sizes logged with FELINE_NET_LOG.
+///
+/// # Safety
+/// As C's.
+pub unsafe extern "C" fn recvfrom(
+    fd: c_int,
+    buf: *mut std::ffi::c_void,
+    len: usize,
+    flags: c_int,
+    address: *mut libc::sockaddr,
+    address_len: *mut libc::socklen_t,
+) -> isize {
+    // SAFETY: the engine's own call, passed through.
+    let n = unsafe { libc::recvfrom(fd, buf, len, flags, address, address_len) };
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if traffic_log() && first_few(&COUNT) {
+        let errno = std::io::Error::last_os_error();
+        let outcome = if n < 0 {
+            errno.to_string()
+        } else {
+            format!("{n} bytes")
+        };
+        eprintln!("feline-runtime: recv({fd}, up to {len}) -> {outcome}");
+    }
+    n
+}
+
+/// `int getsockopt(...)`, forwarded; with FELINE_NET_LOG, a connection's
+/// result (`SO_ERROR`) is logged.
+///
+/// # Safety
+/// As C's.
+pub unsafe extern "C" fn getsockopt(
+    fd: c_int,
+    level: c_int,
+    name: c_int,
+    value: *mut std::ffi::c_void,
+    len: *mut libc::socklen_t,
+) -> c_int {
+    // SAFETY: the engine's own call, passed through.
+    let result = unsafe { libc::getsockopt(fd, level, name, value, len) };
+    if traffic_log() && level == libc::SOL_SOCKET && name == libc::SO_ERROR && result == 0 {
+        // SAFETY: SO_ERROR writes an int.
+        let error = unsafe { *value.cast::<c_int>() };
+        let text = if error == 0 {
+            "connected".to_owned()
+        } else {
+            std::io::Error::from_raw_os_error(error).to_string()
+        };
+        eprintln!("feline-runtime: socket {fd}: {text}");
     }
     result
 }
@@ -380,8 +469,40 @@ pub fn implementation(name: &str) -> Option<u64> {
         "freeaddrinfo" => freeaddrinfo as unsafe extern "C" fn(*mut BionicAddrinfo) as usize,
         "gai_strerror" => gai_strerror as extern "C" fn(c_int) -> *const c_char as usize,
         "getnameinfo" => getnameinfo as GetNameInfo as usize,
-        "socket" => socket as extern "C" fn(c_int, c_int, c_int) -> c_int as usize,
-        "connect" => {
+        "sendto" if traffic_log() => {
+            sendto
+                as unsafe extern "C" fn(
+                    c_int,
+                    *const std::ffi::c_void,
+                    usize,
+                    c_int,
+                    *const libc::sockaddr,
+                    libc::socklen_t,
+                ) -> isize as usize
+        }
+        "recvfrom" if traffic_log() => {
+            recvfrom
+                as unsafe extern "C" fn(
+                    c_int,
+                    *mut std::ffi::c_void,
+                    usize,
+                    c_int,
+                    *mut libc::sockaddr,
+                    *mut libc::socklen_t,
+                ) -> isize as usize
+        }
+        "getsockopt" if traffic_log() => {
+            getsockopt
+                as unsafe extern "C" fn(
+                    c_int,
+                    c_int,
+                    c_int,
+                    *mut std::ffi::c_void,
+                    *mut libc::socklen_t,
+                ) -> c_int as usize
+        }
+        "socket" if traffic_log() => socket as extern "C" fn(c_int, c_int, c_int) -> c_int as usize,
+        "connect" if traffic_log() => {
             connect as unsafe extern "C" fn(c_int, *const libc::sockaddr, libc::socklen_t) -> c_int
                 as usize
         }
