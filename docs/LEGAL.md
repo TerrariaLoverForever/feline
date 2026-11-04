@@ -71,7 +71,7 @@ been added. Until it is resolved, no runtime code is written (see
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |
-| Stud (optional) | AGPL-3.0 (with a section 7 permission) | **Not a dependency.** A separate program, started through its command line. A later stage downloads it from Stud's own GitHub releases on the user's request; Feline never bundles it |
+| Stud (optional) | AGPL-3.0 (with a section 7 permission) | **Not a dependency.** A separate program the user installs, started through its command line. Feline never downloads or bundles it |
 
 ## Runtime component policy
 
