@@ -164,6 +164,24 @@ Result (debug build, idle priority, no network): the engine reaches
 presents **650 frames in 15 s** into the Feline window. Images from the
 network fail to load, as expected offline.
 
-**Next:** input (AGDK's `onTouchEventNative` / key events from winit), the
-network (`getaddrinfo`, TLS certificates), audio (FMOD's Java `AudioDevice`),
-and a release-build performance check.
+### Input and network
+
+- **Input** (`keys.rs`, `window.rs`, `init.rs`): the left mouse button acts
+  as one finger (`onTouchEventNative` with a `MotionEvent` whose getters
+  answer from the event); keys go to `onKeyDownNative`/`onKeyUpNative` with a
+  `KeyEvent` (Android `KEYCODE_*` by physical key). Call*Method now reads
+  integer arguments in all three JNI forms (variadic, `va_list`, `jvalue[]`).
+  `FELINE_INPUT_TEST=1` sends a synthetic tap and key press.
+- **Network** (`net.rs`, `sig.rs`): `getaddrinfo`/`freeaddrinfo`/
+  `gai_strerror`/`getnameinfo` translate bionic's `addrinfo` layout and BSD
+  flag/error numbers; `sigaction`/`pthread_sigmask`/`sigemptyset`/
+  `sigfillset` translate bionic's 8-byte `sigset_t` and its `sigaction`
+  layout. The first lookups, sockets and connections are logged. With
+  network access the engine resolves `*.roblox.com` and connects to
+  Roblox's servers on port 443.
+- The engine honours the `http_proxy`/`https_proxy`/`all_proxy` environment
+  variables, like curl does: if they point to a proxy that isn't running,
+  every request fails.
+
+**Next:** confirm input and downloads in the window, audio (FMOD's Java
+`AudioDevice`), a release-build performance check.

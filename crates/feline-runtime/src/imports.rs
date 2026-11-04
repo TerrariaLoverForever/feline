@@ -151,6 +151,10 @@ const FORWARD_LIBC: &[&str] = &[
     // mask (BSD behaviour), and glibc's sigset_t is stored inside its 200.
     "setjmp",
     "longjmp",
+    // struct hostent: name, aliases, two ints, address list, in both
+    // (AOSP netdb.h); it's glibc's own static result, only read.
+    // getaddrinfo & co. differ and are Feline's own (net.rs).
+    "gethostbyname",
     // Directories: DIR is opaque; struct dirent is the kernel's dirent64 on x86-64.
     "opendir",
     "readdir",
@@ -774,7 +778,7 @@ mod tests {
             symbol("AMEDIAFORMAT_KEY_MIME", 1),
             symbol("pthread_mutex_lock", 1),
             symbol("sem_init", 1),
-            symbol("getaddrinfo", 1),
+            symbol("tcgetattr", 1),
             symbol("ZSTD_trace_compress_begin", 2),
         ];
         let imports = bind(&symbols, &Host::open()).unwrap();
@@ -784,7 +788,7 @@ mod tests {
         assert_eq!(kind("AMEDIAFORMAT_KEY_MIME"), Kind::FelineData);
         assert_eq!(kind("pthread_mutex_lock"), Kind::ForwardLibc);
         assert_eq!(kind("sem_init"), Kind::Feline);
-        assert_eq!(kind("getaddrinfo"), Kind::Stub);
+        assert_eq!(kind("tcgetattr"), Kind::Stub);
         assert_eq!(kind("ZSTD_trace_compress_begin"), Kind::WeakEmpty);
         assert_eq!(imports.bindings.len(), 7);
         // The media key variable holds a pointer to the string "mime".

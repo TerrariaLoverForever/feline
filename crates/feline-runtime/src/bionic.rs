@@ -352,6 +352,12 @@ pub fn implementation(name: &str) -> Option<u64> {
     if let Some(address) = crate::egl::implementation(name) {
         return Some(address);
     }
+    if let Some(address) = crate::net::implementation(name) {
+        return Some(address);
+    }
+    if let Some(address) = crate::sig::implementation(name) {
+        return Some(address);
+    }
     if let Some(address) = crate::sem::implementation(name) {
         return Some(address);
     }
