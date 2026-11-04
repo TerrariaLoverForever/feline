@@ -1,0 +1,360 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Reusable building blocks with Feline's look.
+//
+// Performance note: there are no endless animations. Everything animates
+// only in response to the mouse (hover/press), so the launcher draws nothing
+// while idle and costs no GPU time while you play.
+
+import { TextEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+
+// The Feline logo with rounded corners and an optional purple glow.
+export component Logo inherits Rectangle {
+    in property <length> size: 48px;
+    in property <bool> glow: false;
+    width: size;
+    height: size;
+    border-radius: size * 0.24;
+    drop-shadow-blur: glow ? size * 0.35 : 0px;
+    drop-shadow-color: #a974f080;
+    Rectangle {
+        border-radius: root.border-radius;
+        clip: true;
+        Image {
+            width: 100%;
+            height: 100%;
+            source: @image-url("../../../assets/icons/hicolor/256x256/apps/feline.png");
+            image-fit: cover;
+        }
+    }
+}
+
+// A small rounded label, e.g. "External" or "In development".
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: Theme.accent;
+    height: 22px;
+    border-radius: 11px;
+    background: tone.with-alpha(0.14);
+    border-width: 1px;
+    border-color: tone.with-alpha(0.28);
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        Text {
+            text: root.text;
+            color: root.tone;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A round status indicator with a soft glow.
+export component StatusDot inherits Rectangle {
+    in property <color> tone;
+    width: 9px;
+    height: 9px;
+    border-radius: 4.5px;
+    background: tone;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: tone.with-alpha(0.7);
+}
+
+// A sidebar navigation entry with an icon.
+export component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> active;
+    // Shows a "Soon" pill for pages that aren't built yet.
+    in property <bool> soon;
+    callback clicked;
+
+    height: 42px;
+    border-radius: Theme.radius-small;
+    background: active ? @linear-gradient(90deg, #a974f02e 0%, #a974f00a 100%)
+        : touch.has-hover ? Theme.surface-hover : transparent;
+    animate background { duration: Theme.fast; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                commands: root.icon;
+                tone: root.active ? Theme.accent : touch.has-hover ? Theme.text : Theme.text-faint;
+            }
+        }
+        Text {
+            text: root.label;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: root.active ? 600 : 500;
+            color: root.active ? Theme.lavender : touch.has-hover ? Theme.text : Theme.text-muted;
+        }
+        if root.soon: VerticalLayout {
+            alignment: center;
+            Pill {
+                text: "Soon";
+                tone: Theme.text-faint;
+            }
+        }
+    }
+
+    // Active indicator on the left edge
+    Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: 3px;
+        height: root.active ? 20px : 0px;
+        border-radius: 2px;
+        background: Theme.accent;
+        animate height { duration: Theme.fast; }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// The big call-to-action button, with a play icon.
+export component PlayButton inherits Rectangle {
+    in property <string> text: "Play";
+    in property <bool> enabled: true;
+    callback clicked;
+
+    height: 54px;
+    min-width: 200px;
+    border-radius: 27px;
+    background: !root.enabled ? Theme.surface-hover
+        : touch.pressed ? @linear-gradient(90deg, #8a55e6 0%, #6c3fd1 100%)
+        : touch.has-hover ? @linear-gradient(90deg, #c49bff 0%, #9a63f0 100%)
+        : @linear-gradient(90deg, #b07cf5 0%, #8550e6 100%);
+    drop-shadow-blur: root.enabled ? (touch.has-hover ? 28px : 18px) : 0px;
+    drop-shadow-color: #9b5cf090;
+    animate drop-shadow-blur { duration: 180ms; }
+
+    HorizontalLayout {
+        padding-left: 26px;
+        padding-right: 30px;
+        spacing: 10px;
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 18px;
+                height: 18px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: Icons.play;
+                fill: root.enabled ? Theme.on-accent : Theme.text-faint;
+                stroke: transparent;
+            }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 17px;
+            font-weight: 800;
+            color: root.enabled ? Theme.on-accent : Theme.text-faint;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A quieter button, optionally with an icon.
+export component SecondaryButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> enabled: true;
+    callback clicked;
+
+    height: 38px;
+    border-radius: Theme.radius-small;
+    background: !root.enabled ? transparent
+        : touch.pressed ? Theme.border
+        : touch.has-hover ? Theme.surface-hover : Theme.surface-raised;
+    border-width: 1px;
+    border-color: touch.has-hover && root.enabled ? Theme.accent.with-alpha(0.5) : Theme.border;
+    animate background, border-color { duration: Theme.fast; }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                width: 16px;
+                height: 16px;
+                commands: root.icon;
+                tone: root.enabled ? Theme.lavender : Theme.text-faint;
+            }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: root.enabled ? Theme.text : Theme.text-faint;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A bordered panel that stacks its children vertically.
+export component Card inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    VerticalLayout {
+        padding: 22px;
+        spacing: 12px;
+        alignment: start;
+        @children
+    }
+}
+
+export component CardTitle inherits Text {
+    font-size: 16px;
+    font-weight: 700;
+    color: Theme.text;
+}
+
+// A small uppercase label above a section.
+export component Eyebrow inherits Text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: Theme.text-faint;
+}
+
+export component BodyText inherits Text {
+    font-size: 13px;
+    color: Theme.text-muted;
+    wrap: word-wrap;
+}
+
+export component PageTitle inherits Text {
+    font-size: 30px;
+    font-weight: 800;
+    color: Theme.text;
+}
+
+export component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+// A read-only, scrollable box of monospace text with a Copy button, for
+// command output and reports. Slint has no clipboard API for Rust, so copying
+// goes through the text box itself: select everything, then copy.
+export component OutputBox inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder: "Nothing to show yet.";
+    property <bool> copied: false;
+
+    min-height: 160px;
+    border-radius: Theme.radius-small;
+    background: #08060c;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    if root.text == "": Text {
+        text: root.placeholder;
+        color: Theme.text-faint;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    // Always present (an element inside `if` can't be referenced from
+    // outside it), just hidden while there's no text.
+    Rectangle {
+        visible: root.text != "";
+        VerticalLayout {
+            padding: 2px;
+            box := TextEdit {
+                text: root.text;
+                read-only: true;
+                font-size: 12px;
+                font-family: "monospace";
+                wrap: word-wrap;
+            }
+        }
+    }
+    // Floating Copy button in the top-right corner.
+    SecondaryButton {
+        visible: root.text != "";
+        x: parent.width - self.width - 22px;
+        y: 10px;
+        text: root.copied ? "Copied" : "Copy";
+        icon: root.copied ? Icons.check : Icons.copy;
+        clicked => {
+            box.select-all();
+            box.copy();
+            box.clear-selection();
+            root.copied = true;
+            reset-copied.running = true;
+        }
+    }
+    // Turns "Copied" back into "Copy" after a moment.
+    reset-copied := Timer {
+        interval: 1800ms;
+        running: false;
+        triggered => {
+            root.copied = false;
+            self.running = false;
+        }
+    }
+}
+
+// A label/value line, e.g. "Kernel   6.18.58_1".
+export component InfoLine inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <color> value-color: Theme.text;
+    min-height: 36px;
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            width: 150px;
+            text: root.label;
+            font-size: 13px;
+            color: Theme.text-muted;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.value;
+            font-size: 13px;
+            font-weight: 600;
+            color: root.value-color;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}

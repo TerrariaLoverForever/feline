@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Types shared between the UI and Rust. They're re-exported from app.slint so
+// Rust can use them (e.g. `Page::Home`, `LaunchState::Running`).
+
+export enum Page {
+    home,
+    runtimes,
+    system,
+    diagnostics,
+    settings,
+    about,
+}
+
+// What the Play area shows.
+export enum LaunchState {
+    idle,
+    starting,
+    running,
+    ended,
+    failed,
+}
+
+// One detected runtime installation, as shown in the list.
+export struct RuntimeRow {
+    // Stable identifier, saved in the settings when chosen.
+    key: string,
+    name: string,
+    version: string,
+    // How it's installed, e.g. "Flatpak (system)".
+    kind: string,
+    selected: bool,
+}
+
+// How a value or check result should be colored.
+export enum Level {
+    neutral,
+    ok,
+    warning,
+    problem,
+}
+
+// One line of the System page, e.g. "Kernel" / "6.18.58_1".
+export struct InfoRow {
+    label: string,
+    value: string,
+    level: Level,
+}
+
+// One quick-check result on the Diagnostics page.
+export struct CheckRow {
+    level: Level,
+    title: string,
+    detail: string,
+}

@@ -1,0 +1,30 @@
+[package]
+name = "feline"
+description = "Feline: a launcher for playing Roblox on Linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+feline-core = { path = "../feline-core" }
+# GUI toolkit, used under its GPL-3.0-only option (see docs/LEGAL.md).
+# Default features are off to keep the dependency tree small (no Qt backend,
+# no system tray). Enabled: the winit backend (Wayland + X11), the OpenGL
+# renderer with the software renderer as fallback, and accessibility support.
+slint = { version = "1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+] }
+
+[build-dependencies]
+# Compiles the .slint UI files into Rust code at build time.
+slint-build = "1.18.1"

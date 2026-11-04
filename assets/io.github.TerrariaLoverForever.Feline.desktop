@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Feline
+GenericName=Game Launcher
+Comment=Made for Linux. Built with care.
+Exec=feline
+Icon=io.github.TerrariaLoverForever.Feline
+Terminal=false
+Categories=Game;
+Keywords=roblox;launcher;game;
+StartupWMClass=io.github.TerrariaLoverForever.Feline

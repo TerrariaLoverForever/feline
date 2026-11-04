@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// About page: what Feline is, its license, credits, and the honest status.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
+
+component Credit inherits VerticalLayout {
+    in property <string> name;
+    in property <string> role;
+    spacing: 2px;
+    Text {
+        text: root.name;
+        font-size: 14px;
+        font-weight: 700;
+        color: Theme.text;
+    }
+    BodyText {
+        text: root.role;
+    }
+}
+
+export component AboutPage inherits Rectangle {
+    in property <string> version;
+    callback show-notice();
+
+    ScrollView {
+        VerticalLayout {
+            padding: 32px;
+            spacing: 20px;
+            alignment: start;
+
+            // Header
+            HorizontalLayout {
+                spacing: 22px;
+                alignment: start;
+                Logo {
+                    size: 96px;
+                    glow: true;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    Text {
+                        text: "Feline";
+                        font-size: 36px;
+                        font-weight: 800;
+                        color: Theme.text;
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        Text {
+                            text: "Version " + root.version;
+                            font-size: 14px;
+                            color: Theme.lavender;
+                            vertical-alignment: center;
+                        }
+                        Pill {
+                            text: "Early development";
+                            tone: Theme.warning;
+                        }
+                    }
+                    BodyText {
+                        text: "A launcher for playing Roblox on Linux.";
+                        font-size: 14px;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 20px;
+
+                Card {
+                    preferred-width: 100px;
+                    horizontal-stretch: 1;
+                    Eyebrow {
+                        text: "LICENSE";
+                    }
+                    BodyText {
+                        text: "Feline is free software under the GNU General Public License, version 3 or later. You can use, study, share and change it.";
+                    }
+                    BodyText {
+                        text: "The Feline name and cat logo aren't covered by the GPL. See TRADEMARKS.md.";
+                    }
+                    Divider { }
+                    Eyebrow {
+                        text: "NOT AFFILIATED WITH ROBLOX";
+                    }
+                    BodyText {
+                        text: "Feline is unofficial. Roblox is a trademark of Roblox Corporation, used here only to say what Feline works with. Feline ships no Roblox files.";
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        SecondaryButton {
+                            text: "Show the account notice again";
+                            clicked => {
+                                root.show-notice();
+                            }
+                        }
+                    }
+                }
+
+                Card {
+                    preferred-width: 100px;
+                    horizontal-stretch: 1;
+                    Eyebrow {
+                        text: "BUILT WITH";
+                    }
+                    Credit {
+                        name: "Slint";
+                        role: "The user interface toolkit (used under GPL-3.0).";
+                    }
+                    Credit {
+                        name: "Rust";
+                        role: "The language Feline is written in.";
+                    }
+                    Divider { }
+                    Eyebrow {
+                        text: "WORKS WITH";
+                    }
+                    Credit {
+                        name: "Cordial";
+                        role: "An external, third-party runtime by its own authors (GPL-3.0-or-later). Feline starts it through its public command line and contains none of its code.";
+                    }
+                }
+            }
+        }
+    }
+}

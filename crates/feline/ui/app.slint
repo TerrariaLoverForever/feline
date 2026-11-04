@@ -1,0 +1,292 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The Feline main window: sidebar navigation plus the current page.
+
+import { Theme } from "theme.slint";
+import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow } from "types.slint";
+import { Icons } from "icons.slint";
+import { Logo, NavItem } from "components.slint";
+import { HomePage } from "pages/home.slint";
+import { RuntimesPage } from "pages/runtimes.slint";
+import { ComingSoonPage } from "pages/coming-soon.slint";
+import { SystemPage } from "pages/system.slint";
+import { DiagnosticsPage } from "pages/diagnostics.slint";
+import { AboutPage } from "pages/about.slint";
+import { AccountNotice } from "pages/notice.slint";
+
+// Make the shared types visible to Rust.
+export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow }
+
+export component AppWindow inherits Window {
+    title: "Feline";
+    icon: @image-url("../../../assets/icons/hicolor/256x256/apps/feline.png");
+    preferred-width: 1140px;
+    preferred-height: 740px;
+    min-width: 940px;
+    min-height: 660px;
+    background: Theme.bg;
+    default-font-size: 14px;
+
+    in-out property <Page> page: Page.home;
+    in property <string> version;
+
+    // Runtimes (set from Rust)
+    in property <[RuntimeRow]> runtimes;
+    in property <bool> detecting: true;
+    in property <string> runtimes-error;
+    in property <string> selected-name;
+    in property <string> selected-detail;
+
+    // Launching (set from Rust)
+    in property <LaunchState> launch-state: LaunchState.idle;
+    in property <string> launch-title;
+    in property <string> launch-detail;
+
+    // Link check (set from Rust)
+    in property <bool> link-ready;
+    in property <bool> link-valid;
+    in property <string> link-message;
+
+    callback play();
+    callback join(string);
+    callback link-edited(string);
+    callback select-runtime(string);
+    callback rescan();
+    callback open-logs();
+
+    // First-run account notice
+    in-out property <bool> show-notice;
+    callback accept-notice();
+    callback quit();
+
+    // System page (set from Rust)
+    in property <[InfoRow]> system-rows;
+    in property <string> system-report;
+    in property <bool> system-loading: true;
+    callback refresh-system();
+
+    // Diagnostics page (set from Rust)
+    in property <[CheckRow]> checks;
+    in property <bool> diag-running;
+    in property <string> diag-title;
+    in property <Level> diag-level;
+    in property <string> diag-output;
+    in property <string> log-folder;
+    callback run-doctor();
+    callback run-runtime-info();
+    callback build-report();
+
+    HorizontalLayout {
+        // Sidebar
+        Rectangle {
+            width: 236px;
+            background: @linear-gradient(180deg, #120c1d 0%, Theme.sidebar 100%);
+            VerticalLayout {
+                padding: 16px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-top: 8px;
+                    padding-bottom: 26px;
+                    spacing: 12px;
+                    alignment: start;
+                    Logo {
+                        size: 40px;
+                        glow: true;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "Feline";
+                            font-size: 19px;
+                            font-weight: 800;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "for Linux";
+                            font-size: 12px;
+                            color: Theme.lavender.with-alpha(0.7);
+                        }
+                    }
+                }
+
+                NavItem {
+                    label: "Home";
+                    icon: Icons.home;
+                    active: root.page == Page.home;
+                    clicked => {
+                        root.page = Page.home;
+                    }
+                }
+                NavItem {
+                    label: "Runtimes";
+                    icon: Icons.runtimes;
+                    active: root.page == Page.runtimes;
+                    clicked => {
+                        root.page = Page.runtimes;
+                    }
+                }
+                NavItem {
+                    label: "System";
+                    icon: Icons.system;
+                    active: root.page == Page.system;
+                    clicked => {
+                        root.page = Page.system;
+                    }
+                }
+                NavItem {
+                    label: "Diagnostics";
+                    icon: Icons.diagnostics;
+                    active: root.page == Page.diagnostics;
+                    clicked => {
+                        root.page = Page.diagnostics;
+                    }
+                }
+                NavItem {
+                    label: "Settings";
+                    icon: Icons.settings;
+                    soon: true;
+                    active: root.page == Page.settings;
+                    clicked => {
+                        root.page = Page.settings;
+                    }
+                }
+                NavItem {
+                    label: "About";
+                    icon: Icons.about;
+                    active: root.page == Page.about;
+                    clicked => {
+                        root.page = Page.about;
+                    }
+                }
+
+                // Pushes the footer to the bottom.
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                Text {
+                    text: "Version " + root.version;
+                    font-size: 11px;
+                    color: Theme.text-faint;
+                }
+                Text {
+                    text: "Free software · GPL-3.0-or-later";
+                    font-size: 11px;
+                    color: Theme.text-faint;
+                }
+                Text {
+                    text: "Not affiliated with Roblox Corporation";
+                    font-size: 11px;
+                    color: Theme.text-faint;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        Rectangle {
+            width: 1px;
+            background: Theme.border;
+        }
+
+        // Current page
+        if root.page == Page.home: HomePage {
+            horizontal-stretch: 1;
+            selected-name: root.selected-name;
+            selected-detail: root.selected-detail;
+            detecting: root.detecting;
+            launch-state: root.launch-state;
+            launch-title: root.launch-title;
+            launch-detail: root.launch-detail;
+            link-ready: root.link-ready;
+            link-valid: root.link-valid;
+            link-message: root.link-message;
+            play => {
+                root.play();
+            }
+            join(link) => {
+                root.join(link);
+            }
+            link-edited(text) => {
+                root.link-edited(text);
+            }
+            choose-runtime => {
+                root.page = Page.runtimes;
+            }
+            open-logs => {
+                root.open-logs();
+            }
+        }
+        if root.page == Page.runtimes: RuntimesPage {
+            horizontal-stretch: 1;
+            runtimes: root.runtimes;
+            detecting: root.detecting;
+            error: root.runtimes-error;
+            select(key) => {
+                root.select-runtime(key);
+            }
+            rescan => {
+                root.rescan();
+            }
+        }
+        if root.page == Page.settings: ComingSoonPage {
+            horizontal-stretch: 1;
+            heading: "Settings";
+            description: "Launcher preferences will live here. Your runtime choice is already saved automatically (in ~/.config/feline/settings.conf).";
+        }
+        if root.page == Page.system: SystemPage {
+            horizontal-stretch: 1;
+            rows: root.system-rows;
+            report: root.system-report;
+            loading: root.system-loading;
+            refresh => {
+                root.refresh-system();
+            }
+        }
+        if root.page == Page.diagnostics: DiagnosticsPage {
+            horizontal-stretch: 1;
+            checks: root.checks;
+            checks-loading: root.system-loading;
+            runtime-name: root.selected-name;
+            running: root.diag-running;
+            result-title: root.diag-title;
+            result-level: root.diag-level;
+            output: root.diag-output;
+            log-folder: root.log-folder;
+            run-doctor => {
+                root.run-doctor();
+            }
+            run-runtime-info => {
+                root.run-runtime-info();
+            }
+            build-report => {
+                root.build-report();
+            }
+            open-logs => {
+                root.open-logs();
+            }
+            choose-runtime => {
+                root.page = Page.runtimes;
+            }
+        }
+        if root.page == Page.about: AboutPage {
+            horizontal-stretch: 1;
+            version: root.version;
+            show-notice => {
+                root.show-notice = true;
+            }
+        }
+    }
+
+    // Drawn last, so it covers everything else.
+    if root.show-notice: AccountNotice {
+        width: parent.width;
+        height: parent.height;
+        accepted => {
+            root.accept-notice();
+        }
+        quit => {
+            root.quit();
+        }
+    }
+}

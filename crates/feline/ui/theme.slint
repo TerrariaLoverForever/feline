@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Feline's design tokens. Every color and size used by the UI comes from here,
+// so the look can be adjusted in one place (and themes added later).
+
+import { Level } from "types.slint";
+
+export global Theme {
+    // Backgrounds, darkest first
+    out property <color> bg: #0b0910;
+    out property <color> sidebar: #0f0b17;
+    out property <color> surface: #151020;
+    out property <color> surface-raised: #1c1529;
+    out property <color> surface-hover: #221a33;
+    out property <color> border: #2a2140;
+
+    // Text
+    out property <color> text: #efe9fa;
+    out property <color> text-muted: #a69cbf;
+    out property <color> text-faint: #6f6688;
+
+    // Brand: purple and lavender, taken from the Feline icon
+    out property <color> accent: #a974f0;
+    out property <color> accent-strong: #8a55e6;
+    out property <color> lavender: #dcc6ff;
+    out property <color> on-accent: #150b26;
+
+    // Status
+    out property <color> success: #74d6a6;
+    out property <color> warning: #f0c674;
+    out property <color> danger: #f27d8e;
+
+    // Shape and motion
+    out property <length> radius: 14px;
+    out property <length> radius-small: 9px;
+    out property <duration> fast: 120ms;
+
+    // The color for a status level (used by dots, pills and values).
+    public pure function level-color(level: Level) -> color {
+        if level == Level.ok {
+            return self.success;
+        }
+        if level == Level.warning {
+            return self.warning;
+        }
+        if level == Level.problem {
+            return self.danger;
+        }
+        return self.text-faint;
+    }
+}

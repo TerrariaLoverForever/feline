@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// System page: what Feline knows about this machine, with a copyable report
+// for bug reports. Everything here is read from /proc, /sys and /etc.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { InfoRow, Level } from "../types.slint";
+import { Icons } from "../icons.slint";
+import { SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, InfoLine, OutputBox } from "../components.slint";
+
+export component SystemPage inherits Rectangle {
+    in property <[InfoRow]> rows;
+    in property <string> report;
+    in property <bool> loading;
+    callback refresh();
+
+    ScrollView {
+        VerticalLayout {
+            padding: 32px;
+            spacing: 16px;
+            alignment: start;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 6px;
+                    horizontal-stretch: 1;
+                    PageTitle {
+                        text: "System";
+                    }
+                    BodyText {
+                        text: "Your distribution, hardware and desktop session, as Feline sees them.";
+                    }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    SecondaryButton {
+                        text: root.loading ? "Reading…" : "Refresh";
+                        icon: Icons.refresh;
+                        enabled: !root.loading;
+                        clicked => {
+                            root.refresh();
+                        }
+                    }
+                }
+            }
+
+            Card {
+                if root.loading && root.rows.length == 0: BodyText {
+                    text: "Reading system information…";
+                }
+                for row[i] in root.rows: VerticalLayout {
+                    spacing: 0px;
+                    if i > 0: Divider { }
+                    InfoLine {
+                        label: row.label;
+                        value: row.value;
+                        value-color: row.level == Level.neutral ? Theme.text : Theme.level-color(row.level);
+                    }
+                }
+            }
+
+            Eyebrow {
+                text: "REPORT FOR BUG REPORTS";
+            }
+            BodyText {
+                text: "The same information as plain text (also printed by `feline --info`). It contains no personal data apart from your hardware and distribution.";
+            }
+            OutputBox {
+                height: 230px;
+                text: root.report;
+                placeholder: "Reading system information…";
+            }
+        }
+    }
+}

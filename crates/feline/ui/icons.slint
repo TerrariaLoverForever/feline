@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Feline's line icons, drawn as vector paths on a 24×24 grid. Original
+// drawings (no icon font or icon pack needed), so they always render and
+// scale cleanly.
+
+export global Icons {
+    out property <string> home: "M4 11 L12 4 L20 11 M6.5 9 V20 H17.5 V9";
+    out property <string> runtimes: "M12 3 L21 7.5 L12 12 L3 7.5 Z M3 12 L12 16.5 L21 12 M3 16.5 L12 21 L21 16.5";
+    out property <string> settings: "M4 7 H13 M17 7 H20 M15 4.5 V9.5 M4 17 H7 M11 17 H20 M9 14.5 V19.5";
+    out property <string> system: "M3 5 H21 V16 H3 Z M8.5 20 H15.5 M12 16 V20";
+    out property <string> diagnostics: "M3 12 H7 L10 6 L14 18 L17 12 H21";
+    out property <string> refresh: "M20 12 A8 8 0 1 1 17.7 6.3 M20 4 V9 H15";
+    out property <string> folder: "M3 7 V19 H21 V9 H12 L10 6 H3 Z";
+    out property <string> check: "M5 12.5 L10 17 L19 7";
+    out property <string> about: "M12 3 A9 9 0 1 1 11.99 3 Z M12 10.5 V16.5 M12 7 V7.5";
+    out property <string> copy: "M9 9 H20 V20 H9 Z M5 15 V4 H16";
+    out property <string> shield: "M12 3 L19.5 6 V11.5 C19.5 16 16.3 19.3 12 21 C7.7 19.3 4.5 16 4.5 11.5 V6 Z M12 8.5 V12.5 M12 15.6 V16";
+    out property <string> stethoscope: "M6 3 V8.5 A4 4 0 0 0 14 8.5 V3 M10 12.5 V15 A4.5 4.5 0 0 0 19 15 V13 M19 13 A1.6 1.6 0 1 0 19 9.8 A1.6 1.6 0 1 0 19 13";
+    // Filled
+    out property <string> play: "M8 5 L19 12 L8 19 Z";
+}
+
+export component Icon inherits Path {
+    in property <color> tone;
+    width: 18px;
+    height: 18px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: tone;
+    stroke-width: 1.9px;
+    fill: transparent;
+}

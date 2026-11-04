@@ -1,0 +1,204 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Diagnostics page: Feline's own quick checks, the selected runtime's
+// self-check and info, a combined bug report, and where the logs are.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { CheckRow, Level } from "../types.slint";
+import { Icons } from "../icons.slint";
+import { Pill, StatusDot, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, OutputBox } from "../components.slint";
+
+component CheckLine inherits HorizontalLayout {
+    in property <CheckRow> check;
+    spacing: 14px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    VerticalLayout {
+        alignment: start;
+        padding-top: 5px;
+        StatusDot {
+            tone: Theme.level-color(root.check.level);
+        }
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 3px;
+        Text {
+            text: root.check.title;
+            font-size: 14px;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        if root.check.detail != "": BodyText {
+            text: root.check.detail;
+        }
+    }
+}
+
+export component DiagnosticsPage inherits Rectangle {
+    in property <[CheckRow]> checks;
+    in property <bool> checks-loading;
+
+    // The selected runtime; empty = none selected.
+    in property <string> runtime-name;
+    // True while a self-check or report is being produced.
+    in property <bool> running;
+    // Result of the last action.
+    in property <string> result-title;
+    in property <Level> result-level;
+    in property <string> output;
+
+    in property <string> log-folder;
+
+    callback run-doctor();
+    callback run-runtime-info();
+    callback build-report();
+    callback open-logs();
+    callback choose-runtime();
+
+    property <bool> has-runtime: root.runtime-name != "";
+
+    ScrollView {
+        VerticalLayout {
+            padding: 32px;
+            spacing: 16px;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: 6px;
+                PageTitle {
+                    text: "Diagnostics";
+                }
+                BodyText {
+                    text: "Find out why something doesn't work, and gather what's needed for a bug report.";
+                }
+            }
+
+            Card {
+                Eyebrow {
+                    text: "QUICK CHECKS";
+                }
+                if root.checks-loading && root.checks.length == 0: BodyText {
+                    text: "Checking…";
+                }
+                for check[i] in root.checks: VerticalLayout {
+                    if i > 0: Divider { }
+                    CheckLine {
+                        check: check;
+                    }
+                }
+            }
+
+            Card {
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        Eyebrow {
+                            text: "RUNTIME";
+                        }
+                    }
+                    if root.has-runtime: Pill {
+                        text: root.runtime-name;
+                        tone: Theme.lavender;
+                    }
+                }
+                if !root.has-runtime: HorizontalLayout {
+                    spacing: 12px;
+                    BodyText {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        text: "Choose a runtime first. Its self-check looks for problems Feline can't see, such as missing graphics or sound support.";
+                    }
+                    SecondaryButton {
+                        text: "Choose runtime";
+                        clicked => {
+                            root.choose-runtime();
+                        }
+                    }
+                }
+                if root.has-runtime: BodyText {
+                    text: "The self-check asks the runtime to test the display, GPU and Vulkan, sound and more. Runtime info is the block its developers ask for in bug reports.";
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    SecondaryButton {
+                        text: "Run self-check";
+                        icon: Icons.stethoscope;
+                        enabled: root.has-runtime && !root.running;
+                        clicked => {
+                            root.run-doctor();
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Runtime info";
+                        icon: Icons.about;
+                        enabled: root.has-runtime && !root.running;
+                        clicked => {
+                            root.run-runtime-info();
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Full bug report";
+                        icon: Icons.copy;
+                        enabled: !root.running;
+                        clicked => {
+                            root.build-report();
+                        }
+                    }
+                }
+                if root.result-title != "": HorizontalLayout {
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        StatusDot {
+                            tone: Theme.level-color(root.result-level);
+                        }
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.result-title;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                }
+                OutputBox {
+                    height: 260px;
+                    text: root.output;
+                    placeholder: root.running ? "Working… (a runtime's self-check can take a few seconds)" : "Run a check to see its output here.";
+                }
+            }
+
+            Card {
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 4px;
+                        Eyebrow {
+                            text: "LOGS";
+                        }
+                        BodyText {
+                            text: "Each game session's output is saved to its own file in " + root.log-folder + ". Feline keeps the most recent ones.";
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "Open logs folder";
+                            icon: Icons.folder;
+                            clicked => {
+                                root.open-logs();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

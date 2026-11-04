@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Runtimes page: Feline's own runtime (not available yet) kept visibly
+// separate from the external third-party runtimes that were found.
+
+import { Theme } from "../theme.slint";
+import { RuntimeRow } from "../types.slint";
+import { Icon, Icons } from "../icons.slint";
+import { Logo, Pill, SecondaryButton, Card, CardTitle, Eyebrow, BodyText, PageTitle } from "../components.slint";
+
+component RuntimeItem inherits Rectangle {
+    in property <RuntimeRow> entry;
+    callback select();
+
+    height: 68px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    background: entry.selected ? #a974f014 : touch.has-hover ? Theme.surface-raised : Theme.surface;
+    border-color: entry.selected ? Theme.accent.with-alpha(0.7) : touch.has-hover ? Theme.accent.with-alpha(0.35) : Theme.border;
+    animate background, border-color { duration: Theme.fast; }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 16px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Text {
+                    text: root.entry.name;
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                Text {
+                    text: root.entry.version;
+                    font-size: 15px;
+                    color: Theme.text-muted;
+                }
+            }
+            Text {
+                text: root.entry.kind;
+                font-size: 12px;
+                color: Theme.text-faint;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            if root.entry.selected: Pill {
+                text: "✓ Selected";
+                tone: Theme.success;
+            }
+            if !root.entry.selected: Text {
+                text: "Use this";
+                font-size: 13px;
+                font-weight: 600;
+                color: touch.has-hover ? Theme.lavender : Theme.text-faint;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.select();
+        }
+    }
+}
+
+export component RuntimesPage inherits Rectangle {
+    in property <[RuntimeRow]> runtimes;
+    in property <bool> detecting;
+    in property <string> error;
+    callback select(string);
+    callback rescan();
+
+    VerticalLayout {
+        padding: 32px;
+        spacing: 16px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 16px;
+            VerticalLayout {
+                spacing: 6px;
+                horizontal-stretch: 1;
+                PageTitle {
+                    text: "Runtimes";
+                }
+                BodyText {
+                    text: "A runtime is the program that actually runs Roblox. Choose the one Feline should use.";
+                }
+            }
+            VerticalLayout {
+                alignment: start;
+                SecondaryButton {
+                    text: root.detecting ? "Scanning…" : "Rescan";
+                    icon: Icons.refresh;
+                    enabled: !root.detecting;
+                    clicked => {
+                        root.rescan();
+                    }
+                }
+            }
+        }
+
+        if root.error != "": Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+
+        // Feline's own runtime: honest about its status, nothing to click.
+        Rectangle {
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: @linear-gradient(110deg, #1f1436 0%, Theme.surface 60%);
+            HorizontalLayout {
+                padding: 18px;
+                spacing: 16px;
+                VerticalLayout {
+                    alignment: center;
+                    Logo {
+                        size: 44px;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        CardTitle {
+                            text: "Feline Runtime";
+                        }
+                        Pill {
+                            text: "In development";
+                            tone: Theme.lavender;
+                        }
+                    }
+                    BodyText {
+                        text: "Feline's own, independently developed runtime. It's not available yet and can't be selected.";
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 4px;
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            VerticalLayout {
+                alignment: center;
+                Eyebrow {
+                    text: "EXTERNAL RUNTIMES";
+                }
+            }
+            Pill {
+                text: "Third-party";
+                tone: Theme.warning;
+            }
+        }
+        BodyText {
+            text: "Separate programs you installed yourself. Feline starts them through their public command line and contains none of their code.";
+        }
+
+        for row in root.runtimes: RuntimeItem {
+            entry: row;
+            select => {
+                root.select(row.key);
+            }
+        }
+
+        if root.detecting && root.runtimes.length == 0: BodyText {
+            text: "Looking for runtimes…";
+        }
+        if !root.detecting && root.runtimes.length == 0: Card {
+            CardTitle {
+                text: "No external runtime found";
+            }
+            BodyText {
+                text: "Feline currently supports Cordial (github.com/luohoa97/cordial) as an external runtime. Install it as a Flatpak or AppImage, then press Rescan.";
+            }
+        }
+    }
+}

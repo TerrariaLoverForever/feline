@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The account-risk notice, shown over the whole window on first start (and
+// again whenever the notice changes). It blocks the window until accepted,
+// because the risk is real and the user should decide knowingly.
+
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { Logo, SecondaryButton, Eyebrow, BodyText } from "../components.slint";
+
+component Point inherits HorizontalLayout {
+    in property <string> text;
+    spacing: 12px;
+    VerticalLayout {
+        alignment: start;
+        padding-top: 6px;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: Theme.accent;
+        }
+    }
+    BodyText {
+        horizontal-stretch: 1;
+        text: root.text;
+        font-size: 14px;
+        color: Theme.text;
+    }
+}
+
+export component AccountNotice inherits Rectangle {
+    callback accepted();
+    callback quit();
+
+    // Dim everything behind the dialog.
+    background: #05030acc;
+
+    // Swallow clicks so nothing behind the dialog can be used.
+    TouchArea { }
+
+    dialog := Rectangle {
+        width: min(560px, parent.width - 64px);
+        height: layout.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 20px;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.accent.with-alpha(0.35);
+        drop-shadow-blur: 40px;
+        drop-shadow-color: #00000099;
+
+        layout := VerticalLayout {
+            padding: 32px;
+            spacing: 16px;
+
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: start;
+                Logo {
+                    size: 44px;
+                    glow: true;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Eyebrow {
+                        text: "BEFORE YOU PLAY";
+                    }
+                    Text {
+                        text: "Your Roblox account and Linux";
+                        font-size: 21px;
+                        font-weight: 800;
+                        color: Theme.text;
+                    }
+                }
+            }
+
+            BodyText {
+                text: "Feline is an unofficial project, not affiliated with Roblox Corporation. Please read this once:";
+                font-size: 14px;
+            }
+
+            VerticalLayout {
+                spacing: 10px;
+                Point {
+                    text: "Roblox doesn't support third-party clients on Linux. Using one can get you kicked from experiences or put your account at risk.";
+                }
+                Point {
+                    text: "Feline starts an external runtime you installed yourself (such as Cordial). It never handles your login and never modifies the Roblox client.";
+                }
+                Point {
+                    text: "Don't use an account you can't afford to lose.";
+                }
+            }
+
+            Rectangle {
+                height: 6px;
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: end;
+                SecondaryButton {
+                    text: "Quit Feline";
+                    clicked => {
+                        root.quit();
+                    }
+                }
+                SecondaryButton {
+                    text: "I understand";
+                    icon: Icons.check;
+                    clicked => {
+                        root.accepted();
+                    }
+                }
+            }
+        }
+    }
+}

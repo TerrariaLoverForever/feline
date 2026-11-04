@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Placeholder for pages that aren't built yet. It says so plainly instead of
+// showing controls that don't work.
+
+import { Theme } from "../theme.slint";
+import { Pill, Card, BodyText } from "../components.slint";
+
+export component ComingSoonPage inherits Rectangle {
+    in property <string> heading;
+    in property <string> description;
+
+    VerticalLayout {
+        padding: 32px;
+        spacing: 18px;
+        alignment: start;
+        HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+            Text {
+                text: root.heading;
+                font-size: 28px;
+                font-weight: 800;
+                color: Theme.text;
+            }
+            VerticalLayout {
+                alignment: center;
+                Pill {
+                    text: "Not built yet";
+                    tone: Theme.warning;
+                }
+            }
+        }
+        Card {
+            BodyText {
+                text: root.description;
+            }
+        }
+    }
+}
