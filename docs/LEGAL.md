@@ -70,6 +70,7 @@ reviewed before the first release. Not legal advice.
 | Rust standard library | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [serde_json](https://github.com/serde-rs/json) 1 (+ `serde`, `indexmap` for key order) | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [ureq](https://github.com/algesten/ureq) 3 with `rustls` (+ `rustls`, `ring`, `webpki-roots`, `http` and small helpers) | MIT / Apache-2.0 / ISC / BSD-3-Clause / Zlib; `ring`: Apache-2.0 AND ISC; `webpki-roots`: CDLA-Permissive-2.0 (certificate data; keep its license text) | Compiled in. All compatible with GPL-3.0. Checked with `cargo metadata` |
+| [rustix](https://github.com/bytecodealliance/rustix) 1.1 (runtime only: `mm`, `param`; + `linux-raw-sys`, `bitflags`) | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |

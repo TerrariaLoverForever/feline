@@ -76,6 +76,7 @@ permission in [`LICENSE.exception`](../LICENSE.exception). See
 | `elf` | Bounds-checked ELF64 reader: segments, dynamic section, symbols with versions (GNU hash count), relocation tables |
 | `packed` | Decoder for Android's packed relocations (`APS2`, SLEB128) |
 | `check` | `feline-runtime --check <lib>`: summary and consistency check of every relocation |
+| `load` | `feline-runtime --load <lib>`: maps the segments, applies relocations that don't need imports, sets permissions (W^X, RELRO). The only module with `unsafe` (four operations) |
 
 ## Toolchain
 

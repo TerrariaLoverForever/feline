@@ -279,6 +279,16 @@ impl<'a> Elf<'a> {
             .ok_or(ElfError::BadAddress { what, addr })
     }
 
+    /// The bytes a segment takes from the file (`p_filesz` of them).
+    pub fn segment_data(&self, segment: &Segment) -> Result<&'a [u8]> {
+        if segment.filesz > segment.memsz {
+            return Err(ElfError::Unsupported(
+                "a segment is larger in the file than in memory".into(),
+            ));
+        }
+        bytes(self.data, segment.offset, segment.filesz, "segment data")
+    }
+
     /// True if `addr` lies in the memory of some loadable segment (including
     /// its zero-filled part beyond the file data).
     pub fn in_memory_image(&self, addr: u64) -> bool {

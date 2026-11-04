@@ -177,9 +177,15 @@ MangoHud, same place, same settings, ≥5 runs), compared with Sober and Cordial
 | 4. Run `INIT_ARRAY` | All constructors return, with every stub hit logged |
 | 5. Minimal `JavaVM`/`JNIEnv`, call `JNI_OnLoad`, then a first native, with logging | They return; the log lists the Java callbacks they wanted |
 
-**Progress:** step 1 is done. `feline-runtime --check` reads the engine with
-a bounds-checked ELF reader and an APS2 decoder (no `unsafe`, no dependencies)
-and validates every relocation (see §2).
+**Progress:**
+- Step 1 done: `feline-runtime --check` reads the engine with a
+  bounds-checked ELF reader and an APS2 decoder and validates every
+  relocation (see §2).
+- Step 2 done: `feline-runtime --load` maps the engine (128.4 MB), applies
+  572,132 `RELATIVE` relocations and 1 to its own symbol, and sets W^X
+  permissions plus 5.2 MB of read-only RELRO, in 0.3 s. The remaining 626
+  relocations need the 576 imports (step 3). `unsafe` is limited to four
+  operations in `load.rs`; all writes go through a bounds-checked slice.
 
 **Not a goal of M3:** a window, a game, or any claim that Roblox runs.
 

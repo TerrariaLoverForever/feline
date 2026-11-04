@@ -1141,6 +1141,9 @@ dependencies = [
 [[package]]
 name = "feline-runtime"
 version = "0.1.0"
+dependencies = [
+ "rustix 1.1.6",
+]
 
 [[package]]
 name = "femtovg"
