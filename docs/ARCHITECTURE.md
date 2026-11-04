@@ -65,6 +65,18 @@ All Feline code is licensed GPL-3.0-or-later.
 Detection never starts processes; only `Installation::version()` (when the
 version isn't in a file), `doctor()` and `diagnostics()` do, always with a timeout.
 
+## `feline-runtime` (in development, M3)
+
+Feline's own runtime, licensed GPL-3.0-or-later with the additional
+permission in [`LICENSE.exception`](../LICENSE.exception). See
+[runtime/M2-RESEARCH.md](runtime/M2-RESEARCH.md) for the plan.
+
+| Module | Purpose |
+|---|---|
+| `elf` | Bounds-checked ELF64 reader: segments, dynamic section, symbols with versions (GNU hash count), relocation tables |
+| `packed` | Decoder for Android's packed relocations (`APS2`, SLEB128) |
+| `check` | `feline-runtime --check <lib>`: summary and consistency check of every relocation |
+
 ## Toolchain
 
 Feline builds with a distribution-packaged Rust toolchain; rustup is not

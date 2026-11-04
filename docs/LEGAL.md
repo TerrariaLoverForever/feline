@@ -53,13 +53,15 @@ The GPL does not grant rights to the Feline name or logo; see
 [TRADEMARKS.md](../TRADEMARKS.md). The icon files in `icon/` and `assets/icons/`
 are **not** covered by the GPL: all rights reserved.
 
-### Open licensing question: the Roblox client
+### Licensing the runtime: the Roblox client
 
 Feline's future runtime will run the proprietary Roblox client, obtained
-separately by the user, in the same process. Whether that needs an additional
-permission under GPL-3.0 section 7 is **under review**. No such exception has
-been added. Until it is resolved, no runtime code is written (see
-[ROADMAP.md](ROADMAP.md)).
+separately by the user, in the same process. **Chosen approach (M2):** the
+runtime is GPL-3.0-or-later with an **additional permission under GPL-3.0
+section 7** allowing it to be combined with the Roblox client. The draft text is
+in [runtime/M2-RESEARCH.md](runtime/M2-RESEARCH.md#7-legal). It will be added as
+`LICENSE.exception` together with the first runtime code (M3), and should be
+reviewed before the first release. Not legal advice.
 
 ## Dependencies
 

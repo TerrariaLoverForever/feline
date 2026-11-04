@@ -1,0 +1,15 @@
+Feline runtime: additional permission under GNU GPL version 3 section 7
+
+This applies to the files of Feline's runtime (crates/feline-runtime/) whose
+headers refer to LICENSE.exception.
+
+If you modify this Program, or any covered work, by linking or combining it
+with the Roblox client (or a modified version of that client), containing
+parts covered by the terms of Roblox Corporation's license, the licensors of
+this Program grant you additional permission to convey the resulting work.
+
+This permission does not give anyone a right to the Roblox client itself.
+Feline does not include or distribute it; users obtain it themselves.
+
+Status: draft, chosen in milestone M2 (docs/runtime/M2-RESEARCH.md). It should
+be reviewed before the first release. This file is not legal advice.

@@ -1,0 +1,17 @@
+[package]
+name = "feline-runtime"
+description = "Feline's own runtime for Roblox's Android client (in development, milestone M3)"
+version.workspace = true
+edition.workspace = true
+# C-variadic function definitions (needed later for bionic and liblog) were
+# verified on rustc 1.99; an older minimum hasn't been checked.
+rust-version = "1.99"
+# GPL-3.0-or-later with the additional permission in LICENSE.exception
+# (combining with the Roblox client). Cargo can't express that exception.
+license = "GPL-3.0-or-later"
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
