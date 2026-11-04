@@ -78,6 +78,9 @@ pub enum Link {
     GameMode,
     /// Feline's "close the runtime when leaving a game" switch (a `Toggle`).
     CloseOnLeave,
+    /// The runtime's own Discord status (a `Toggle`), turned off while
+    /// Feline shows the status itself.
+    DiscordPresence,
 }
 
 /// One setting of a runtime that Feline can show and change.
@@ -132,6 +135,12 @@ pub fn managed_value(link: Link, overrides: &Overrides) -> Option<(Value, &'stat
             "Feline closes the runtime when you leave a game",
             "Feline keeps the runtime open when you leave a game",
         ),
+        Link::DiscordPresence => overrides.discord_presence.then(|| {
+            (
+                Value::Bool(false),
+                "Feline shows your Discord status instead",
+            )
+        }),
     }
 }
 
@@ -502,6 +511,7 @@ mod tests {
             renderer: Renderer::OpenGl,
             gamemode: Toggle::Off,
             close_on_leave: Toggle::On, // no linked setting here
+            discord_presence: false,
         };
         let changed = file.apply_overrides(&defs, &overrides).unwrap();
         assert_eq!(changed, ["gamemode", "graphicsMode"]);

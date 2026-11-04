@@ -22,7 +22,7 @@ use feline_core::launch::{self, GameExit};
 use feline_core::link::{self, LinkError};
 use feline_core::paths;
 use feline_core::runtime::{DetectContext, InstallKind, Installation, LaunchTarget, detect_all};
-use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Overrides, Settings};
+use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Settings};
 use feline_core::system::{CheckLevel, FlatpakNvidia, SessionType, SystemInfo};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -146,6 +146,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
         move |which, index| {
             if let Some(ui) = weak.upgrade() {
                 settings_page::set_override(&ui, &shared, which.as_str(), index);
+            }
+        }
+    });
+    ui.on_set_presence({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |which, value| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_presence(&ui, &shared, which.as_str(), value);
             }
         }
     });
@@ -741,7 +750,7 @@ fn set_launch(ui: &AppWindow, state: LaunchState, title: &str, detail: &str) {
 }
 
 fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
-    let (installation, overrides) = {
+    let (installation, settings) = {
         let mut state = lock(shared);
         if state.busy {
             return; // already starting or running
@@ -758,7 +767,7 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
         };
         let installation = found.installation.clone();
         state.busy = true;
-        (installation, state.settings.overrides)
+        (installation, state.settings.clone())
     };
 
     let name = installation.backend.name();
@@ -769,12 +778,24 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
     let spawned = thread::Builder::new()
         .name("feline-game".into())
         .spawn(move || {
-            let outcome = run_game(&installation, &target, &overrides, |title, detail| {
-                let (title, detail) = (title.to_owned(), detail.to_owned());
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    set_launch(&ui, LaunchState::Running, &title, &detail);
+            let presence_ui = weak.clone();
+            let on_presence = move |status: String| {
+                let _ = presence_ui.upgrade_in_event_loop(move |ui| {
+                    ui.set_presence_status(status.into());
                 });
-            });
+            };
+            let outcome = run_game(
+                &installation,
+                &target,
+                &settings,
+                on_presence,
+                |title, detail| {
+                    let (title, detail) = (title.to_owned(), detail.to_owned());
+                    let _ = weak.upgrade_in_event_loop(move |ui| {
+                        set_launch(&ui, LaunchState::Running, &title, &detail);
+                    });
+                },
+            );
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 let mut state = lock(&shared_for_thread);
                 state.busy = false;
@@ -820,9 +841,12 @@ impl Outcome {
 fn run_game(
     installation: &Installation,
     target: &LaunchTarget,
-    overrides: &Overrides,
+    settings: &Settings,
+    on_presence: impl Fn(String) + Send + 'static,
     on_running: impl FnOnce(&str, &str),
 ) -> Outcome {
+    let overrides = &settings.overrides;
+    let started_at = std::time::SystemTime::now();
     let name = installation.backend.name();
 
     // Write Feline's overrides into the runtime's settings first. A failure
@@ -849,16 +873,39 @@ fn run_game(
         (None, LaunchTarget::Home) => format!("Roblox is running in {name}"),
         (None, LaunchTarget::Game(_)) => format!("Joining the experience in {name}"),
     };
+    // Feline's Discord status follows this session's Roblox log.
+    let presence = overrides
+        .discord_presence
+        .then(|| {
+            feline_core::presence::Session::start(
+                installation.roblox_log_roots(&DetectContext::host()),
+                started_at,
+                settings.presence,
+                on_presence,
+            )
+        })
+        .and_then(Result::ok);
+
+    let default_detail = if presence.is_some() {
+        "Have fun! Keep Feline open to show your Discord status."
+    } else {
+        "Have fun! You can close Feline; the game keeps running."
+    };
     let mut detail = plan
         .note
         .clone()
-        .unwrap_or_else(|| "Have fun! You can close Feline; the game keeps running.".to_owned());
+        .unwrap_or_else(|| default_detail.to_owned());
     if let Some(warning) = settings_warning {
         detail = format!("{warning}\n{detail}");
     }
     on_running(&title, &detail);
 
-    match game.wait() {
+    let waited = game.wait();
+    // Clears the Discord status.
+    if let Some(presence) = presence {
+        presence.stop();
+    }
+    match waited {
         Ok(exit) => describe_exit(name, exit),
         Err(e) => Outcome::failed(
             "Lost track of the game",

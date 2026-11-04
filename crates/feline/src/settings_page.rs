@@ -46,6 +46,12 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     });
     ui.set_gamemode_index(toggle_index(o.gamemode));
     ui.set_close_index(toggle_index(o.close_on_leave));
+    let p = state.settings.presence;
+    ui.set_discord_on(o.discord_presence);
+    ui.set_discord_user(p.show_user);
+    ui.set_discord_join(p.join_button);
+    ui.set_discord_game(p.game_button);
+    ui.set_discord_menus(p.in_menus);
 
     let ctx = DetectContext::host();
     let tabs: Vec<RuntimeTab> = backends()
@@ -251,7 +257,7 @@ pub fn set_override(ui: &AppWindow, shared: &Shared, which: &str, index: i32) {
         2 => Toggle::Off,
         _ => Toggle::Runtime,
     };
-    let (settings, installations) = {
+    {
         let mut state = lock(shared);
         let o = &mut state.settings.overrides;
         match which {
@@ -266,6 +272,32 @@ pub fn set_override(ui: &AppWindow, shared: &Shared, which: &str, index: i32) {
             "close-on-leave" => o.close_on_leave = toggle(index),
             _ => return,
         }
+    }
+    save_and_apply(ui, shared);
+}
+
+/// Changes one Discord status option. Turning the status on or off also
+/// changes the runtimes' own Discord settings, so it's applied like an override.
+pub fn set_presence(ui: &AppWindow, shared: &Shared, which: &str, value: bool) {
+    {
+        let mut state = lock(shared);
+        let settings = &mut state.settings;
+        match which {
+            "enabled" => settings.overrides.discord_presence = value,
+            "show-user" => settings.presence.show_user = value,
+            "join-button" => settings.presence.join_button = value,
+            "game-button" => settings.presence.game_button = value,
+            "in-menus" => settings.presence.in_menus = value,
+            _ => return,
+        }
+    }
+    save_and_apply(ui, shared);
+}
+
+/// Saves Feline's settings and writes the overrides into every installed runtime.
+fn save_and_apply(ui: &AppWindow, shared: &Shared) {
+    let (settings, installations) = {
+        let mut state = lock(shared);
         state.settings_message = None;
         let installations: Vec<Installation> =
             state.found.iter().map(|f| f.installation.clone()).collect();

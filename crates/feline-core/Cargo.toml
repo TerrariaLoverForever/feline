@@ -15,3 +15,6 @@ workspace = true
 # keeps keys in their original order, so Feline's edits produce small,
 # readable diffs and don't reshuffle another program's file.
 serde_json = { version = "1", features = ["preserve_order"] }
+# HTTPS client for Roblox's public web API (game names and icons for the
+# Discord status). Pure-Rust TLS (rustls), no OpenSSL needed; gzip off.
+ureq = { version = "3", default-features = false, features = ["rustls"] }

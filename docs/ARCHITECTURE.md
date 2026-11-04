@@ -37,7 +37,8 @@ All Feline code is licensed GPL-3.0-or-later.
    own process group, so closing or crashing the launcher doesn't end the game.
 6. **The GUI never blocks.** Slow work runs on a background thread.
 7. **Small dependency set.** Third-party crates: `slint` (GUI, default
-   features off) and `serde_json` (editing the runtimes' JSON settings files).
+   features off), `serde_json` (JSON settings files, Discord and Roblox API
+   messages) and `ureq` with `rustls` (HTTPS for Roblox's public web API).
    Every dependency is license-checked first (see [LEGAL.md](LEGAL.md)).
 8. **Editing a runtime's own settings file is conservative.** Only settings
    whose values were verified are listed; files are never created, never
@@ -55,6 +56,7 @@ All Feline code is licensed GPL-3.0-or-later.
 | `runtime` | `RuntimeBackend` trait, `Origin` (Feline vs external), `Installation`, `detect_all` |
 | `settings` | `~/.config/feline/settings.conf`: chosen runtime, accepted account-notice version |
 | `runtime::config` | Settings lists (`SettingDef`), safe editing of a runtime's JSON file (`ConfigFile`), Feline's overrides (`managed_value`), "is it running?" |
+| `presence` | Feline's Discord status: `log` (follows the Roblox client log), `roblox` (public web API lookups), `discord` (Discord's local socket protocol), `Session` (background thread per game) |
 | `runtime::sober` | Optional adapter for the external Sober runtime (Flatpak only, closed source): `sober [link]` |
 | `runtime::stud` | Optional adapter for the external Stud runtime: Flatpak / `stud` on `PATH` (verified by its metainfo) / AppImage, `stud [link]` |
 | `runtime::cordial` | Optional adapter for the external Cordial runtime: finds Flatpak / `PATH` / AppImage installs, uses `--help`, `--doctor`, `--diagnostics` |

@@ -11,6 +11,7 @@
 pub mod launch;
 pub mod link;
 pub mod paths;
+pub mod presence;
 pub mod process;
 pub mod runtime;
 pub mod settings;

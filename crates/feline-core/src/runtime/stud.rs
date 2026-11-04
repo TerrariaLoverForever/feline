@@ -118,18 +118,24 @@ static SETTINGS: &[SettingDef] = &[
         false,
     ),
     toggle("systemTray", "System tray icon", "", true),
-    toggle(
-        "discordRichPresence",
-        "Discord status",
-        "Stud's own Discord Rich Presence.",
-        true,
-    ),
-    toggle(
-        "discordJoinButton",
-        "Discord Join button",
-        "Lets people join your server from your Discord profile.",
-        false,
-    ),
+    SettingDef {
+        link: Some(Link::DiscordPresence),
+        ..toggle(
+            "discordRichPresence",
+            "Discord status",
+            "Stud's own Discord Rich Presence.",
+            true,
+        )
+    },
+    SettingDef {
+        link: Some(Link::DiscordPresence),
+        ..toggle(
+            "discordJoinButton",
+            "Discord Join button",
+            "Lets people join your server from your Discord profile.",
+            false,
+        )
+    },
 ];
 
 impl RuntimeBackend for Stud {
@@ -204,6 +210,19 @@ impl RuntimeBackend for Stud {
             InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.config_dir("stud")?,
         };
         Some(dir.join("config.json"))
+    }
+
+    fn roblox_log_roots(&self, installation: &Installation, ctx: &DetectContext) -> Vec<PathBuf> {
+        // Not verified on a real install yet: Stud keeps "engine data" in its
+        // data folder, so the Roblox log is searched for under it.
+        match &installation.kind {
+            InstallKind::Flatpak { app_id, .. } => {
+                ctx.flatpak_data_dir(app_id).map(|d| d.join("stud"))
+            }
+            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.data_dir("stud"),
+        }
+        .into_iter()
+        .collect()
     }
 
     fn process_names(&self) -> &'static [&'static str] {

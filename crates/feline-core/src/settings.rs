@@ -9,6 +9,8 @@
 //! account_notice = 1
 //! renderer = opengl
 //! gamemode = on
+//! discord = on
+//! discord_join_button = on
 //! ```
 //!
 //! Stability rules:
@@ -54,6 +56,34 @@ pub struct Overrides {
     pub renderer: Renderer,
     pub gamemode: Toggle,
     pub close_on_leave: Toggle,
+    /// Feline shows the Discord status itself, so the runtimes' own Discord
+    /// status is turned off (two programs would fight over one status).
+    pub discord_presence: bool,
+}
+
+/// What Feline's Discord status shows (when `Overrides::discord_presence` is on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresenceOptions {
+    /// Your Roblox username and avatar. Off by default: it's personal.
+    pub show_user: bool,
+    /// A "Join server" button. Off by default: anyone who sees your profile
+    /// could join the server you're on.
+    pub join_button: bool,
+    /// A "See this game" button linking to the game's Roblox page.
+    pub game_button: bool,
+    /// Show "In the Roblox menus" between games (otherwise no status).
+    pub in_menus: bool,
+}
+
+impl Default for PresenceOptions {
+    fn default() -> Self {
+        Self {
+            show_user: false,
+            join_button: false,
+            game_button: true,
+            in_menus: true,
+        }
+    }
 }
 
 impl Renderer {
@@ -98,6 +128,7 @@ pub struct Settings {
     /// The version of the account-risk notice the user accepted; 0 = never.
     pub account_notice: u32,
     pub overrides: Overrides,
+    pub presence: PresenceOptions,
 }
 
 impl Settings {
@@ -132,6 +163,12 @@ impl Settings {
                 "renderer" => settings.overrides.renderer = Renderer::parse(value),
                 "gamemode" => settings.overrides.gamemode = Toggle::parse(value),
                 "close_on_leave" => settings.overrides.close_on_leave = Toggle::parse(value),
+                "discord" => settings.overrides.discord_presence = value == "on",
+                "discord_show_user" => settings.presence.show_user = value == "on",
+                "discord_join_button" => settings.presence.join_button = value == "on",
+                // These two default to on, so only "off" changes them.
+                "discord_game_button" => settings.presence.game_button = value != "off",
+                "discord_in_menus" => settings.presence.in_menus = value != "off",
                 _ => {}
             }
         }
@@ -155,6 +192,22 @@ impl Settings {
         }
         if o.close_on_leave != Toggle::Runtime {
             text.push_str(&format!("close_on_leave = {}\n", o.close_on_leave.as_str()));
+        }
+        let on_off = |b: bool| if b { "on" } else { "off" };
+        if o.discord_presence {
+            text.push_str("discord = on\n");
+        }
+        let p = &self.presence;
+        let defaults = PresenceOptions::default();
+        for (key, value, default) in [
+            ("discord_show_user", p.show_user, defaults.show_user),
+            ("discord_join_button", p.join_button, defaults.join_button),
+            ("discord_game_button", p.game_button, defaults.game_button),
+            ("discord_in_menus", p.in_menus, defaults.in_menus),
+        ] {
+            if value != default {
+                text.push_str(&format!("{key} = {}\n", on_off(value)));
+            }
         }
         text
     }
@@ -238,6 +291,13 @@ mod tests {
                 renderer: Renderer::OpenGl,
                 gamemode: Toggle::Off,
                 close_on_leave: Toggle::On,
+                discord_presence: true,
+            },
+            presence: PresenceOptions {
+                show_user: true,
+                join_button: true,
+                game_button: false,
+                in_menus: false,
             },
         };
         settings.save_to(&path).unwrap();

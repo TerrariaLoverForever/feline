@@ -72,6 +72,23 @@ impl DetectContext {
         Some(base.join(program))
     }
 
+    /// The data folder of a non-Flatpak program, e.g. `~/.local/share/stud`.
+    pub fn data_dir(&self, program: &str) -> Option<PathBuf> {
+        Some(crate::paths::data_home()?.join(program))
+    }
+
+    /// The data folder a Flatpak app sees as its data home, e.g.
+    /// `~/.var/app/org.vinegarhq.Sober/data`.
+    pub fn flatpak_data_dir(&self, app_id: &str) -> Option<PathBuf> {
+        Some(
+            self.home
+                .as_ref()?
+                .join(".var/app")
+                .join(app_id)
+                .join("data"),
+        )
+    }
+
     /// The settings folder a Flatpak app sees as its config home, e.g.
     /// `~/.var/app/org.vinegarhq.Sober/config`.
     pub fn flatpak_config_dir(&self, app_id: &str) -> Option<PathBuf> {
@@ -219,6 +236,11 @@ impl Installation {
     /// Where this installation keeps its own settings file, if Feline can edit it.
     pub fn config_path(&self, ctx: &DetectContext) -> Option<PathBuf> {
         self.backend.config_path(self, ctx)
+    }
+
+    /// Where this installation's Roblox client writes its logs.
+    pub fn roblox_log_roots(&self, ctx: &DetectContext) -> Vec<PathBuf> {
+        self.backend.roblox_log_roots(self, ctx)
     }
 
     /// True if this runtime is running right now (any installation of it).
@@ -382,6 +404,11 @@ pub trait RuntimeBackend: Send + Sync {
     /// Where `installation` keeps the settings file described by `settings`.
     fn config_path(&self, _installation: &Installation, _ctx: &DetectContext) -> Option<PathBuf> {
         None
+    }
+    /// Folders under which the Roblox client of `installation` writes its
+    /// logs (searched a few levels deep), for the Discord status.
+    fn roblox_log_roots(&self, _installation: &Installation, _ctx: &DetectContext) -> Vec<PathBuf> {
+        Vec::new()
     }
     /// Process names (as in `/proc/<pid>/comm`, cut to 15 characters) that
     /// mean this runtime is running.

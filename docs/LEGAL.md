@@ -29,6 +29,19 @@ Roblox does not support third-party clients on Linux.
 Using Feline does not remove these risks. **Do not use an account you can't
 afford to lose.**
 
+## Privacy: what the Discord status sends
+
+Only while the Discord status is switched on and a game Feline started is running:
+
+- **To Roblox's public web API** (no login): the game's universe ID, to get its
+  name, creator and icon. Your user ID only if "Show your Roblox username and
+  avatar" is on.
+- **To the Discord app on your computer** (a local socket, not the internet):
+  the status text, images and buttons shown in the Settings page. Discord then
+  shows it to people who can see your profile.
+- Feline reads the Roblox client's log file for this. It never reads cookies,
+  passwords or anything outside that log.
+
 ## Feline's license
 
 Feline is free software, licensed under the **GNU General Public License,
@@ -54,6 +67,7 @@ been added. Until it is resolved, no runtime code is written (see
 |---|---|---|
 | Rust standard library | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
 | [serde_json](https://github.com/serde-rs/json) 1 (+ `serde`, `indexmap` for key order) | MIT OR Apache-2.0 | Compiled in. Compatible with GPL-3.0 |
+| [ureq](https://github.com/algesten/ureq) 3 with `rustls` (+ `rustls`, `ring`, `webpki-roots`, `http` and small helpers) | MIT / Apache-2.0 / ISC / BSD-3-Clause / Zlib; `ring`: Apache-2.0 AND ISC; `webpki-roots`: CDLA-Permissive-2.0 (certificate data; keep its license text) | Compiled in. All compatible with GPL-3.0. Checked with `cargo metadata` |
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |

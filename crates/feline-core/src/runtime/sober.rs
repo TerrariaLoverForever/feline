@@ -108,18 +108,24 @@ static SETTINGS: &[SettingDef] = &[
         "Lets Roblox use controllers.",
         false,
     ),
-    toggle(
-        "discord_rpc_enabled",
-        "Discord status",
-        "Sober's own Discord Rich Presence.",
-        false,
-    ),
-    toggle(
-        "discord_rpc_show_join_button",
-        "Discord Join button",
-        "Lets people join your server from your Discord profile.",
-        false,
-    ),
+    SettingDef {
+        link: Some(Link::DiscordPresence),
+        ..toggle(
+            "discord_rpc_enabled",
+            "Discord status",
+            "Sober's own Discord Rich Presence.",
+            false,
+        )
+    },
+    SettingDef {
+        link: Some(Link::DiscordPresence),
+        ..toggle(
+            "discord_rpc_show_join_button",
+            "Discord Join button",
+            "Lets people join your server from your Discord profile.",
+            false,
+        )
+    },
 ];
 
 pub const FLATPAK_ID: &str = "org.vinegarhq.Sober";
@@ -172,6 +178,14 @@ impl RuntimeBackend for Sober {
 
     fn process_names(&self) -> &'static [&'static str] {
         &["sober"]
+    }
+
+    fn roblox_log_roots(&self, _installation: &Installation, ctx: &DetectContext) -> Vec<PathBuf> {
+        // Checked on a real install.
+        ctx.flatpak_data_dir(FLATPAK_ID)
+            .map(|dir| dir.join("sober/appData/logs"))
+            .into_iter()
+            .collect()
     }
 
     fn version(&self, _installation: &Installation) -> Result<String, RuntimeError> {

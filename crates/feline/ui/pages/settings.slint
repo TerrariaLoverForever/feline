@@ -106,11 +106,20 @@ export component SettingsPage inherits Rectangle {
     in property <string> apply-status;
     in property <Level> apply-level;
 
+    // Feline's Discord status.
+    in property <bool> discord-on;
+    in property <bool> discord-user;
+    in property <bool> discord-join;
+    in property <bool> discord-game;
+    in property <bool> discord-menus;
+    in property <string> presence-status;
+
     in property <[RuntimeTab]> tabs;
     // 0 = Feline, 1.. = tabs[n - 1]
     in-out property <int> current: 0;
 
     callback set-override(string, int);
+    callback set-presence(string, bool);
     callback set-bool(string, string, bool);
     callback set-choice(string, string, int);
     callback set-number(string, string, int);
@@ -203,6 +212,83 @@ export component SettingsPage inherits Rectangle {
                     BodyText {
                         horizontal-stretch: 1;
                         text: root.apply-status;
+                    }
+                }
+            }
+            if root.current == 0: Card {
+                Eyebrow {
+                    text: "DISCORD STATUS";
+                }
+                SettingLine {
+                    label: "Show what you're playing on Discord";
+                    help: "Works with every runtime. Keep Feline open while you play: the status ends when Feline closes. Turns off Sober's and Stud's own Discord status, so they don't fight over it.";
+                    Switch {
+                        checked: root.discord-on;
+                        toggled => {
+                            root.set-presence("enabled", self.checked);
+                        }
+                    }
+                }
+                Divider { }
+                SettingLine {
+                    label: "\"See this game\" button";
+                    help: "Links to the game's Roblox page.";
+                    Switch {
+                        checked: root.discord-game;
+                        enabled: root.discord-on;
+                        toggled => {
+                            root.set-presence("game-button", self.checked);
+                        }
+                    }
+                }
+                Divider { }
+                SettingLine {
+                    label: "\"Join server\" button";
+                    help: "Anyone who can see your Discord profile could join the server you're on.";
+                    Switch {
+                        checked: root.discord-join;
+                        enabled: root.discord-on;
+                        toggled => {
+                            root.set-presence("join-button", self.checked);
+                        }
+                    }
+                }
+                Divider { }
+                SettingLine {
+                    label: "Show your Roblox username and avatar";
+                    Switch {
+                        checked: root.discord-user;
+                        enabled: root.discord-on;
+                        toggled => {
+                            root.set-presence("show-user", self.checked);
+                        }
+                    }
+                }
+                Divider { }
+                SettingLine {
+                    label: "Show a status in the Roblox menus";
+                    help: "Otherwise there's no status between games.";
+                    Switch {
+                        checked: root.discord-menus;
+                        enabled: root.discord-on;
+                        toggled => {
+                            root.set-presence("in-menus", self.checked);
+                        }
+                    }
+                }
+                if root.discord-on && root.presence-status != "": HorizontalLayout {
+                    spacing: 10px;
+                    padding-top: 6px;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 5px;
+                        StatusDot {
+                            tone: Theme.accent;
+                        }
+                    }
+                    BodyText {
+                        horizontal-stretch: 1;
+                        text: root.presence-status;
                     }
                 }
             }

@@ -236,6 +236,19 @@ impl RuntimeBackend for Cordial {
         &["cordial", "cordial-run"]
     }
 
+    fn roblox_log_roots(&self, installation: &Installation, ctx: &DetectContext) -> Vec<PathBuf> {
+        // Checked on real installs: …/cordial/profiles/<profile>/data/files/appData/logs.
+        let profiles = match &installation.kind {
+            InstallKind::Flatpak { app_id, .. } => ctx
+                .flatpak_data_dir(app_id)
+                .map(|data| data.join("cordial/profiles")),
+            InstallKind::AppImage(_) | InstallKind::Native(_) => {
+                ctx.data_dir("cordial").map(|dir| dir.join("profiles"))
+            }
+        };
+        profiles.into_iter().collect()
+    }
+
     fn has_doctor(&self) -> bool {
         true
     }
