@@ -2,11 +2,14 @@
 // (with the additional permission in LICENSE.exception)
 //! The engine's `dl*` imports: loading other libraries and finding code.
 //!
-//! - `dlopen`: no Android library is provided yet, so every request is
-//!   **logged** (that list says which libraries the engine needs, e.g.
-//!   Vulkan or audio) and answered honestly with "not available".
-//! - `dlsym`, `dlclose`, `dlerror`: the matching operations, with a
-//!   per-thread error message as in any C library.
+//! - `dlopen`: Android's system libraries whose functions Feline provides
+//!   (libc, libandroid, EGL, …) get a handle; anything else is **logged**
+//!   (that list says which libraries the engine needs, e.g. Vulkan or
+//!   audio) and answered honestly with "not available".
+//! - `dlsym`: on that handle, the function an import of the same name is
+//!   bound to; otherwise "not found". Every lookup is logged.
+//! - `dlclose`, `dlerror`: the matching operations, with a per-thread error
+//!   message as in any C library.
 //! - `dladdr`: answers for addresses inside the engine; others go to glibc.
 //!   `Dl_info` has the same four fields in both libraries.
 //! - `dl_iterate_phdr`: reports the engine first (C++ exception unwinding
@@ -54,6 +57,28 @@ fn fail(message: String) {
     PENDING.with(|p| *p.borrow_mut() = CString::new(message).ok());
 }
 
+/// Android system libraries whose functions Feline provides: `dlopen` of
+/// these returns a handle, and `dlsym` on it answers with the same function
+/// an import of that name is bound to (see `imports::resolve_function`).
+const SYSTEM_LIBRARIES: &[&str] = &[
+    "libc.so",
+    "libm.so",
+    "libdl.so",
+    "liblog.so",
+    "libandroid.so",
+    "libEGL.so",
+    "libGLESv2.so",
+    "libGLESv3.so",
+];
+
+/// The handle for Feline's system libraries (any non-NULL value works; this
+/// one points at a static so it can't collide with a real address).
+static SYSTEM_HANDLE: u8 = 0;
+
+fn system_handle() -> *mut c_void {
+    std::ptr::from_ref(&SYSTEM_HANDLE).cast_mut().cast()
+}
+
 /// # Safety
 /// `name` is NULL or a valid C string.
 pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_void {
@@ -65,6 +90,12 @@ pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_vo
             .to_string_lossy()
             .into_owned()
     };
+    // "libc.so", "/system/lib64/libc.so", …
+    let base = name.rsplit('/').next().unwrap_or(&name);
+    if SYSTEM_LIBRARIES.contains(&base) {
+        eprintln!("feline-runtime: the engine opened `{name}` (Feline's)");
+        return system_handle();
+    }
     eprintln!(
         "feline-runtime: the engine asked for the library `{name}`, which Feline doesn't provide yet"
     );
@@ -74,9 +105,15 @@ pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_vo
 
 /// # Safety
 /// `symbol` is a valid C string.
-pub unsafe extern "C" fn dlsym(_handle: *mut c_void, symbol: *const c_char) -> *mut c_void {
+pub unsafe extern "C" fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void {
     // SAFETY: the caller passes a valid C string.
     let symbol = unsafe { CStr::from_ptr(symbol) }.to_string_lossy();
+    if handle == system_handle()
+        && let Some(address) = crate::imports::resolve_function(&symbol, &crate::host::Host::open())
+    {
+        eprintln!("feline-runtime: the engine looked up `{symbol}` (found)");
+        return address as *mut c_void;
+    }
     eprintln!(
         "feline-runtime: the engine looked up `{symbol}` with dlsym, which Feline doesn't answer yet"
     );

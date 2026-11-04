@@ -35,6 +35,7 @@ pub mod keys;
 pub mod liblog;
 pub mod load;
 pub mod looper;
+pub mod manifest;
 pub mod net;
 pub mod packed;
 pub mod sem;

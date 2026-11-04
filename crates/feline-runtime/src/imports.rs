@@ -571,6 +571,36 @@ impl Imports {
 }
 
 /// Binds every import in `symbols` (the library's dynamic symbols).
+/// The function a name resolves to for the engine, by the same rules as its
+/// imports (Feline's own first, then the reasoned forwarding tables, then GL
+/// ES / EGL): for `dlsym` on Feline's system libraries. Variables aren't
+/// resolved here.
+pub fn resolve_function(name: &str, host: &Host) -> Option<u64> {
+    if let Some(address) = crate::bionic::implementation(name) {
+        return Some(address);
+    }
+    if FORWARD_LIBM.contains(&name) {
+        return host.libc(name);
+    }
+    if FORWARD_LIBC.contains(&name)
+        || FORWARD_PTHREAD.contains(&name)
+        || FORWARD_LOCALE.contains(&name)
+        || FORWARD_STDIO.contains(&name)
+    {
+        return host.libc(name);
+    }
+    if let Some((_, glibc)) = ALIASES.iter().find(|(b, _)| *b == name) {
+        return host.libc(glibc);
+    }
+    if name.starts_with("gl") {
+        return host.gles(name);
+    }
+    if name.starts_with("egl") {
+        return host.egl(name);
+    }
+    None
+}
+
 pub fn bind(symbols: &[Symbol], host: &Host) -> Result<Imports, String> {
     let imports: Vec<&Symbol> = symbols
         .iter()

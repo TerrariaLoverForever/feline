@@ -133,6 +133,11 @@ pub fn set_apk(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The opened APK's bytes.
+pub fn apk_bytes() -> Option<&'static [u8]> {
+    MANAGER.get().map(|m| m.map)
+}
+
 /// Unpacks the APK's `assets/` folder into `dest` (once: skipped when
 /// `dest/.complete` exists), for engine code that reads assets as plain
 /// files (`PlatformParams.assetFolderPath`). Returns `dest`.

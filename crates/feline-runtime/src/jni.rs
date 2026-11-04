@@ -1137,6 +1137,7 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
         ("android/util/DisplayMetrics", "heightPixels") => 1080.0,
         // Android 13, matching ro.build.version.sdk.
         ("android/os/Build$VERSION", "SDK_INT") => 33.0,
+        ("com/roblox/engine/jni/model/DeviceStaticParams", "cpu64Bit") => 1.0,
         ("com/roblox/engine/jni/model/PlatformParams", "dpiScale") => 1.0,
         // The window's physical size at 160 dpi: pixels / 160 * 25.4 mm.
         ("com/roblox/engine/jni/model/PlatformParams", "viewportWidthMm") => window_mm(true),

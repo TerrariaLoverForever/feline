@@ -211,6 +211,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                 "Constructors    all {ran} ran and returned\nWaited          3 s without JNI_OnLoad, no crash\n"
             ));
         }
+        describe_device();
         eprintln!("feline-runtime: calling JNI_OnLoad…");
         let version = feline_runtime::init::call_jni_onload(&elf, image)?;
         // The engine's cache folder (Android's Context.getCacheDir()), set
@@ -519,4 +520,41 @@ fn runtime_data() -> Result<std::path::PathBuf, String> {
         })
         .ok_or("no home folder")?;
     Ok(base.join("feline/runtime"))
+}
+
+/// The device the app runs on, described honestly, for the app's
+/// `DeviceStaticParams` (read during start-up): Android 13, as the system
+/// properties say, made by "Feline", model "Linux", and the app's own
+/// version from its manifest. Empty answers made the app think it ran on
+/// a very old Android ("update your device").
+fn describe_device() {
+    let app_version = feline_runtime::assets::apk_bytes()
+        .and_then(feline_runtime::manifest::apk_version_name)
+        .unwrap_or_default();
+    eprintln!("feline-runtime: app version {app_version}");
+    // The user agent the app's HTTP requests and scripts see, in the
+    // Roblox Android app's format, with the same honest device details.
+    let user_agent = format!(
+        "Mozilla/5.0 (Linux; Android 13; Linux) Roblox/Android RobloxApp/{app_version} (GlobalDist; AndroidApp)"
+    );
+    feline_runtime::jni::set_known_string(
+        "com/roblox/engine/jni/autovalue/InitParams",
+        "userAgent",
+        &user_agent,
+    );
+    for (field, value) in [
+        ("osVersion", "13"),
+        ("manufacturer", "Feline"),
+        ("deviceName", "Linux"),
+        ("deviceSku", "feline"),
+        ("socModel", "x86_64"),
+        ("appBuildVariant", "release"),
+        ("appVersion", app_version.as_str()),
+    ] {
+        feline_runtime::jni::set_known_string(
+            "com/roblox/engine/jni/model/DeviceStaticParams",
+            field,
+            value,
+        );
+    }
 }

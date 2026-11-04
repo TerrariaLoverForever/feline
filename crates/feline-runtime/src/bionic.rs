@@ -333,7 +333,16 @@ pub unsafe extern "C" fn traced_setspecific(
 }
 
 /// The address of Feline's implementation of `name`, if there is one.
+/// `int android_get_device_api_level(void)`: Android 13 (SDK 33), as the
+/// system properties say.
+pub extern "C" fn android_get_device_api_level() -> c_int {
+    33
+}
+
 pub fn implementation(name: &str) -> Option<u64> {
+    if name == "android_get_device_api_level" {
+        return Some(android_get_device_api_level as extern "C" fn() -> c_int as usize as u64);
+    }
     if let Some(address) = crate::dl::implementation(name) {
         return Some(address);
     }
