@@ -244,6 +244,8 @@ fn run_init(data: &[u8]) -> ExitCode {
                         as usize,
                 ],
             )?;
+            // Roblox's own input functions, for the window's mouse and keys.
+            feline_runtime::init::prepare_input_natives(&elf, image)?;
             // FELINE_STORAGE_INIT=1 (experiment): LocalStorageManager's
             // initStorageManagerNativeV3(AssetManager, String, String), here
             // with the files and cache folders (the parameter names aren't

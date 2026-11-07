@@ -479,6 +479,206 @@ pub fn call_lifecycle(name: &str, handle: i64) -> Result<(), String> {
 /// Tells the engine about a window change, through the natives AGDK
 /// registered: `onSurfaceCreatedNative(J, Surface)`, `onSurfaceChangedNative
 /// (J, Surface, format, width, height)`, `onWindowFocusChangedNative(J, Z)`.
+/// Roblox's own input functions. Its Java code passes mouse and keyboard
+/// input through these, not through GameActivity's input queue (which the
+/// engine never reads): mouse buttons are Roblox's MouseButton1/2/3 indices
+/// (0, 1, 2), positions are surface pixels. Argument meanings follow
+/// mocktail's input adapter (Apache-2.0, github.com/komaruworld/mocktail).
+#[derive(Clone, Copy)]
+struct InputNatives {
+    input_class: usize,
+    gl_class: usize,
+    mouse_move: Option<usize>,
+    mouse_button: Option<usize>,
+    mouse_wheel: Option<usize>,
+    key: Option<usize>,
+    sync_text: Option<usize>,
+    pass_text: Option<usize>,
+    return_pressed: Option<usize>,
+    release_focus: Option<usize>,
+}
+
+static INPUT_NATIVES: std::sync::OnceLock<InputNatives> = std::sync::OnceLock::new();
+
+/// Finds Roblox's input functions (once the engine is loaded).
+pub fn prepare_input_natives(elf: &Elf, image: &Image) -> Result<(), String> {
+    const INPUT: &str = "com/roblox/engine/jni/NativeInputInterface";
+    const GL: &str = "com/roblox/engine/jni/NativeGLInterface";
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let find = |class: &str, method: &str| {
+        let name = jni_symbol(class, method);
+        symbols
+            .iter()
+            .find(|s| s.defined && s.name == name)
+            .map(|s| (image.bias() + s.value) as usize)
+    };
+    let natives = InputNatives {
+        input_class: crate::jni::new_class(INPUT) as usize,
+        gl_class: crate::jni::new_class(GL) as usize,
+        mouse_move: find(INPUT, "nativePassMouseMove"),
+        mouse_button: find(INPUT, "nativePassMouseButton"),
+        mouse_wheel: find(INPUT, "nativePassMouseWheel"),
+        key: find(GL, "nativePassKeyEvent"),
+        sync_text: find(GL, "syncTextboxTextAndCursorPosition2"),
+        pass_text: find(GL, "nativePassText"),
+        return_pressed: find(GL, "nativeReturnPressedFromOnScreenKeyboard"),
+        release_focus: find(GL, "nativeReleaseFocus"),
+    };
+    let _ = INPUT_NATIVES.set(natives);
+    Ok(())
+}
+
+/// Sends a pointer event through Roblox's mouse functions. False if they
+/// aren't available (then GameActivity's touch path is used).
+fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
+    use crate::window::TouchAction;
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<(f32, f32)>> = Mutex::new(None);
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return false;
+    };
+    let class = natives.input_class as *mut c_void;
+    let (x, y) = (touch.x.max(0.0), touch.y.max(0.0));
+    match touch.action {
+        TouchAction::Down | TouchAction::Up => {
+            let Some(address) = natives.mouse_button else {
+                return false;
+            };
+            // SAFETY: nativePassMouseButton (FFZI)V, a static JNI function.
+            let button: extern "C" fn(*mut c_void, *mut c_void, f32, f32, u8, c_int) =
+                unsafe { std::mem::transmute(address) };
+            button(
+                env,
+                class,
+                x,
+                y,
+                u8::from(touch.action == TouchAction::Down),
+                0,
+            );
+        }
+        TouchAction::Move | TouchAction::Hover => {
+            let Some(address) = natives.mouse_move else {
+                return false;
+            };
+            let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
+            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| (x - lx, y - ly));
+            *last = Some((x, y));
+            // SAFETY: nativePassMouseMove (FFFF)V: position, then movement.
+            let moved: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32, f32) =
+                unsafe { std::mem::transmute(address) };
+            moved(env, class, x, y, dx, dy);
+        }
+    }
+    true
+}
+
+/// Sends a mouse wheel step through Roblox's function (`dy` > 0 is up).
+fn roblox_wheel(env: *mut c_void, x: f32, y: f32, dy: f32) {
+    if let Some(address) = INPUT_NATIVES.get().and_then(|n| n.mouse_wheel) {
+        let class = INPUT_NATIVES.get().map_or(0, |n| n.input_class) as *mut c_void;
+        // SAFETY: nativePassMouseWheel (FFF)V.
+        let wheel: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32) =
+            unsafe { std::mem::transmute(address) };
+        wheel(env, class, x, y, dy);
+    }
+}
+
+/// Types `key` into the focused text box, if there is one and the key is for
+/// it (see `text.rs`). True if the key was used.
+fn roblox_text(env: *mut c_void, key: crate::window::Key) -> bool {
+    use crate::text::Edit;
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return false;
+    };
+    let (Some(sync), Some(pass), Some(ret), Some(release)) = (
+        natives.sync_text,
+        natives.pass_text,
+        natives.return_pressed,
+        natives.release_focus,
+    ) else {
+        return false;
+    };
+    let Some(edit) = crate::text::key(key) else {
+        return false;
+    };
+    let class = natives.gl_class as *mut c_void;
+    // SAFETY: the DEX signatures: syncTextboxTextAndCursorPosition2
+    // (Ljava/lang/String;I)V, nativePassText (JLjava/lang/String;ZI)V,
+    // nativeReturnPressedFromOnScreenKeyboard (J)V, nativeReleaseFocus (J)V.
+    let (sync, pass, ret, release): (
+        extern "C" fn(*mut c_void, *mut c_void, *mut c_void, c_int),
+        extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void, u8, c_int),
+        extern "C" fn(*mut c_void, *mut c_void, i64),
+        extern "C" fn(*mut c_void, *mut c_void, i64),
+    ) = unsafe {
+        (
+            std::mem::transmute(sync),
+            std::mem::transmute(pass),
+            std::mem::transmute(ret),
+            std::mem::transmute(release),
+        )
+    };
+    match edit {
+        Edit::Unchanged => {}
+        Edit::Changed {
+            text_box,
+            text,
+            cursor,
+        } => {
+            sync(env, class, crate::jni::new_string(&text), cursor);
+            pass(
+                env,
+                class,
+                text_box,
+                crate::jni::new_string(&text),
+                0,
+                cursor,
+            );
+        }
+        Edit::Enter {
+            text_box,
+            text,
+            cursor,
+        } => {
+            sync(env, class, crate::jni::new_string(&text), cursor);
+            ret(env, class, text_box);
+            pass(
+                env,
+                class,
+                text_box,
+                crate::jni::new_string(&text),
+                1,
+                cursor,
+            );
+        }
+        Edit::Release { text_box } => release(env, class, text_box),
+    }
+    true
+}
+
+/// Sends a key through Roblox's function. False if it isn't available.
+fn roblox_key(env: *mut c_void, key: crate::window::Key) -> bool {
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return false;
+    };
+    let Some(address) = natives.key else {
+        return false;
+    };
+    // SAFETY: nativePassKeyEvent (ZIIZ)V: pressed, evdev scan code, Android
+    // key code, repeat.
+    let pass: extern "C" fn(*mut c_void, *mut c_void, u8, c_int, c_int, u8) =
+        unsafe { std::mem::transmute(address) };
+    pass(
+        env,
+        natives.gl_class as *mut c_void,
+        u8::from(key.down),
+        key.scan_code,
+        key.code,
+        u8::from(key.repeat),
+    );
+    true
+}
+
 pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Result<(), String> {
     use crate::window::WindowChange;
     /// Android's PixelFormat.RGBA_8888.
@@ -521,10 +721,39 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
             focus(env, activity, handle, u8::from(focused));
         }
         WindowChange::CloseRequested => {}
+        WindowChange::Wheel { x, y, dy } => roblox_wheel(env, x, y, dy),
+        WindowChange::Touch(touch) if crate::window::mouse_mode() && roblox_mouse(env, touch) => {
+            static LOGGED: AtomicUsize = AtomicUsize::new(0);
+            if touch.action != crate::window::TouchAction::Hover
+                && LOGGED.fetch_add(1, Ordering::Relaxed) < 12
+            {
+                eprintln!(
+                    "feline-runtime: mouse {:?} at ({:.0}, {:.0}) through Roblox's input",
+                    touch.action, touch.x, touch.y
+                );
+            }
+        }
+        WindowChange::Key(key) if roblox_text(env, key) || roblox_key(env, key) => {}
         WindowChange::Touch(touch) => {
             use crate::window::TouchAction;
-            /// AINPUT_SOURCE_TOUCHSCREEN.
+            /// AINPUT_SOURCE_TOUCHSCREEN, AINPUT_SOURCE_MOUSE.
             const SOURCE_TOUCHSCREEN: c_int = 0x1002;
+            const SOURCE_MOUSE: c_int = 0x2002;
+            /// MotionEvent.BUTTON_PRIMARY.
+            const BUTTON_PRIMARY: c_int = 1;
+            let mouse = crate::window::mouse_mode();
+            let source = if mouse {
+                SOURCE_MOUSE
+            } else {
+                SOURCE_TOUCHSCREEN
+            };
+            // The button held during the event, and the one that changed.
+            let (button_state, action_button) = match (mouse, touch.action) {
+                (false, _) | (true, TouchAction::Hover) => (0, 0),
+                (true, TouchAction::Down) => (BUTTON_PRIMARY, BUTTON_PRIMARY),
+                (true, TouchAction::Move) => (BUTTON_PRIMARY, 0),
+                (true, TouchAction::Up) => (0, BUTTON_PRIMARY),
+            };
             static DOWN_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
             let now = uptime_millis();
             if touch.action == TouchAction::Down {
@@ -559,7 +788,7 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
                 f32,
                 f32,
             ) -> u8 = unsafe { std::mem::transmute(native("onTouchEventNative")?) };
-            touch_native(
+            let handled = touch_native(
                 env,
                 activity,
                 handle,
@@ -567,19 +796,31 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
                 1,
                 0,
                 1,
-                SOURCE_TOUCHSCREEN,
+                source,
                 touch.action as c_int,
                 now,
                 down_time,
                 0,
                 0,
-                0,
-                0,
+                action_button,
+                button_state,
                 0,
                 0,
                 1.0,
                 1.0,
             );
+            static LOGGED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            if touch.action != TouchAction::Hover
+                && LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 12
+            {
+                eprintln!(
+                    "feline-runtime: touch {:?} at ({:.0}, {:.0}) -> {}",
+                    touch.action,
+                    touch.x,
+                    touch.y,
+                    if handled != 0 { "taken" } else { "not taken" }
+                );
+            }
         }
         WindowChange::Key(key) => {
             static DOWN_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);

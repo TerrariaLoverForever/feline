@@ -84,6 +84,12 @@ pub enum WindowChange {
     CloseRequested,
     /// The left mouse button as one finger on a touch screen.
     Touch(Touch),
+    /// A mouse wheel step at the cursor (`dy` > 0 is up).
+    Wheel {
+        x: f32,
+        y: f32,
+        dy: f32,
+    },
     Key(Key),
 }
 
@@ -93,6 +99,16 @@ pub enum TouchAction {
     Down = 0,
     Up = 1,
     Move = 2,
+    /// The mouse moving with no button held (ACTION_HOVER_MOVE).
+    Hover = 7,
+}
+
+/// Whether the mouse reaches the engine as a mouse (Android's SOURCE_MOUSE,
+/// TOOL_TYPE_MOUSE, the primary button), the default, or as one finger on a
+/// touchscreen (`FELINE_INPUT_TOUCH=1`). Roblox's UI ignored the finger.
+pub fn mouse_mode() -> bool {
+    static MOUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MOUSE.get_or_init(|| std::env::var_os("FELINE_INPUT_TOUCH").is_none())
 }
 
 /// One touch event (window pixels, physical).
@@ -212,6 +228,8 @@ impl ApplicationHandler for App {
                 self.cursor = (position.x as f32, position.y as f32);
                 if self.pressed {
                     self.touch(TouchAction::Move);
+                } else if mouse_mode() {
+                    self.touch(TouchAction::Hover);
                 }
             }
             WindowEvent::MouseInput {
@@ -240,6 +258,16 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(true) => self.changes.push(WindowChange::Focus(true)),
+            WindowEvent::MouseWheel { delta, .. } => {
+                let dy = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 40.0) as f32,
+                };
+                if dy != 0.0 {
+                    let (x, y) = self.cursor;
+                    self.changes.push(WindowChange::Wheel { x, y, dy });
+                }
+            }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = crate::keys::android_key(&event, self.modifiers) {

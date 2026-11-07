@@ -222,6 +222,19 @@ network fail to load, as expected offline.
   callbacks while the window is hidden). Neither changed the frame rate:
   about 15 per second, with the `Main` render thread never sleeping
   (about 65 ms of CPU per frame). Not yet explained.
+- **Input goes through Roblox's own functions**, not GameActivity's queue
+  (which the engine never reads): `NativeInputInterface.nativePassMouseButton`
+  (button 0/1/2 = MouseButton1/2/3), `nativePassMouseMove`,
+  `nativePassMouseWheel`, `NativeGLInterface.nativePassKeyEvent`. Clicking
+  works (buttons, login screen). Arguments follow mocktail's input adapter
+  (Apache-2.0). JNI `byte[]` support added (the engine passes text box text
+  in one).
+- **Typing (in progress, not working yet):** `showKeyboard`/`hideKeyboard`
+  are caught and the focused text box is tracked (works: "text box …
+  focused" in the log), and `text.rs` sends edits through
+  `syncTextboxTextAndCursorPosition2` + `nativePassText`. But typed text
+  doesn't appear: not yet known whether the window's key events reach
+  `text::key` at all (next: log key events).
 - Diagnostics added: crash reports name the crashing thread and, outside
   the engine, the host library and symbol; the call trace records the
   calling thread and shows the crashing thread's own last calls.

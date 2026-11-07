@@ -50,6 +50,12 @@ enum Object {
         address: usize,
         capacity: i64,
     },
+    /// A `byte[]`: Feline-owned bytes at a fixed address (never freed,
+    /// like the strings), so element pointers stay valid.
+    Bytes {
+        address: usize,
+        len: usize,
+    },
 }
 
 /// A Java String the runtime hands to the engine (e.g. a folder path).
@@ -315,6 +321,7 @@ extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
             Some(Object::Str(_)) => "java/lang/String".to_owned(),
             Some(Object::Instance(class)) => class.clone(),
             Some(Object::Buffer { .. }) => "java/nio/DirectByteBuffer".to_owned(),
+            Some(Object::Bytes { .. }) => "[B".to_owned(),
             None => "java/lang/Object".to_owned(),
         }
     };
@@ -399,6 +406,99 @@ extern "C" fn alloc_object(_env: Handle, class: Handle) -> Handle {
     let name = class_name(class);
     log(format!("alloc {name}"));
     new_instance(&name)
+}
+
+// ---------------------------------------------------------------------------
+// byte[] (the engine hands data to Java code in these, e.g. after a click).
+// ---------------------------------------------------------------------------
+
+/// The bytes of a `byte[]` handle: (address, length).
+fn bytes(array: Handle) -> Option<(usize, usize)> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    match index(array).and_then(|i| world.objects.get(i)) {
+        Some(Object::Bytes { address, len }) => Some((*address, *len)),
+        _ => None,
+    }
+}
+
+extern "C" fn new_byte_array(_env: Handle, len: JInt) -> Handle {
+    trace("NewByteArray");
+    let Ok(len) = usize::try_from(len) else {
+        return std::ptr::null_mut();
+    };
+    let block: &'static mut [u8] = Box::leak(vec![0u8; len].into_boxed_slice());
+    add_object(Object::Bytes {
+        address: block.as_mut_ptr() as usize,
+        len,
+    })
+}
+
+/// `GetArrayLength`: byte arrays are the only arrays Feline makes.
+extern "C" fn get_array_length(_env: Handle, array: Handle) -> JInt {
+    trace("GetArrayLength");
+    bytes(array).map_or(0, |(_, len)| len as JInt)
+}
+
+/// The range `start..start+len` of an array of `size` bytes, if inside.
+fn range(start: JInt, len: JInt, size: usize) -> Option<(usize, usize)> {
+    let (start, len) = (usize::try_from(start).ok()?, usize::try_from(len).ok()?);
+    (start.checked_add(len)? <= size).then_some((start, len))
+}
+
+unsafe extern "C" fn get_byte_array_region(
+    _env: Handle,
+    array: Handle,
+    start: JInt,
+    len: JInt,
+    buf: *mut i8,
+) {
+    trace("GetByteArrayRegion");
+    if let Some((address, size)) = bytes(array)
+        && let Some((start, len)) = range(start, len, size)
+    {
+        // SAFETY: inside the array; the engine's buffer holds `len` bytes.
+        unsafe { std::ptr::copy_nonoverlapping((address + start) as *const i8, buf, len) };
+    }
+}
+
+unsafe extern "C" fn set_byte_array_region(
+    _env: Handle,
+    array: Handle,
+    start: JInt,
+    len: JInt,
+    buf: *const i8,
+) {
+    trace("SetByteArrayRegion");
+    if let Some((address, size)) = bytes(array)
+        && let Some((start, len)) = range(start, len, size)
+    {
+        // SAFETY: inside the array; the engine's buffer holds `len` bytes.
+        unsafe { std::ptr::copy_nonoverlapping(buf, (address + start) as *mut i8, len) };
+    }
+}
+
+/// `Get<Byte>ArrayElements` / `GetPrimitiveArrayCritical`: the array's own
+/// bytes (not a copy), so releasing has nothing to copy back.
+unsafe extern "C" fn get_array_elements(
+    _env: Handle,
+    array: Handle,
+    is_copy: *mut JBoolean,
+) -> *mut c_void {
+    trace("GetByteArrayElements");
+    if !is_copy.is_null() {
+        // SAFETY: the engine passes a writable jboolean or NULL.
+        unsafe { *is_copy = 0 };
+    }
+    bytes(array).map_or(std::ptr::null_mut(), |(address, _)| address as *mut c_void)
+}
+
+extern "C" fn release_array_elements(
+    _env: Handle,
+    _array: Handle,
+    _elements: *mut c_void,
+    _mode: JInt,
+) {
+    trace("ReleaseByteArrayElements");
 }
 
 unsafe extern "C" fn new_string_utf(_env: Handle, s: *const c_char) -> Handle {
@@ -713,9 +813,19 @@ fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -
     if object == MOTION_EVENT.load(Ordering::Relaxed) {
         let (_, name, _) = member_of(method)?;
         let (x, y) = *MOTION.lock().unwrap_or_else(|p| p.into_inner());
+        if std::env::var_os("FELINE_INPUT_LOG").is_some() {
+            log(format!("MotionEvent.{name} asked"));
+        }
         return Some(match name.as_str() {
             "getPointerId" => 0.0,
-            "getToolType" => 1.0, // TOOL_TYPE_FINGER
+            // TOOL_TYPE_MOUSE or TOOL_TYPE_FINGER (see window::mouse_mode).
+            "getToolType" => {
+                if crate::window::mouse_mode() {
+                    3.0
+                } else {
+                    1.0
+                }
+            }
             "getRawX" | "getX" => f64::from(x),
             "getRawY" | "getY" => f64::from(y),
             "getAxisValue" => match read() as i32 {
@@ -748,6 +858,32 @@ fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -
     None
 }
 
+/// The engine's on-screen keyboard requests, for typing into text boxes
+/// (see `text.rs`): `showKeyboard(long textBox, boolean, byte[] text, …)`
+/// and `hideKeyboard()`, on NativeGLJavaInterface and NativeHelper.
+fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
+    let Some((_, name, _)) = member_of(method) else {
+        return;
+    };
+    match name.as_str() {
+        "showKeyboard" | "gameActivity_showKeyboard" => {
+            let text_box = read();
+            let _multiline = read();
+            let array = read() as usize as Handle;
+            let initial = bytes(array)
+                .map(|(address, len)| {
+                    // SAFETY: a Feline byte[] of `len` bytes.
+                    let raw = unsafe { std::slice::from_raw_parts(address as *const u8, len) };
+                    String::from_utf8_lossy(raw).into_owned()
+                })
+                .unwrap_or_default();
+            crate::text::focus(text_box, initial);
+        }
+        "hideKeyboard" | "gameActivity_hideKeyboard" => crate::text::blur(),
+        _ => {}
+    }
+}
+
 macro_rules! calls {
     ($kind:ident, $ty:ty, $zero:expr, $label:literal, $m:ident, $mv:ident, $ma:ident, $s:ident, $sv:ident, $sa:ident, $n:ident, $nv:ident, $na:ident) => {
         unsafe extern "C" fn $m(_env: Handle, obj: Handle, method: Handle, mut args: ...) -> $ty {
@@ -767,14 +903,22 @@ macro_rules! calls {
                 v
             })
         }
-        unsafe extern "C" fn $s(_env: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
-            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
+        unsafe extern "C" fn $s(_env: Handle, _class: Handle, method: Handle, mut args: ...) -> $ty {
+            // SAFETY: the engine passed the method's arguments.
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || unsafe { args.next_arg::<i64>() })
         }
-        unsafe extern "C" fn $sv(_env: Handle, _class: Handle, method: Handle, _args: *mut c_void) -> $ty {
-            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
+        unsafe extern "C" fn $sv(_env: Handle, _class: Handle, method: Handle, args: *mut c_void) -> $ty {
+            // SAFETY: the engine passed a live va_list with the arguments.
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || unsafe { va_list_int(args) })
         }
-        unsafe extern "C" fn $sa(_env: Handle, _class: Handle, method: Handle, _args: *const c_void) -> $ty {
-            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
+        unsafe extern "C" fn $sa(_env: Handle, _class: Handle, method: Handle, args: *const c_void) -> $ty {
+            let mut at = 0;
+            calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || {
+                // SAFETY: the engine passed one jvalue (8 bytes) per argument.
+                let v = unsafe { *args.cast::<i64>().add(at) };
+                at += 1;
+                v
+            })
         }
         unsafe extern "C" fn $n(_env: Handle, _obj: Handle, _class: Handle, method: Handle, _args: ...) -> $ty {
             calls!(@body $kind, std::ptr::null_mut::<c_void>(), method, $label, $zero, &mut || 0)
@@ -793,6 +937,7 @@ macro_rules! calls {
     }};
     (@body value, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
         trace(concat!("Call…", $label, "Method"));
+        keyboard_call($method, $read);
         if let Some(value) = event_answer($obj, $method, $read) {
             return FromAnswer::from_answer(value);
         }
@@ -1124,8 +1269,9 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
         ("android/content/res/Configuration", "fontScale") => 1.0,
         // ORIENTATION_LANDSCAPE
         ("android/content/res/Configuration", "orientation") => 2.0,
-        // TOUCHSCREEN_NOTOUCH, KEYBOARD_QWERTY, NAVIGATION_NONAV
-        ("android/content/res/Configuration", "touchscreen") => 1.0,
+        // TOUCHSCREEN_FINGER (the mouse arrives as a finger; with NOTOUCH,
+        // 1, Roblox's UI ignored every tap), KEYBOARD_QWERTY, NAVIGATION_NONAV
+        ("android/content/res/Configuration", "touchscreen") => 3.0,
         ("android/content/res/Configuration", "keyboard") => 2.0,
         ("android/content/res/Configuration", "navigation") => 1.0,
         // UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_NO
@@ -1323,6 +1469,23 @@ fn implemented(name: &str) -> Option<usize> {
             is_same_object as extern "C" fn(Handle, Handle, Handle) -> JBoolean as usize
         }
         "GetObjectRefType" => get_object_ref_type as extern "C" fn(Handle, Handle) -> JInt as usize,
+        "NewByteArray" => new_byte_array as extern "C" fn(Handle, JInt) -> Handle as usize,
+        "GetArrayLength" => get_array_length as extern "C" fn(Handle, Handle) -> JInt as usize,
+        "GetByteArrayRegion" => {
+            get_byte_array_region as unsafe extern "C" fn(Handle, Handle, JInt, JInt, *mut i8)
+                as usize
+        }
+        "SetByteArrayRegion" => {
+            set_byte_array_region as unsafe extern "C" fn(Handle, Handle, JInt, JInt, *const i8)
+                as usize
+        }
+        "GetByteArrayElements" | "GetPrimitiveArrayCritical" => {
+            get_array_elements as unsafe extern "C" fn(Handle, Handle, *mut JBoolean) -> *mut c_void
+                as usize
+        }
+        "ReleaseByteArrayElements" | "ReleasePrimitiveArrayCritical" => {
+            release_array_elements as extern "C" fn(Handle, Handle, *mut c_void, JInt) as usize
+        }
         "NewStringUTF" => {
             new_string_utf as unsafe extern "C" fn(Handle, *const c_char) -> Handle as usize
         }
@@ -1475,7 +1638,9 @@ pub fn summary() -> Summary {
         .iter()
         .filter_map(|o| match o {
             Object::Class(name) => Some(name.clone()),
-            Object::Str(_) | Object::Instance(_) | Object::Buffer { .. } => None,
+            Object::Str(_) | Object::Instance(_) | Object::Buffer { .. } | Object::Bytes { .. } => {
+                None
+            }
         })
         .collect();
     classes.sort();

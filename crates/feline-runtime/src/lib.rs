@@ -44,5 +44,6 @@ pub mod sig;
 pub mod stdio;
 pub mod stubs;
 pub mod sysconf_table;
+pub mod text;
 pub mod trace;
 pub mod window;
