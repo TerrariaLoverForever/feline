@@ -1077,6 +1077,7 @@ pub fn run_window_loop(
         if let Some(env) = crate::jni::current_env() {
             finish_left_text_box(env);
             refresh_text_box_info(env);
+            pass_refresh_rates(env);
         }
         let mut changes = window.pump(std::time::Duration::from_millis(1));
         while let Some((at, _)) = script.peek()
@@ -1242,6 +1243,64 @@ fn update_app_surface(env: *mut c_void) {
     let update: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) =
         unsafe { std::mem::transmute(address) };
     update(env, class, crate::window::surface_object(), platform);
+}
+
+/// The engine's `nativePassSupportedRefreshRates([F)V` and
+/// `nativePassCurrentDisplayRefreshRate(F)V`, once found (0 before).
+static REFRESH_NATIVES: std::sync::Mutex<(usize, usize)> = std::sync::Mutex::new((0, 0));
+
+/// Finds the functions that tell the engine the monitor's refresh rates,
+/// as Android's Java side does for the phone's screen. Without them the
+/// engine assumes 60 Hz and Roblox's in-game Maximum Frame Rate couldn't
+/// go higher. They're called by [`pass_refresh_rates`] once the monitor is
+/// known.
+pub fn remember_refresh_natives(elf: &Elf, image: &Image) -> Result<(), String> {
+    const GL: &str = "com/roblox/engine/jni/NativeGLInterface";
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let find = |method: &str| {
+        let name = jni_symbol(GL, method);
+        symbols
+            .iter()
+            .find(|s| s.defined && s.name == name)
+            .map(|s| (image.bias() + s.value) as usize)
+            .ok_or_else(|| format!("no {name}"))
+    };
+    *REFRESH_NATIVES.lock().unwrap_or_else(|p| p.into_inner()) = (
+        find("nativePassSupportedRefreshRates")?,
+        find("nativePassCurrentDisplayRefreshRate")?,
+    );
+    Ok(())
+}
+
+/// Passes the monitor's refresh rates once (when they're known). From the
+/// window loop.
+fn pass_refresh_rates(env: *mut c_void) {
+    static PASSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if PASSED.load(Ordering::Relaxed) {
+        return;
+    }
+    let (supported_address, current_address) =
+        *REFRESH_NATIVES.lock().unwrap_or_else(|p| p.into_inner());
+    let Some((current, supported)) = crate::window::refresh_rates() else {
+        return;
+    };
+    if supported_address == 0 || current_address == 0 {
+        return;
+    }
+    PASSED.store(true, Ordering::Relaxed);
+    eprintln!("feline-runtime: telling the engine about {current} Hz (supported {supported:?})");
+    let class = crate::jni::new_class("com/roblox/engine/jni/NativeGLInterface");
+    stubs::set_phase("NativeGLInterface.nativePassSupportedRefreshRates".to_owned());
+    // SAFETY: static JNI functions with signatures ([F)V and (F)V; the
+    // float goes in a vector register, as C passes it.
+    let pass_supported: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
+        unsafe { std::mem::transmute(supported_address) };
+    pass_supported(env, class, crate::jni::new_float_array(&supported));
+    stubs::set_phase("NativeGLInterface.nativePassCurrentDisplayRefreshRate".to_owned());
+    let pass_current: extern "C" fn(*mut c_void, *mut c_void, f32) =
+        unsafe { std::mem::transmute(current_address) };
+    pass_current(env, class, current);
+    stubs::set_phase(String::new());
 }
 
 /// [`call_java_native`] for `com.roblox.engine.jni.NativeGLInterface`'s

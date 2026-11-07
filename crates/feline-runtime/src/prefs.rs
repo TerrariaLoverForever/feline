@@ -8,6 +8,7 @@
 //! | Key | What it does |
 //! |---|---|
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
+//! | `unlimitedFps` | lift Roblox's frame-rate target and its 240 FPS ceiling |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
@@ -21,6 +22,7 @@ use serde_json::{Map, Value, json};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prefs {
     pub theme: String,
+    pub unlimited_fps: bool,
     pub start_fullscreen: bool,
 }
 
@@ -28,6 +30,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
+            unlimited_fps: false,
             start_fullscreen: false,
         }
     }
@@ -53,6 +56,10 @@ impl Prefs {
                 Some(t @ ("dark" | "light")) => t.to_owned(),
                 _ => d.theme,
             },
+            unlimited_fps: json
+                .get("unlimitedFps")
+                .and_then(Value::as_bool)
+                .unwrap_or(d.unlimited_fps),
             start_fullscreen: json
                 .get("startFullscreen")
                 .and_then(Value::as_bool)
@@ -63,6 +70,7 @@ impl Prefs {
     fn to_json(&self) -> Value {
         json!({
             "theme": self.theme,
+            "unlimitedFps": self.unlimited_fps,
             "startFullscreen": self.start_fullscreen,
         })
     }
@@ -71,8 +79,15 @@ impl Prefs {
     /// "Maximum Frame Rate" setting, which Roblox turns on for PC
     /// (`FFlagGameBasicSettingsFramerateCap5` is True in the PC client's
     /// settings and absent from Android's).
+    /// With `unlimitedFps`, also no frame-rate target and no 240 ceiling
+    /// (`DFIntTaskSchedulerTargetFps`, `FFlagTaskSchedulerLimitTargetFpsTo2402`).
     pub fn flags(&self) -> Vec<(&'static str, String)> {
-        vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())]
+        let mut flags = vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())];
+        if self.unlimited_fps {
+            flags.push(("DFIntTaskSchedulerTargetFps", "9999".to_owned()));
+            flags.push(("FFlagTaskSchedulerLimitTargetFpsTo2402", "False".to_owned()));
+        }
+        flags
     }
 }
 

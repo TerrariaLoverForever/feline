@@ -27,6 +27,9 @@ struct Session {
     all_selected: bool,
     /// Where and how the box is shown (from its first, sized report).
     info: BoxInfo,
+    /// The text when it was focused (or last set by the engine): a box
+    /// left with this text wasn't typed into.
+    initial: String,
 }
 
 static FOCUSED: Mutex<Option<Session>> = Mutex::new(None);
@@ -127,6 +130,7 @@ pub fn focus(text_box: i64, initial: String, native: bool) {
             return;
         }
         if !usable {
+            // A refresh of the box being edited.
             eprintln!(
                 "feline-runtime: text box {:#x} continues as {text_box:#x} (native {native})",
                 session.text_box
@@ -134,6 +138,12 @@ pub fn focus(text_box: i64, initial: String, native: bool) {
             session.text_box = text_box;
             return;
         }
+    } else if !usable {
+        // A size-less show with no box being edited: Roblox's leftover
+        // after a message is sent. It can't be seen; keys stay with the
+        // game (taking them blocked movement and the next `/`).
+        eprintln!("feline-runtime: text box {text_box:#x} has no size; keys stay with the game");
+        return;
     } else {
         OPENED_BY.store(
             LAST_GAME_KEY.load(std::sync::atomic::Ordering::Relaxed),
@@ -143,9 +153,10 @@ pub fn focus(text_box: i64, initial: String, native: bool) {
     eprintln!("feline-runtime: text box {text_box:#x} focused");
     *focused = Some(Session {
         text_box,
-        text: initial,
+        text: initial.clone(),
         all_selected: false,
         info: latest,
+        initial,
     });
 }
 
@@ -181,7 +192,8 @@ pub fn replace_text(text: String) {
     if let Some(session) = FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
         && session.text != text
     {
-        session.text = text;
+        session.text = text.clone();
+        session.initial = text;
         session.all_selected = false;
     }
 }
@@ -264,7 +276,12 @@ pub fn blur() {
     let mut focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(session) = focused.take() {
         eprintln!("feline-runtime: text box left");
-        *LEFT.lock().unwrap_or_else(|p| p.into_inner()) = Some((session.text_box, session.text));
+        // Only text the user typed is passed on as finished: finishing an
+        // untouched box (e.g. the leftover after a chat message) acted on
+        // whatever box had focus by then, and closed chat.
+        if session.text != session.initial {
+            *LEFT.lock().unwrap_or_else(|p| p.into_inner()) = Some((session.text_box, session.text));
+        }
     }
 }
 
@@ -461,6 +478,31 @@ mod tests {
         assert!(matches!(key(press(31, 'x' as i32)), Some(Edit::Changed { ref text, .. }) if text == "x"));
         blur();
         let _ = take_left();
+    }
+
+    #[test]
+    fn leftovers_after_sending_take_no_keys_and_untouched_boxes_finish_nothing() {
+        let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+        blur();
+        let _ = take_left();
+        // No box being edited, a size-less show: not a text box for keys.
+        *INFO.lock().unwrap() = Some(BoxInfo::default());
+        focus(5, String::new(), true);
+        assert!(key(press(51, 'w' as i32)).is_none(), "W goes to the game");
+        // A real box, focused and left without typing: nothing to finish.
+        *INFO.lock().unwrap() = Some(BoxInfo {
+            width: 100.0,
+            height: 20.0,
+            ..BoxInfo::default()
+        });
+        focus(6, "keep".into(), true);
+        blur();
+        assert!(take_left().is_none());
+        // Typed into, then left: finished.
+        focus(6, String::new(), true);
+        let _ = key(press(29, 'a' as i32));
+        blur();
+        assert!(matches!(take_left(), Some((6, ref text, _)) if text == "a"));
     }
 
     #[test]

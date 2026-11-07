@@ -56,6 +56,44 @@ enum Object {
         address: usize,
         len: usize,
     },
+    /// A `float[]` Feline made (e.g. refresh rates), never freed.
+    Floats {
+        address: usize,
+        count: usize,
+    },
+}
+
+/// A `float[]` holding `values`, for the engine.
+pub fn new_float_array(values: &[f32]) -> Handle {
+    let block: &'static mut [f32] = Box::leak(values.to_vec().into_boxed_slice());
+    add_object(Object::Floats {
+        address: block.as_mut_ptr() as usize,
+        count: block.len(),
+    })
+}
+
+fn floats(array: Handle) -> Option<(usize, usize)> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    match index(array).and_then(|i| world.objects.get(i)) {
+        Some(Object::Floats { address, count }) => Some((*address, *count)),
+        _ => None,
+    }
+}
+
+unsafe extern "C" fn get_float_array_region(
+    _env: Handle,
+    array: Handle,
+    start: JInt,
+    len: JInt,
+    buf: *mut f32,
+) {
+    trace("GetFloatArrayRegion");
+    if let Some((address, count)) = floats(array)
+        && let Some((start, len)) = range(start, len, count)
+    {
+        // SAFETY: inside the array; the engine's buffer holds `len` floats.
+        unsafe { std::ptr::copy_nonoverlapping((address as *const f32).add(start), buf, len) };
+    }
 }
 
 /// A Java String the runtime hands to the engine (e.g. a folder path).
@@ -322,6 +360,7 @@ extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
             Some(Object::Instance(class)) => class.clone(),
             Some(Object::Buffer { .. }) => "java/nio/DirectByteBuffer".to_owned(),
             Some(Object::Bytes { .. }) => "[B".to_owned(),
+            Some(Object::Floats { .. }) => "[F".to_owned(),
             None => "java/lang/Object".to_owned(),
         }
     };
@@ -537,10 +576,12 @@ extern "C" fn new_byte_array(_env: Handle, len: JInt) -> Handle {
     })
 }
 
-/// `GetArrayLength`: byte arrays are the only arrays Feline makes.
+/// `GetArrayLength`: Feline's byte and float arrays.
 extern "C" fn get_array_length(_env: Handle, array: Handle) -> JInt {
     trace("GetArrayLength");
-    bytes(array).map_or(0, |(_, len)| len as JInt)
+    bytes(array)
+        .or_else(|| floats(array))
+        .map_or(0, |(_, len)| len as JInt)
 }
 
 /// The range `start..start+len` of an array of `size` bytes, if inside.
@@ -593,7 +634,9 @@ unsafe extern "C" fn get_array_elements(
         // SAFETY: the engine passes a writable jboolean or NULL.
         unsafe { *is_copy = 0 };
     }
-    bytes(array).map_or(std::ptr::null_mut(), |(address, _)| address as *mut c_void)
+    bytes(array)
+        .or_else(|| floats(array))
+        .map_or(std::ptr::null_mut(), |(address, _)| address as *mut c_void)
 }
 
 extern "C" fn release_array_elements(
@@ -1738,11 +1781,15 @@ fn implemented(name: &str) -> Option<usize> {
             set_byte_array_region as unsafe extern "C" fn(Handle, Handle, JInt, JInt, *const i8)
                 as usize
         }
-        "GetByteArrayElements" | "GetPrimitiveArrayCritical" => {
+        "GetFloatArrayRegion" => {
+            get_float_array_region as unsafe extern "C" fn(Handle, Handle, JInt, JInt, *mut f32)
+                as usize
+        }
+        "GetByteArrayElements" | "GetFloatArrayElements" | "GetPrimitiveArrayCritical" => {
             get_array_elements as unsafe extern "C" fn(Handle, Handle, *mut JBoolean) -> *mut c_void
                 as usize
         }
-        "ReleaseByteArrayElements" | "ReleasePrimitiveArrayCritical" => {
+        "ReleaseByteArrayElements" | "ReleaseFloatArrayElements" | "ReleasePrimitiveArrayCritical" => {
             release_array_elements as extern "C" fn(Handle, Handle, *mut c_void, JInt) as usize
         }
         "NewStringUTF" => {
@@ -1905,9 +1952,11 @@ pub fn summary() -> Summary {
         .iter()
         .filter_map(|o| match o {
             Object::Class(name) => Some(name.clone()),
-            Object::Str(_) | Object::Instance(_) | Object::Buffer { .. } | Object::Bytes { .. } => {
-                None
-            }
+            Object::Str(_)
+            | Object::Instance(_)
+            | Object::Buffer { .. }
+            | Object::Bytes { .. }
+            | Object::Floats { .. } => None,
         })
         .collect();
     classes.sort();

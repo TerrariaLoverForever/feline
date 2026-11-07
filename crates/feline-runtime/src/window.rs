@@ -182,6 +182,39 @@ impl App {
     }
 }
 
+impl App {
+    /// The window's monitor's refresh rates (Wayland names the monitor only
+    /// once the window is shown; until then, the first monitor).
+    fn note_refresh_rates(&self, event_loop: &ActiveEventLoop) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let Some(monitor) = window
+            .current_monitor()
+            .or_else(|| event_loop.available_monitors().next())
+        else {
+            return;
+        };
+        let rate = |mhz: u32| (mhz as f32 / 10.0).round() / 100.0;
+        let Some(current) = monitor.refresh_rate_millihertz().map(rate) else {
+            return;
+        };
+        let mut supported: Vec<f32> = monitor
+            .video_modes()
+            .map(|m| rate(m.refresh_rate_millihertz()))
+            .filter(|&r| r > 0.0)
+            .collect();
+        supported.push(current);
+        // Wayland lists only the current mode: the usual rates up to the
+        // monitor's are offered too, as a phone lists its display modes.
+        supported.extend([30.0, 60.0, 120.0, 144.0, 165.0].into_iter().filter(|&r| r <= current));
+        supported.sort_by(f32::total_cmp);
+        supported.dedup();
+        eprintln!("feline-runtime: monitor refresh {current} Hz, supports {supported:?}");
+        *REFRESH_RATES.lock().unwrap_or_else(|p| p.into_inner()) = Some((current, supported));
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -228,7 +261,10 @@ impl ApplicationHandler for App {
         self.window = Some(window);
     }
 
-    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if REFRESH_RATES.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
+            self.note_refresh_rates(event_loop);
+        }
         match event {
             WindowEvent::Resized(size) => {
                 if let Some(native) = native_window() {
@@ -396,6 +432,15 @@ impl DesktopWindow {
             .pump_app_events(Some(timeout), &mut self.app);
         std::mem::take(&mut self.app.changes)
     }
+}
+
+/// The monitor's refresh rate and the rates it supports (Hz), once the
+/// window exists.
+static REFRESH_RATES: std::sync::Mutex<Option<(f32, Vec<f32>)>> = std::sync::Mutex::new(None);
+
+/// What the window's monitor runs at and can run at, once known.
+pub fn refresh_rates() -> Option<(f32, Vec<f32>)> {
+    REFRESH_RATES.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 /// The `android.view.Surface` object for the window (created on first use).
