@@ -96,7 +96,8 @@ fn main() -> ExitCode {
             if flag == "--play" {
                 PLAY.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            let data = match std::fs::read(path) {
+            let _ = ENGINE_PATH.set(std::path::PathBuf::from(path));
+            let data = match feline_runtime::load::map_file(std::path::Path::new(path)) {
                 Ok(data) => data,
                 Err(e) => {
                     eprintln!("feline-runtime: couldn't read {path}: {e}");
@@ -117,7 +118,7 @@ fn main() -> ExitCode {
             }
             // The image and imports must stay alive while the engine's code
             // may run, so this never returns normally.
-            run_init(&data)
+            run_init(data)
         }
         [flag] if flag == "--version" => {
             println!("feline-runtime {}", env!("CARGO_PKG_VERSION"));
@@ -253,7 +254,10 @@ fn load_with_imports(data: &[u8], list: bool) -> Result<String, String> {
 
 /// `--init`: load, bind, run the constructors, report, and exit without
 /// running the engine's exit handlers.
-fn run_init(data: &[u8]) -> ExitCode {
+/// The engine file being run (`--play`/`--init`), for `load_mapped`.
+static ENGINE_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+fn run_init(data: &'static [u8]) -> ExitCode {
     let result = (|| -> Result<String, String> {
         let elf = feline_runtime::elf::Elf::parse(data).map_err(|e| e.to_string())?;
         let symbols = elf.symbols().map_err(|e| e.to_string())?;
@@ -261,9 +265,16 @@ fn run_init(data: &[u8]) -> ExitCode {
         // Leaked on purpose: the engine's code and its pointers into Feline's
         // data must stay valid until the process ends.
         let imports = Box::leak(Box::new(feline_runtime::imports::bind(&symbols, &host)?));
-        let (image, _) =
-            feline_runtime::load::load(&elf, Some(imports)).map_err(|e| e.to_string())?;
+        // The engine's code is mapped from its file (see `load_mapped`).
+        let (image, _) = match ENGINE_PATH.get().and_then(|p| std::fs::File::open(p).ok()) {
+            Some(file) => feline_runtime::load::load_mapped(&elf, Some(imports), &file),
+            None => feline_runtime::load::load(&elf, Some(imports)),
+        }
+        .map_err(|e| e.to_string())?;
         let image = Box::leak(Box::new(image));
+        // The engine's segments are copied into the image: the file's
+        // pages aren't needed in memory any more.
+        feline_runtime::load::release_file_pages(data);
         eprintln!(
             "feline-runtime: running {} constructors…",
             elf.init_array_len()

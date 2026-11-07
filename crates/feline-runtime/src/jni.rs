@@ -143,7 +143,11 @@ fn index(handle: Handle) -> Option<usize> {
 fn add_object(object: Object) -> Handle {
     let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     world.objects.push(object);
-    handle(world.objects.len() - 1)
+    let n = world.objects.len();
+    if n.is_power_of_two() && n >= 1024 {
+        log(format!("{n} Java objects so far"));
+    }
+    handle(n - 1)
 }
 
 fn class_name(class: Handle) -> String {

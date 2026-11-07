@@ -148,6 +148,27 @@ fn align_up(v: u64, page: u64) -> Option<u64> {
 /// Maps `elf`'s segments, applies its relocations (imports from `imports`,
 /// if given) and sets the final permissions. Runs none of its code.
 pub fn load(elf: &Elf, imports: Option<&Imports>) -> Result<(Image, LoadReport), LoadError> {
+    load_inner(elf, imports, None)
+}
+
+/// [`load`], with read-only segments (the engine's 115 MB of code) mapped
+/// from `file` instead of copied: only the pages the engine runs are read
+/// into memory, from the kernel's shared file cache, as a regular dynamic
+/// loader does. Private mappings, so a write (a relocation or a patch)
+/// copies just that page.
+pub fn load_mapped(
+    elf: &Elf,
+    imports: Option<&Imports>,
+    file: &std::fs::File,
+) -> Result<(Image, LoadReport), LoadError> {
+    load_inner(elf, imports, Some(file))
+}
+
+fn load_inner(
+    elf: &Elf,
+    imports: Option<&Imports>,
+    file: Option<&std::fs::File>,
+) -> Result<(Image, LoadReport), LoadError> {
     let page = rustix::param::page_size() as u64;
     let loads: Vec<Segment> = elf
         .segments
@@ -199,10 +220,15 @@ pub fn load(elf: &Elf, imports: Option<&Imports>) -> Result<(Image, LoadReport),
         // any permissions are changed).
         let memory: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(base.cast::<u8>(), len) };
 
-        // 2. Copy.
+        // 2. Copy (or map, see `load_mapped`).
         for s in &loads {
             let data = elf.segment_data(s)?;
             let at = (s.vaddr - min) as usize;
+            if let Some(file) = file
+                && map_segment(file, &loads, s, base, min, page)
+            {
+                continue;
+            }
             memory
                 .get_mut(at..at + data.len())
                 .ok_or_else(|| LoadError::Layout("a segment is outside the image".into()))?
@@ -250,6 +276,79 @@ pub fn load(elf: &Elf, imports: Option<&Imports>) -> Result<(Image, LoadReport),
             ..report
         },
     ))
+}
+
+/// Maps a read-only segment from the file over its place in the reserved
+/// image. False (copy it instead) for writable segments, file offsets that
+/// don't line up with the address within a page, or pages shared with
+/// another segment.
+fn map_segment(
+    file: &std::fs::File,
+    loads: &[Segment],
+    s: &Segment,
+    base: *mut c_void,
+    min: u64,
+    page: u64,
+) -> bool {
+    if s.flags & 2 != 0 || s.filesz == 0 || s.filesz != s.memsz || s.offset % page != s.vaddr % page {
+        return false;
+    }
+    let start = align_down(s.vaddr, page);
+    let Some(end) = align_up(s.vaddr + s.filesz, page) else {
+        return false;
+    };
+    let shares_a_page = loads.iter().any(|o| {
+        !std::ptr::eq(o, s)
+            && align_down(o.vaddr, page) < end
+            && align_up(o.vaddr + o.memsz, page).is_some_and(|e| e > start)
+    });
+    if shares_a_page {
+        return false;
+    }
+    // SAFETY: a range inside the image reserved above (only this loader
+    // owns it), replaced by a private mapping of the same file bytes the
+    // copy would have put there; writable until `protect` sets the
+    // segment's own flags, like the copied segments.
+    let mapped = unsafe {
+        mm::mmap(
+            base.cast::<u8>().add((start - min) as usize).cast(),
+            (end - start) as usize,
+            ProtFlags::READ | ProtFlags::WRITE,
+            MapFlags::PRIVATE | MapFlags::FIXED,
+            file,
+            align_down(s.offset, page),
+        )
+    };
+    mapped.is_ok()
+}
+
+/// The engine file, mapped read-only instead of read into memory: its
+/// pages come from the kernel's file cache when touched, and can be
+/// handed back with [`release_file_pages`] once loading is done (reading
+/// it kept a 115 MB copy alive for the whole session).
+pub fn map_file(path: &std::path::Path) -> Result<&'static [u8], String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+    if len == 0 {
+        return Err("empty file".into());
+    }
+    // SAFETY: a fresh read-only private mapping of the whole file; it's
+    // never unmapped (the parsed ELF points into it for the session). The
+    // file isn't expected to change while Feline runs.
+    let address = unsafe {
+        mm::mmap(std::ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, &file, 0)
+    }
+    .map_err(|e| e.to_string())?;
+    // SAFETY: `len` readable bytes, valid for the rest of the process.
+    Ok(unsafe { std::slice::from_raw_parts(address.cast::<u8>(), len) })
+}
+
+/// Drops the resident pages of a [`map_file`] mapping. They're read again
+/// from the file if needed (e.g. a symbol looked up later).
+pub fn release_file_pages(data: &'static [u8]) {
+    // SAFETY: the whole of a file mapping made by `map_file`; private and
+    // never written, so dropping its pages loses nothing.
+    let _ = unsafe { mm::madvise(data.as_ptr() as *mut c_void, data.len(), mm::Advice::LinuxDontNeed) };
 }
 
 /// Changes the permissions of `[offset, offset + len)` inside the image.
