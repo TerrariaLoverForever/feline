@@ -7,10 +7,12 @@
 //! no), then plays through `AudioDevice`, its small wrapper around Android's
 //! `AudioTrack`, as seen in Feline's JNI log:
 //!
-//! - `init(int channels, int sampleRate, int sampleSize, int frames)`: open
-//!   an output; `false` makes FMOD give up ("error initializing output
-//!   device", FMOD_RESULT 51, and no sound at all);
-//! - `write(byte[] data, int length)`: play PCM bytes. Like
+//! - `init(int channels, int sampleRate, int blockFrames, int blocks)`:
+//!   open an output (Roblox asks for 2, 48000, 512, 4); `false` makes FMOD
+//!   give up ("error initializing output device", FMOD_RESULT 51, and no
+//!   sound at all);
+//! - `write(byte[] data, int length)`: play 16-bit PCM bytes (AudioTrack's
+//!   default encoding; 512 stereo frames arrive as 2048 bytes). Like
 //!   `AudioTrack.write`, it blocks while the output is full, which is what
 //!   paces FMOD's mixer;
 //! - `close()`.
@@ -50,7 +52,6 @@ struct BufferAttr {
 
 const PA_STREAM_PLAYBACK: c_int = 1;
 const PA_SAMPLE_S16LE: c_int = 3;
-const PA_SAMPLE_FLOAT32LE: c_int = 5;
 
 type New = unsafe extern "C" fn(
     *const c_char,
@@ -104,43 +105,31 @@ fn pulse() -> Option<&'static Pulse> {
 /// The open output (a `pa_simple*`), if any.
 static STREAM: Mutex<usize> = Mutex::new(0);
 
-/// The PCM format for AudioDevice's `sampleSize` (bytes, or bits).
-fn sample_format(sample_size: i32) -> Option<c_int> {
-    let bytes = if sample_size >= 8 { sample_size / 8 } else { sample_size };
-    match bytes {
-        2 => Some(PA_SAMPLE_S16LE),
-        4 => Some(PA_SAMPLE_FLOAT32LE),
-        _ => None,
-    }
-}
-
 /// `AudioDevice.init`: opens the output. False if there's no sound server.
-pub fn init(channels: i32, rate: i32, sample_size: i32, frames: i32) -> bool {
+pub fn init(channels: i32, rate: i32, block_frames: i32, blocks: i32) -> bool {
     eprintln!(
-        "feline-runtime: sound: FMOD asks for {channels} channels, {rate} Hz, sample size {sample_size}, {frames} frames"
+        "feline-runtime: sound: FMOD asks for {channels} channels, {rate} Hz, {blocks} blocks of {block_frames} frames"
     );
-    let (Some(pulse), Some(format), Ok(channels), Ok(rate)) = (
-        pulse(),
-        sample_format(sample_size),
-        u8::try_from(channels),
-        u32::try_from(rate),
-    ) else {
+    let (Some(pulse), Ok(channels @ 1..=8), Ok(rate @ 8000..=192_000)) =
+        (pulse(), u8::try_from(channels), u32::try_from(rate))
+    else {
         eprintln!("feline-runtime: sound: can't open that output");
         return false;
     };
     close();
-    let frame_bytes = u32::from(channels) * if format == PA_SAMPLE_S16LE { 2 } else { 4 };
-    // About two of FMOD's blocks queued: low delay, no gaps.
-    let block = frame_bytes * u32::try_from(frames.max(256)).unwrap_or(1024);
+    let frame_bytes = u32::from(channels) * 2;
+    // FMOD's own buffer (blocks × block size) queued: about 43 ms at
+    // 4 × 512 frames and 48 kHz. Low delay, no gaps.
+    let block = frame_bytes * u32::try_from(block_frames.clamp(64, 8192)).unwrap_or(512);
     let attr = BufferAttr {
         maxlength: u32::MAX,
-        tlength: block * 2,
+        tlength: block * u32::try_from(blocks.clamp(2, 16)).unwrap_or(4),
         prebuf: u32::MAX,
         minreq: u32::MAX,
         fragsize: u32::MAX,
     };
     let spec = SampleSpec {
-        format,
+        format: PA_SAMPLE_S16LE,
         rate,
         channels,
     };
@@ -197,13 +186,12 @@ pub fn close() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    /// Opens and closes an output on this machine's sound server (no sound
+    /// is played). Ignored by default: needs a desktop session.
     #[test]
-    fn formats() {
-        assert_eq!(sample_format(2), Some(PA_SAMPLE_S16LE));
-        assert_eq!(sample_format(16), Some(PA_SAMPLE_S16LE));
-        assert_eq!(sample_format(4), Some(PA_SAMPLE_FLOAT32LE));
-        assert_eq!(sample_format(3), None);
+    #[ignore]
+    fn opens_an_output() {
+        assert!(super::init(2, 48000, 512, 4));
+        super::close();
     }
 }

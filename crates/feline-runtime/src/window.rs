@@ -188,7 +188,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attributes = Window::default_attributes()
-            .with_title("Feline (runtime test)")
+            .with_title("Feline")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
         let window = match event_loop.create_window(attributes) {
             Ok(w) => w,
@@ -197,6 +197,10 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        // Roblox draws its own pointer; the desktop's would be a second one.
+        if mouse_mode() {
+            window.set_cursor_visible(false);
+        }
         let size = window.inner_size();
         match handles(&window) {
             Ok(handles) => {

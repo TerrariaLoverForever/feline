@@ -431,7 +431,13 @@ fn run_init(data: &[u8]) -> ExitCode {
                 // empty `applicationSettings` object (returns 0; "" or "{}"
                 // return 1) and keeps its built-in defaults. Fetching Roblox's
                 // real settings comes later. FELINE_SETTINGS overrides it.
-                let settings = client_settings(&data.join("feline/runtime"));
+                let runtime = data.join("feline/runtime");
+                let settings = client_settings(&runtime);
+                // Roblox's desktop layout instead of the tablet one.
+                let settings = match feline_runtime::desktop::apply(&runtime, USER_ID.get().copied()) {
+                    Some(policy) => feline_runtime::desktop::add_to_settings(&settings, &policy),
+                    None => settings,
+                };
                 let first = new_string(&settings) as usize;
                 let r = call_gl_native(
                     &elf,
@@ -602,6 +608,9 @@ fn client_settings(runtime: &std::path::Path) -> String {
 /// developer variables (FELINE_START, FELINE_WINDOW, FELINE_APP).
 static PLAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The logged-in user's ID, once the saved session was checked.
+static USER_ID: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
 /// "No time limit": a year, as a number of seconds.
 const UNTIL_CLOSED: u64 = 365 * 24 * 60 * 60;
 
@@ -649,6 +658,7 @@ fn session_step(
                 Ok(account) => {
                     use feline_runtime::jni::{set_known_number, set_known_string};
                     set_known_number(USER, "getUserId", account.id as f64);
+                    let _ = USER_ID.set(account.id);
                     set_known_string(USER, "getUsername", &account.name);
                     set_known_string(USER, "getDisplayName", &account.display_name);
                     set_known_string(REPORTER, "getLastLoggedInUserId", &account.id.to_string());

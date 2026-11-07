@@ -22,6 +22,7 @@ pub mod audio;
 pub mod alloc;
 pub mod assets;
 pub mod bionic;
+pub mod desktop;
 pub mod check;
 pub mod dex;
 pub mod dl;
