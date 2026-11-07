@@ -315,6 +315,14 @@ impl DesktopWindow {
         Ok(window)
     }
 
+    /// Asks the window system for a new size in pixels (for test scripts;
+    /// the change arrives as a `Resized` event, if it's granted).
+    pub fn request_size(&self, width: u32, height: u32) {
+        if let Some(window) = &self.app.window {
+            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        }
+    }
+
     /// Handles pending window events (waiting at most `timeout`), and returns
     /// what changed.
     pub fn pump(&mut self, timeout: Duration) -> Vec<WindowChange> {

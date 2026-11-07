@@ -1464,9 +1464,13 @@ fn call_function(name: &str) -> Option<usize> {
 /// Known field values: (class, field) → value.
 fn known_field(class: &str, field: &str) -> Option<f64> {
     Some(match (class, field) {
-        ("android/content/res/Configuration", "screenWidthDp") => 1920.0,
-        ("android/content/res/Configuration", "screenHeightDp") => 1080.0,
-        ("android/content/res/Configuration", "smallestScreenWidthDp") => 1080.0,
+        // The window's size in dp (pixels at 160 dpi), as Android reports
+        // for an app in a window.
+        ("android/content/res/Configuration", "screenWidthDp") => f64::from(window_px().0),
+        ("android/content/res/Configuration", "screenHeightDp") => f64::from(window_px().1),
+        ("android/content/res/Configuration", "smallestScreenWidthDp") => {
+            f64::from(window_px().0.min(window_px().1))
+        }
         ("android/content/res/Configuration", "densityDpi") => 160.0,
         ("android/content/res/Configuration", "fontScale") => 1.0,
         // ORIENTATION_LANDSCAPE
@@ -1508,8 +1512,13 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
 
 /// The window's width or height in millimetres at 160 dpi (1920x1080 if
 /// there's no window).
+/// The window's size in pixels (1920x1080 before it exists).
+fn window_px() -> (i32, i32) {
+    crate::window::native_window().map_or((1920, 1080), |w| w.size())
+}
+
 fn window_mm(width: bool) -> f64 {
-    let (w, h) = crate::window::native_window().map_or((1920, 1080), |w| w.size());
+    let (w, h) = window_px();
     f64::from(if width { w } else { h }) / 160.0 * 25.4
 }
 

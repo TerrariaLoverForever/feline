@@ -448,6 +448,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                 let start = new_instance("com/roblox/engine/jni/autovalue/StartAppParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2StartAppWithParams", &[start])?;
                 session_step(&elf, image, "started")?;
+                feline_runtime::init::remember_app_surface_update(&elf, image)?;
                 if window.is_some() {
                     let platform =
                         new_instance("com/roblox/engine/jni/model/PlatformParams") as usize;

@@ -735,6 +735,28 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
                 c_int,
             ) = unsafe { std::mem::transmute(native("onSurfaceChangedNative")?) };
             changed(env, activity, handle, surface, RGBA_8888, width, height);
+            // What Android also does when a window changes size: the area
+            // the app may draw in, the new configuration (its size in dp),
+            // and Roblox's app screens get the new surface size. Without
+            // these the app screens kept their first size: black areas
+            // after growing the window, glitches after shrinking it.
+            stubs::set_phase("GameActivity.onContentRectChangedNative".to_owned());
+            // SAFETY: AGDK's native with signature (JIIII)V.
+            let content: extern "C" fn(*mut c_void, *mut c_void, i64, c_int, c_int, c_int, c_int) =
+                unsafe { std::mem::transmute(native("onContentRectChangedNative")?) };
+            content(env, activity, handle, 0, 0, width, height);
+            stubs::set_phase("GameActivity.onConfigurationChangedNative".to_owned());
+            // SAFETY: AGDK's native with signature (JLandroid/content/res/Configuration;)V.
+            let configuration: extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void) =
+                unsafe { std::mem::transmute(native("onConfigurationChangedNative")?) };
+            configuration(
+                env,
+                activity,
+                handle,
+                crate::jni::new_instance("android/content/res/Configuration"),
+            );
+            update_app_surface(env);
+            stubs::set_phase(String::new());
         }
         WindowChange::Focus(focused) => {
             stubs::set_phase("GameActivity.onWindowFocusChangedNative".to_owned());
@@ -901,7 +923,8 @@ fn synthetic_input() -> Vec<crate::window::WindowChange> {
 /// FELINE_INPUT_SCRIPT: timed test input, steps separated by `;`, each
 /// `seconds:action`: `tap x,y`, `type text` (each character pressed and
 /// released), `key code` (an Android key code, e.g. 66 for Enter), or
-/// `shot path` (the next frame saved as a PPM image). For testing without
+/// `shot path` (the next frame saved as a PPM image), or `size w,h` (resize
+/// the window). For testing without
 /// anyone at the window.
 fn input_script() -> Vec<(f64, String)> {
     let Ok(script) = std::env::var("FELINE_INPUT_SCRIPT") else {
@@ -1010,6 +1033,16 @@ pub fn run_window_loop(
             && start.elapsed().as_secs_f64() >= *at
         {
             let (_, action) = script.next().expect("peeked");
+            // `size W,H`: resize the window.
+            if let Some((w, h)) = action
+                .strip_prefix("size ")
+                .and_then(|r| r.split_once(','))
+                .and_then(|(w, h)| Some((w.trim().parse().ok()?, h.trim().parse().ok()?)))
+            {
+                eprintln!("feline-runtime: input script: {action}");
+                window.request_size(w, h);
+                continue;
+            }
             changes.extend(script_action(&action));
         }
         if input_test && start.elapsed() >= std::time::Duration::from_secs(8) {
@@ -1123,6 +1156,42 @@ pub fn call_java_native(
     };
     stubs::set_phase(String::new());
     Ok(result)
+}
+
+/// The engine's `NativeGLInterface.nativeAppBridgeV2UpdateSurfaceAppWithPlatformParams`,
+/// once the app has started (0 before).
+static APP_SURFACE_UPDATE: AtomicUsize = AtomicUsize::new(0);
+
+/// Remembers the app's surface update, to call it when the window changes
+/// size (see [`window_changed`]). Call once the app has started.
+pub fn remember_app_surface_update(elf: &Elf, image: &Image) -> Result<(), String> {
+    let name = jni_symbol(
+        "com/roblox/engine/jni/NativeGLInterface",
+        "nativeAppBridgeV2UpdateSurfaceAppWithPlatformParams",
+    );
+    let symbols = elf.symbols().map_err(|e| e.to_string())?;
+    let entry = symbols
+        .iter()
+        .find(|s| s.defined && s.name == name)
+        .ok_or_else(|| format!("no {name}"))?;
+    APP_SURFACE_UPDATE.store((image.bias() + entry.value) as usize, Ordering::Release);
+    Ok(())
+}
+
+/// Gives Roblox's app screens the window's current surface and size.
+fn update_app_surface(env: *mut c_void) {
+    let address = APP_SURFACE_UPDATE.load(Ordering::Acquire);
+    if address == 0 {
+        return;
+    }
+    stubs::set_phase("NativeGLInterface.nativeAppBridgeV2UpdateSurfaceAppWithPlatformParams".to_owned());
+    let class = crate::jni::new_class("com/roblox/engine/jni/NativeGLInterface");
+    let platform = crate::jni::new_instance("com/roblox/engine/jni/model/PlatformParams");
+    // SAFETY: the engine's static JNI function, signature
+    // (Landroid/view/Surface;Lcom/roblox/engine/jni/model/PlatformParams;)V.
+    let update: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) =
+        unsafe { std::mem::transmute(address) };
+    update(env, class, crate::window::surface_object(), platform);
 }
 
 /// [`call_java_native`] for `com.roblox.engine.jni.NativeGLInterface`'s
