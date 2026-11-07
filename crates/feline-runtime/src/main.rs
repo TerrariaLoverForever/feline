@@ -337,125 +337,6 @@ fn run_init(data: &[u8]) -> ExitCode {
                 )?;
             }
         }
-        // FELINE_APP=1 (experimental): start Roblox's app the way its Java
-        // code would, through NativeGLInterface. The order follows the
-        // method names; Feline doesn't read Roblox's Java logic.
-        // The client settings are handed over before GameActivity's
-        // initializeNativeCode (as Mocktail does): started first, the app
-        // sometimes looked for its flags before they existed
-        // (onFlagsFailed), then ignored window size changes
-        // ("Flags-Not-Received"), drew at 1280x720 capped near 60 FPS, and
-        // left parts of the Home screen (the avatar) empty.
-        if wanted("FELINE_START") && wanted("FELINE_APP") {
-            use feline_runtime::init::call_gl_native;
-            use feline_runtime::jni::new_string;
-            // Real answers the engine depends on.
-            let data = std::env::var_os("XDG_DATA_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| {
-                    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                        .join(".local/share")
-                });
-            let assets =
-                feline_runtime::assets::unpack_assets(&data.join("feline/runtime/assets"))?;
-            // The engine reads its TLS certificate bundle from
-            // `./exe/ssl/cacert.pem` (relative to its data folder, where it
-            // runs); the APK ships it as `assets/ssl/`. Link it there.
-            link_certificates(&data.join("feline/runtime"), &assets)?;
-            // The APK's assets hold `content/` (the asset folder) next to
-            // `android/`, `fonts/`, …, which the engine finds relative to it.
-            let assets = assets.join("content");
-            let assets = assets.to_string_lossy();
-            feline_runtime::jni::set_known_string(
-                "com/roblox/engine/jni/model/PlatformParams",
-                "assetFolderPath",
-                &assets,
-            );
-            feline_runtime::jni::set_known_string(
-                "com/roblox/engine/jni/autovalue/InitParams",
-                "baseURL",
-                "https://www.roblox.com/",
-            );
-            // Locale and theme from the desktop: LANG=en_US.UTF-8 -> "en-US" / "en_us".
-            let lang = std::env::var("LANG").unwrap_or_default();
-            let mut parts = lang.split(['.', '@']).next().unwrap_or("").split('_');
-            let language = parts
-                .next()
-                .filter(|l| l.len() == 2)
-                .unwrap_or("en")
-                .to_ascii_lowercase();
-            let country = parts
-                .next()
-                .filter(|c| c.len() == 2)
-                .unwrap_or("US")
-                .to_ascii_uppercase();
-            let locale_class = "com/roblox/engine/jni/locale/NativeLocaleJavaInterface";
-            let roblox_locale = format!("{language}_{}", country.to_ascii_lowercase());
-            feline_runtime::jni::set_known_string(
-                locale_class,
-                "getLocale",
-                &format!("{language}-{country}"),
-            );
-            feline_runtime::jni::set_known_string(
-                locale_class,
-                "getRobloxLocale",
-                &roblox_locale,
-            );
-            feline_runtime::jni::set_known_string(
-                locale_class,
-                "getGameLocale",
-                &roblox_locale,
-            );
-            feline_runtime::jni::set_known_string(
-                "com/roblox/engine/jni/user/NativeUserJavaInterface",
-                "getTheme",
-                &feline_runtime::prefs::get().theme,
-            );
-            // The platform games are told, as the Android app's Java side
-            // answers (empty showed as "unknown" in games).
-            feline_runtime::jni::set_known_string(
-                "com/roblox/engine/jni/user/NativeUserJavaInterface",
-                "getPlatformName",
-                "Android",
-            );
-            // The FPS limit: Roblox's own Maximum Frame Rate setting.
-            let fps_limit = feline_runtime::prefs::get().fps_limit;
-            if fps_limit > 0 {
-                feline_runtime::prefs::write_framerate_cap(
-                    &data.join("feline/runtime/files/appData"),
-                    fps_limit,
-                );
-            }
-            call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;
-            let empty = || new_string("") as usize;
-            // Client settings ("FastFlags") as JSON. The engine accepts an
-            // empty `applicationSettings` object (returns 0; "" or "{}"
-            // return 1) and keeps its built-in defaults. Fetching Roblox's
-            // real settings comes later. FELINE_SETTINGS overrides it.
-            let runtime = data.join("feline/runtime");
-            let settings = client_settings(&runtime);
-            // Roblox's desktop layout instead of the tablet one.
-            let settings = match feline_runtime::desktop::apply(&runtime, USER_ID.get().copied()) {
-                Some(policy) => feline_runtime::desktop::add_to_settings(&settings, &policy),
-                None => settings,
-            };
-            // Roblox's PC in-game settings (Maximum Frame Rate).
-            let settings = feline_runtime::prefs::add_flags(
-                &settings,
-                &feline_runtime::prefs::get().flags(),
-            );
-            let first = new_string(&settings) as usize;
-            let r = call_gl_native(
-                &elf,
-                image,
-                "nativeInitClientSettings",
-                &[first, empty(), empty()],
-            )?;
-            eprintln!(
-                "feline-runtime: nativeInitClientSettings returned {}",
-                r as i32
-            );
-        }
         // FELINE_START=1: continue like Android's GameActivity does (M4).
         let started = if wanted("FELINE_START") {
             eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
@@ -476,11 +357,118 @@ fn run_init(data: &[u8]) -> ExitCode {
             eprintln!("feline-runtime: onStart, onResume, then the main loop…");
             feline_runtime::init::call_lifecycle("onStartNative", handle)?;
             feline_runtime::init::call_lifecycle("onResumeNative", handle)?;
-            // FELINE_APP=1: the app's start, after the client settings
-            // (handed over before initializeNativeCode, above).
+            // FELINE_APP=1 (experimental): start Roblox's app the way its Java
+            // code would, through NativeGLInterface. The order follows the
+            // method names; Feline doesn't read Roblox's Java logic.
             if wanted("FELINE_APP") {
                 use feline_runtime::init::call_gl_native;
-                use feline_runtime::jni::new_instance;
+                use feline_runtime::jni::{new_instance, new_string};
+                // Real answers the engine depends on.
+                let data = std::env::var_os("XDG_DATA_HOME")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| {
+                        std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                            .join(".local/share")
+                    });
+                let assets =
+                    feline_runtime::assets::unpack_assets(&data.join("feline/runtime/assets"))?;
+                // The engine reads its TLS certificate bundle from
+                // `./exe/ssl/cacert.pem` (relative to its data folder, where it
+                // runs); the APK ships it as `assets/ssl/`. Link it there.
+                link_certificates(&data.join("feline/runtime"), &assets)?;
+                // The APK's assets hold `content/` (the asset folder) next to
+                // `android/`, `fonts/`, …, which the engine finds relative to it.
+                let assets = assets.join("content");
+                let assets = assets.to_string_lossy();
+                feline_runtime::jni::set_known_string(
+                    "com/roblox/engine/jni/model/PlatformParams",
+                    "assetFolderPath",
+                    &assets,
+                );
+                feline_runtime::jni::set_known_string(
+                    "com/roblox/engine/jni/autovalue/InitParams",
+                    "baseURL",
+                    "https://www.roblox.com/",
+                );
+                // Locale and theme from the desktop: LANG=en_US.UTF-8 -> "en-US" / "en_us".
+                let lang = std::env::var("LANG").unwrap_or_default();
+                let mut parts = lang.split(['.', '@']).next().unwrap_or("").split('_');
+                let language = parts
+                    .next()
+                    .filter(|l| l.len() == 2)
+                    .unwrap_or("en")
+                    .to_ascii_lowercase();
+                let country = parts
+                    .next()
+                    .filter(|c| c.len() == 2)
+                    .unwrap_or("US")
+                    .to_ascii_uppercase();
+                let locale_class = "com/roblox/engine/jni/locale/NativeLocaleJavaInterface";
+                let roblox_locale = format!("{language}_{}", country.to_ascii_lowercase());
+                feline_runtime::jni::set_known_string(
+                    locale_class,
+                    "getLocale",
+                    &format!("{language}-{country}"),
+                );
+                feline_runtime::jni::set_known_string(
+                    locale_class,
+                    "getRobloxLocale",
+                    &roblox_locale,
+                );
+                feline_runtime::jni::set_known_string(
+                    locale_class,
+                    "getGameLocale",
+                    &roblox_locale,
+                );
+                feline_runtime::jni::set_known_string(
+                    "com/roblox/engine/jni/user/NativeUserJavaInterface",
+                    "getTheme",
+                    &feline_runtime::prefs::get().theme,
+                );
+                // The platform games are told, as the Android app's Java side
+                // answers (empty showed as "unknown" in games).
+                feline_runtime::jni::set_known_string(
+                    "com/roblox/engine/jni/user/NativeUserJavaInterface",
+                    "getPlatformName",
+                    "Android",
+                );
+                // The FPS limit: Roblox's own Maximum Frame Rate setting.
+                let fps_limit = feline_runtime::prefs::get().fps_limit;
+                if fps_limit > 0 {
+                    feline_runtime::prefs::write_framerate_cap(
+                        &data.join("feline/runtime/files/appData"),
+                        fps_limit,
+                    );
+                }
+                call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;
+                let empty = || new_string("") as usize;
+                // Client settings ("FastFlags") as JSON. The engine accepts an
+                // empty `applicationSettings` object (returns 0; "" or "{}"
+                // return 1) and keeps its built-in defaults. Fetching Roblox's
+                // real settings comes later. FELINE_SETTINGS overrides it.
+                let runtime = data.join("feline/runtime");
+                let settings = client_settings(&runtime);
+                // Roblox's desktop layout instead of the tablet one.
+                let settings = match feline_runtime::desktop::apply(&runtime, USER_ID.get().copied()) {
+                    Some(policy) => feline_runtime::desktop::add_to_settings(&settings, &policy),
+                    None => settings,
+                };
+                // Roblox's PC in-game settings (Maximum Frame Rate).
+                let settings = feline_runtime::prefs::add_flags(
+                    &settings,
+                    &feline_runtime::prefs::get().flags(),
+                );
+                let first = new_string(&settings) as usize;
+                let r = call_gl_native(
+                    &elf,
+                    image,
+                    "nativeInitClientSettings",
+                    &[first, empty(), empty()],
+                )?;
+                eprintln!(
+                    "feline-runtime: nativeInitClientSettings returned {}",
+                    r as i32
+                );
                 let init = new_instance("com/roblox/engine/jni/autovalue/InitParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2InitWithParams", &[init])?;
                 let start = new_instance("com/roblox/engine/jni/autovalue/StartAppParams") as usize;
