@@ -20,7 +20,6 @@ use std::thread;
 use std::time::Duration;
 
 use feline_core::launch::{self, GameExit};
-use feline_core::link::{self, LinkError};
 use feline_core::paths;
 use feline_core::runtime::{
     DetectContext, InstallKind, Installation, LaunchTarget, Origin, detect_all,
@@ -229,16 +228,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
         }
     });
 
-    show_link_check(&ui, "");
-    ui.on_link_edited({
-        let weak = ui.as_weak();
-        move |text| {
-            if let Some(ui) = weak.upgrade() {
-                show_link_check(&ui, &text);
-            }
-        }
-    });
-
     ui.on_select_runtime({
         let weak = ui.as_weak();
         let shared = shared.clone();
@@ -265,18 +254,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
         move || {
             if let Some(ui) = weak.upgrade() {
                 start_launch(&ui, &shared, LaunchTarget::Home);
-            }
-        }
-    });
-
-    ui.on_join({
-        let weak = ui.as_weak();
-        let shared = shared.clone();
-        move |text| {
-            let Some(ui) = weak.upgrade() else { return };
-            match link::parse(&text) {
-                Ok(game) => start_launch(&ui, &shared, LaunchTarget::Game(game)),
-                Err(e) => show_link_check(&ui, &e.to_string()),
             }
         }
     });
@@ -592,25 +569,6 @@ fn run_diagnostic(
 // Links
 // ---------------------------------------------------------------------------
 
-/// Validates the link as the user types and shows the result under the field.
-fn show_link_check(ui: &AppWindow, text: &str) {
-    let (ready, valid, message) = match link::parse(text) {
-        Ok(game) => (
-            true,
-            true,
-            match game.place_id() {
-                Some(id) => format!("Valid link · experience {id}"),
-                None => "Valid Roblox link".to_owned(),
-            },
-        ),
-        // An empty field isn't an error; show nothing.
-        Err(LinkError::Empty) => (false, true, String::new()),
-        Err(e) => (false, false, e.to_string()),
-    };
-    ui.set_link_ready(ready);
-    ui.set_link_valid(valid);
-    ui.set_link_message(message.into());
-}
 
 // ---------------------------------------------------------------------------
 // Runtimes

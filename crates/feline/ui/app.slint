@@ -49,13 +49,8 @@ export component AppWindow inherits Window {
     in property <string> stat-memory;
 
     // Link check (set from Rust)
-    in property <bool> link-ready;
-    in property <bool> link-valid;
-    in property <string> link-message;
 
     callback play();
-    callback join(string);
-    callback link-edited(string);
     callback select-runtime(string);
     callback rescan();
     callback open-logs();
@@ -231,17 +226,8 @@ export component AppWindow inherits Window {
             stat-time: root.stat-time;
             stat-cpu: root.stat-cpu;
             stat-memory: root.stat-memory;
-            link-ready: root.link-ready;
-            link-valid: root.link-valid;
-            link-message: root.link-message;
             play => {
                 root.play();
-            }
-            join(link) => {
-                root.join(link);
-            }
-            link-edited(text) => {
-                root.link-edited(text);
             }
             choose-runtime => {
                 root.page = Page.runtimes;

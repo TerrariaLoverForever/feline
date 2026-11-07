@@ -56,13 +56,8 @@ export component HomePage inherits PageBase {
     in property <string> stat-memory;
 
     // Link check (set from Rust).
-    in property <bool> link-ready;
-    in property <bool> link-valid;
-    in property <string> link-message;
 
     callback play();
-    callback join(string);
-    callback link-edited(string);
     callback choose-runtime();
     callback open-logs();
 
@@ -273,47 +268,6 @@ export component HomePage inherits PageBase {
 
         HorizontalLayout {
             spacing: 20px;
-
-            Card {
-                // A small base width, so the 3-part share of the stretch decides the size.
-                preferred-width: 100px;
-                horizontal-stretch: 3;
-                Eyebrow {
-                    text: "JOIN AN EXPERIENCE";
-                }
-                BodyText {
-                    text: "Paste a link from the Roblox website or a friend to pounce straight into that experience.";
-                }
-                HorizontalLayout {
-                    spacing: 10px;
-                    link-field := LineEdit {
-                        horizontal-stretch: 1;
-                        placeholder-text: "roblox.com/games/…  or  roblox://…";
-                        edited(text) => {
-                            root.link-edited(text);
-                        }
-                        accepted(text) => {
-                            if root.link-ready && root.has-runtime && !root.busy {
-                                root.join(text);
-                            }
-                        }
-                    }
-                    SecondaryButton {
-                        text: "Join";
-                        icon: Icons.play;
-                        enabled: root.link-ready && root.has-runtime && !root.busy;
-                        clicked => {
-                            root.join(link-field.text);
-                        }
-                    }
-                }
-                if root.link-message != "": Text {
-                    text: root.link-message;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                    color: root.link-valid ? Theme.success : Theme.danger;
-                }
-            }
 
             Card {
                 // A small base width, so the 2-part share of the stretch decides the size.
