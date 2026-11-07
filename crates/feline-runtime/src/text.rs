@@ -123,6 +123,12 @@ pub fn focus(text_box: i64, initial: String) {
         return;
     }
     let mut focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
+    if focused.is_none() {
+        OPENED_BY.store(
+            LAST_GAME_KEY.load(std::sync::atomic::Ordering::Relaxed),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
     // showKeyboard comes twice per focus (two Java classes); keep the text
     // already typed if it's the same box.
     if focused.as_ref().is_some_and(|s| s.text_box == text_box) {
@@ -173,6 +179,36 @@ fn clipboard<T>(use_it: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Op
         }
     }
     use_it(guard.as_mut()?)
+}
+
+/// The last key pressed down in the game (Android key code; 0 = none since
+/// it was released), and the one whose press opened the focused box.
+static LAST_GAME_KEY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static OPENED_BY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Whether a key event for the game should really go to it. A key whose
+/// press opened a text box (`/` for chat) has its release kept from the
+/// game: on Android the on-screen keyboard owns keys once a box has focus.
+/// Sending that release made Roblox move the focus away from chat at once,
+/// so `/` needed a second press.
+pub fn game_key(key: crate::window::Key) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    if key.down {
+        if !key.repeat {
+            LAST_GAME_KEY.store(key.code, Relaxed);
+        }
+        return true;
+    }
+    if LAST_GAME_KEY.load(Relaxed) == key.code {
+        LAST_GAME_KEY.store(0, Relaxed);
+    }
+    let focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+    if focused && OPENED_BY.load(Relaxed) == key.code {
+        OPENED_BY.store(0, Relaxed);
+        eprintln!("feline-runtime: key {} opened the text box; its release stays with it", key.code);
+        return false;
+    }
+    true
 }
 
 /// The engine hid the keyboard (e.g. another box or button was clicked):

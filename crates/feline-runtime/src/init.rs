@@ -561,7 +561,10 @@ fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
                 return false;
             };
             let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| (x - lx, y - ly));
+            // The movement, scaled by the mouse sensitivity setting (what
+            // turns the camera; the position stays the real one).
+            let scale = crate::prefs::get().mouse_sensitivity as f32 / 100.0;
+            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| ((x - lx) * scale, (y - ly) * scale));
             *last = Some((x, y));
             // SAFETY: nativePassMouseMove (FFFF)V: position, then movement.
             let moved: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32, f32) =
@@ -704,6 +707,9 @@ fn roblox_key(env: *mut c_void, key: crate::window::Key) -> bool {
     let Some(natives) = INPUT_NATIVES.get() else {
         return false;
     };
+    if !crate::text::game_key(key) {
+        return true;
+    }
     let Some(address) = natives.key else {
         return false;
     };

@@ -201,6 +201,9 @@ impl ApplicationHandler for App {
         if mouse_mode() {
             window.set_cursor_visible(false);
         }
+        if crate::prefs::get().start_fullscreen {
+            window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        }
         let size = window.inner_size();
         match handles(&window) {
             Ok(handles) => {
@@ -315,6 +318,21 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+            // F11: fullscreen on or off (not passed to the game).
+            WindowEvent::KeyboardInput { event, .. }
+                if event.physical_key
+                    == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F11) =>
+            {
+                if event.state == winit::event::ElementState::Pressed
+                    && !event.repeat
+                    && let Some(window) = &self.window
+                {
+                    let fullscreen = window.fullscreen().is_none();
+                    window.set_fullscreen(
+                        fullscreen.then_some(winit::window::Fullscreen::Borderless(None)),
+                    );
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let key = crate::keys::android_key(&event, self.modifiers);
                 if let Some(key) = key {

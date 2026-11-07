@@ -43,6 +43,7 @@ pub mod manifest;
 pub mod net;
 pub mod overlay;
 pub mod packed;
+pub mod prefs;
 pub mod sem;
 pub mod sig;
 pub mod stdio;

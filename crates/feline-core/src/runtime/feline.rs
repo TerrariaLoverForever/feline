@@ -21,6 +21,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::config::{Choice, Kind, SettingDef, Val};
 use super::{
     DetectContext, DoctorReport, InstallKind, Installation, LaunchPlan, LaunchTarget, Origin,
     RuntimeBackend, RuntimeError, find_on_path, tail_lines,
@@ -63,6 +64,60 @@ fn program(ctx: &DetectContext) -> Option<PathBuf> {
         .filter(|p| p.is_file())
         .or_else(|| find_on_path(ctx, PROGRAM))
 }
+
+/// The runtime's settings (`~/.config/feline/runtime.json`, created by the
+/// runtime on its first start; see feline-runtime's prefs.rs).
+static SETTINGS: &[SettingDef] = &[
+    SettingDef {
+        key: "maxFps",
+        label: "Max FPS",
+        help: "Roblox's frame rate limit. 0 = no limit.",
+        kind: Kind::Number { min: 0, max: 1000 },
+        default: Val::Int(60),
+        link: None,
+    },
+    SettingDef {
+        key: "mouseSensitivity",
+        label: "Mouse sensitivity (%)",
+        help: "How fast the camera turns with the mouse. 100 = normal; also adjustable in Roblox's own settings.",
+        kind: Kind::Number { min: 10, max: 500 },
+        default: Val::Int(100),
+        link: None,
+    },
+    SettingDef {
+        key: "graphicsQuality",
+        label: "Graphics quality",
+        help: "1 (fastest) to 21 (best). 0 = Roblox decides.",
+        kind: Kind::Number { min: 0, max: 21 },
+        default: Val::Int(0),
+        link: None,
+    },
+    SettingDef {
+        key: "theme",
+        label: "App theme",
+        help: "",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "dark",
+                label: "Dark",
+            },
+            Choice {
+                value: "light",
+                label: "Light",
+            },
+        ]),
+        default: Val::Str("dark"),
+        link: None,
+    },
+    SettingDef {
+        key: "startFullscreen",
+        label: "Start in fullscreen",
+        help: "F11 switches fullscreen on and off while playing.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+];
 
 fn no_engine() -> RuntimeError {
     RuntimeError::Failed {
@@ -132,6 +187,14 @@ impl RuntimeBackend for FelineRuntime {
         })
     }
 
+    fn settings(&self) -> &'static [SettingDef] {
+        SETTINGS
+    }
+
+    fn config_path(&self, _installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
+        Some(ctx.config_dir("feline")?.join("runtime.json"))
+    }
+
     fn roblox_log_roots(&self, _installation: &Installation, ctx: &DetectContext) -> Vec<PathBuf> {
         // The engine writes to <runtime data>/files/appData/logs.
         ctx.data_dir("feline")
@@ -165,6 +228,25 @@ impl RuntimeBackend for FelineRuntime {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn the_runtimes_settings_file_is_readable() {
+        // As feline-runtime writes it (prefs.rs), with non-default values.
+        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"maxFps\": 144,\n  \"mouseSensitivity\": 250,\n  \"graphicsQuality\": 7,\n  \"theme\": \"light\",\n  \"startFullscreen\": true\n}\n";
+        let file = super::super::config::ConfigFile::parse(std::path::Path::new("/x"), text)
+            .expect("parses");
+        let expected = [
+            serde_json::json!(144),
+            serde_json::json!(250),
+            serde_json::json!(7),
+            serde_json::json!("light"),
+            serde_json::json!(true),
+        ];
+        for (def, value) in SETTINGS.iter().zip(expected) {
+            assert!(def.accepts(&def.default.to_json()), "{}", def.key);
+            assert_eq!(file.get(def), value, "{}", def.key);
+        }
+    }
 
     #[test]
     fn engine_needs_the_apk_next_to_it() {

@@ -423,7 +423,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                 feline_runtime::jni::set_known_string(
                     "com/roblox/engine/jni/user/NativeUserJavaInterface",
                     "getTheme",
-                    "dark",
+                    &feline_runtime::prefs::get().theme,
                 );
                 call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;
                 let empty = || new_string("") as usize;
@@ -438,6 +438,11 @@ fn run_init(data: &[u8]) -> ExitCode {
                     Some(policy) => feline_runtime::desktop::add_to_settings(&settings, &policy),
                     None => settings,
                 };
+                // The user's settings (max FPS, graphics quality).
+                let settings = feline_runtime::prefs::add_flags(
+                    &settings,
+                    &feline_runtime::prefs::get().flags(),
+                );
                 let first = new_string(&settings) as usize;
                 let r = call_gl_native(
                     &elf,
