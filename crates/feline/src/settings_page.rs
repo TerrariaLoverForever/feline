@@ -212,8 +212,11 @@ pub enum Edit {
     Number(i64),
 }
 
-/// Saves one changed runtime setting, then redraws the page.
+/// Saves one changed runtime setting, then redraws the page. A number
+/// that saved fine isn't redrawn: it changes with every digit typed, and
+/// redrawing rebuilt its box, which lost the keyboard focus each time.
 pub fn set_runtime_value(ui: &AppWindow, shared: &Shared, backend_id: &str, key: &str, edit: Edit) {
+    let typed_number = matches!(edit, Edit::Number(_));
     let result = {
         let state = lock(shared);
         let installation = installation_for(&state, backend_id).cloned();
@@ -238,9 +241,18 @@ pub fn set_runtime_value(ui: &AppWindow, shared: &Shared, backend_id: &str, key:
             }
         }
     };
-    lock(shared).settings_message = result
+    let message = result
         .err()
         .map(|e| (backend_id.to_owned(), format!("Not saved: {e}")));
+    let unchanged_page = {
+        let mut state = lock(shared);
+        let unchanged = message.is_none() && state.settings_message.is_none();
+        state.settings_message = message;
+        unchanged
+    };
+    if typed_number && unchanged_page {
+        return;
+    }
     refresh(ui, shared);
 }
 
