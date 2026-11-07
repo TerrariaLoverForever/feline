@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Runtimes page: Feline's own runtime (not available yet) kept visibly
+// Runtimes page: Feline's own runtime (in development) kept visibly
 // separate from the external third-party runtimes that were found.
 
 import { Theme } from "../theme.slint";
@@ -77,6 +77,9 @@ export component RuntimesPage inherits PageBase {
     in property <string> error;
     callback select(string);
     callback rescan();
+    // Feline's own runtime, if it was found (at most one).
+    in property <[RuntimeRow]> feline-runtimes;
+    property <bool> has-feline: root.feline-runtimes.length > 0;
 
     VerticalLayout {
         padding: 32px;
@@ -115,7 +118,8 @@ export component RuntimesPage inherits PageBase {
             wrap: word-wrap;
         }
 
-        // Feline's own runtime: honest about its status, nothing to click.
+        // Feline's own runtime: selectable once it's installed, honest about
+        // its status either way.
         Rectangle {
             border-radius: Theme.radius;
             border-width: 1px;
@@ -146,9 +150,18 @@ export component RuntimesPage inherits PageBase {
                         }
                     }
                     BodyText {
-                        text: "Feline's own, independently developed runtime. It's not available yet and can't be selected.";
+                        text: root.has-feline
+                            ? "Feline's own, independently developed runtime. Early: expect missing features and crashes."
+                            : "Feline's own, independently developed runtime. To use it, install feline-runtime and copy libroblox.so and base.apk from your Roblox app into ~/.local/share/feline/engine/, then press Rescan.";
                     }
                 }
+            }
+        }
+
+        for row in root.feline-runtimes: RuntimeItem {
+            entry: row;
+            select => {
+                root.select(row.key);
             }
         }
 

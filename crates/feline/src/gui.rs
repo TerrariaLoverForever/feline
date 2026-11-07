@@ -22,7 +22,9 @@ use std::time::Duration;
 use feline_core::launch::{self, GameExit};
 use feline_core::link::{self, LinkError};
 use feline_core::paths;
-use feline_core::runtime::{DetectContext, InstallKind, Installation, LaunchTarget, detect_all};
+use feline_core::runtime::{
+    DetectContext, InstallKind, Installation, LaunchTarget, Origin, detect_all,
+};
 use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Settings};
 use feline_core::system::{CheckLevel, FlatpakNvidia, SessionType, SystemInfo};
 use slint::{ModelRc, SharedString, VecModel};
@@ -662,18 +664,26 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
     let state = lock(shared);
     let saved = state.settings.runtime.as_deref();
 
-    let rows: Vec<RuntimeRow> = state
+    let (feline, external): (Vec<_>, Vec<_>) = state
         .found
         .iter()
-        .map(|f| RuntimeRow {
+        .partition(|f| f.installation.backend.origin() == Origin::Feline);
+    let row = |f: &&Found| RuntimeRow {
             key: f.installation.key().into(),
             name: f.installation.backend.name().into(),
             version: f.version.clone().unwrap_or_default().into(),
-            kind: format!("External · {}", kind_label(&f.installation.kind)).into(),
+            kind: format!(
+                "{} · {}",
+                origin_label(f.installation.backend.origin()),
+                kind_label(&f.installation.kind)
+            )
+            .into(),
             selected: saved == Some(f.installation.key().as_str()),
-        })
-        .collect();
-    ui.set_runtimes(ModelRc::new(VecModel::from(rows)));
+    };
+    let feline: Vec<RuntimeRow> = feline.iter().map(row).collect();
+    let external: Vec<RuntimeRow> = external.iter().map(row).collect();
+    ui.set_feline_runtimes(ModelRc::new(VecModel::from(feline)));
+    ui.set_runtimes(ModelRc::new(VecModel::from(external)));
 
     match selected(&state) {
         Some(f) => {
@@ -685,7 +695,13 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
             ui.set_selected_has_doctor(f.installation.backend.has_doctor());
             ui.set_selected_has_info(f.installation.backend.has_diagnostics());
             ui.set_selected_detail(
-                format!("External runtime · {}", short_kind(&f.installation.kind)).into(),
+                match f.installation.backend.origin() {
+                    Origin::Feline => "Feline's own runtime · in development".to_owned(),
+                    Origin::External { .. } => {
+                        format!("External runtime · {}", short_kind(&f.installation.kind))
+                    }
+                }
+                .into(),
             );
         }
         None => {
@@ -720,6 +736,13 @@ fn select_runtime(ui: &AppWindow, shared: &Shared, key: &str) {
     }
     refresh_runtimes(ui, shared);
     settings_page::refresh(ui, shared);
+}
+
+fn origin_label(origin: Origin) -> &'static str {
+    match origin {
+        Origin::Feline => "Feline",
+        Origin::External { .. } => "External",
+    }
 }
 
 fn kind_label(kind: &InstallKind) -> String {

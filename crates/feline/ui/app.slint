@@ -31,6 +31,7 @@ export component AppWindow inherits Window {
 
     // Runtimes (set from Rust)
     in property <[RuntimeRow]> runtimes;
+    in property <[RuntimeRow]> feline-runtimes;
     in property <bool> detecting: true;
     in property <string> runtimes-error;
     in property <string> selected-name;
@@ -252,6 +253,7 @@ export component AppWindow inherits Window {
         if root.page == Page.runtimes: RuntimesPage {
             horizontal-stretch: 1;
             runtimes: root.runtimes;
+            feline-runtimes: root.feline-runtimes;
             detecting: root.detecting;
             error: root.runtimes-error;
             select(key) => {

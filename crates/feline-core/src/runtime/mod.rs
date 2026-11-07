@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Runtime backends.
 //!
-//! A *runtime* is a separate program that runs the Roblox client. Feline's
-//! own runtime is a long-term goal and doesn't exist yet. Until then, Feline
-//! can optionally drive **external, third-party** runtimes the user installed
-//! themselves, through their public command line only.
+//! A *runtime* is a separate program that runs the Roblox client: Feline's
+//! own, `feline-runtime` (in development, see [`feline`]), or **external,
+//! third-party** runtimes the user installed themselves, which Feline drives
+//! through their public command line only.
 //!
 //! The pieces:
 //! - [`RuntimeBackend`]: one implementation per runtime project. It knows how
@@ -19,6 +19,7 @@
 
 pub mod config;
 pub mod cordial;
+pub mod feline;
 pub mod sober;
 pub mod stud;
 
@@ -179,7 +180,7 @@ impl fmt::Display for Installation {
 /// Who develops a runtime. Shown to users wherever a runtime is listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
-    /// Developed by the Feline project (none exists yet).
+    /// Developed by the Feline project: `feline-runtime`.
     Feline,
     /// A separate, third-party project. Feline only starts it through its
     /// public interface and contains none of its code.
@@ -427,7 +428,12 @@ pub trait RuntimeBackend: Send + Sync {
 /// Every backend Feline knows about. The order is not a preference: Feline
 /// never picks a runtime on the user's behalf. A `static` lives for the whole
 /// program, so we can hand out `'static` references.
-static BACKENDS: &[&dyn RuntimeBackend] = &[&cordial::CORDIAL, &sober::SOBER, &stud::STUD];
+static BACKENDS: &[&dyn RuntimeBackend] = &[
+    &feline::FELINE,
+    &cordial::CORDIAL,
+    &sober::SOBER,
+    &stud::STUD,
+];
 
 pub fn backends() -> &'static [&'static dyn RuntimeBackend] {
     BACKENDS

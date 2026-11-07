@@ -11,15 +11,19 @@ use std::process::ExitCode;
 const HELP: &str = "\
 feline-runtime: Feline's own runtime for Roblox's Android client (in development)
 
-Usage: feline-runtime --check <libroblox.so>
+Usage: feline-runtime --play <libroblox.so>
+       feline-runtime --check <libroblox.so>
        feline-runtime --load <libroblox.so>
        feline-runtime --imports <libroblox.so>
        feline-runtime --init <libroblox.so>
        feline-runtime --natives <base.apk>
        feline-runtime --login
+       feline-runtime --version
        feline-runtime --save-cookie   (reads the cookie from standard input)
        feline-runtime --logout
 
+--play   starts Roblox's app in a window, until you close it (what the
+         Feline launcher runs). base.apk must be next to libroblox.so.
 --check  reads the engine library and reports what loading it would involve.
 --load   also puts it into memory: binds every import (forwarded to glibc
          or OpenGL ES, Feline data, or a stub), applies all relocations and
@@ -87,7 +91,10 @@ fn main() -> ExitCode {
                 }
             }
         }
-        [flag, path] if flag == "--init" => {
+        [flag, path] if flag == "--init" || flag == "--play" => {
+            if flag == "--play" {
+                PLAY.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             let data = match std::fs::read(path) {
                 Ok(data) => data,
                 Err(e) => {
@@ -114,6 +121,10 @@ fn main() -> ExitCode {
             // The image and imports must stay alive while the engine's code
             // may run, so this never returns normally.
             run_init(&data)
+        }
+        [flag] if flag == "--version" => {
+            println!("feline-runtime {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
         }
         [flag] if flag == "--login" => match runtime_data().and_then(|d| login_window(&d)) {
             Ok(path) => {
@@ -278,7 +289,7 @@ fn run_init(data: &[u8]) -> ExitCode {
         // right after loading the engine, before the activity starts. With
         // Roblox's real client settings the engine requires it ("Path does
         // not exist").
-        if std::env::var_os("FELINE_APP").is_some() {
+        if wanted("FELINE_APP") {
             let cache = runtime_data()?.join("cache");
             std::fs::create_dir_all(&cache)
                 .map_err(|e| format!("couldn't create {}: {e}", cache.display()))?;
@@ -345,12 +356,12 @@ fn run_init(data: &[u8]) -> ExitCode {
             }
         }
         // FELINE_START=1: continue like Android's GameActivity does (M4).
-        let started = if std::env::var_os("FELINE_START").is_some() {
+        let started = if wanted("FELINE_START") {
             eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
             let handle = feline_runtime::init::call_initialize_native_code(&elf, image)?;
             // FELINE_WINDOW=1: open the window first (refused while a game
             // runs, so it can't take focus from it).
-            let mut window = if std::env::var_os("FELINE_WINDOW").is_some() {
+            let mut window = if wanted("FELINE_WINDOW") {
                 if let Some(running) = runtime_running() {
                     return Err(format!(
                         "not opening a window while {running} is running (it could take focus from your game)"
@@ -367,7 +378,7 @@ fn run_init(data: &[u8]) -> ExitCode {
             // FELINE_APP=1 (experimental): start Roblox's app the way its Java
             // code would, through NativeGLInterface. The order follows the
             // method names; Feline doesn't read Roblox's Java logic.
-            if std::env::var_os("FELINE_APP").is_some() {
+            if wanted("FELINE_APP") {
                 use feline_runtime::init::call_gl_native;
                 use feline_runtime::jni::{new_instance, new_string};
                 // Real answers the engine depends on.
@@ -468,12 +479,13 @@ fn run_init(data: &[u8]) -> ExitCode {
             }
             let lifecycle = match window.as_mut() {
                 Some(window) => {
-                    // FELINE_SECONDS: how long the window stays open (15 s).
+                    // FELINE_SECONDS: how long the window stays open (15 s;
+                    // with --play, until it's closed).
                     let seconds = std::env::var("FELINE_SECONDS")
                         .ok()
                         .and_then(|s| s.parse::<u64>().ok())
                         .filter(|&s| s > 0)
-                        .unwrap_or(15);
+                        .unwrap_or(if playing() { UNTIL_CLOSED } else { 15 });
                     let opened = std::time::Instant::now();
                     let why = feline_runtime::init::run_window_loop(
                         window,
@@ -629,6 +641,23 @@ fn login_window(runtime_data: &std::path::Path) -> Result<std::path::PathBuf, St
     let saved = feline_runtime::login::save_cookie(runtime_data, &text);
     text.clear();
     saved
+}
+
+/// `--play`: the window, Roblox's app, and no time limit, without the
+/// developer variables (FELINE_START, FELINE_WINDOW, FELINE_APP).
+static PLAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// "No time limit": a year, as a number of seconds.
+const UNTIL_CLOSED: u64 = 365 * 24 * 60 * 60;
+
+fn playing() -> bool {
+    PLAY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A start-up step that `--play` always does and `--init` does only when
+/// its developer variable is set.
+fn wanted(variable: &str) -> bool {
+    playing() || std::env::var_os(variable).is_some()
 }
 
 fn runtime_data() -> Result<std::path::PathBuf, String> {

@@ -29,8 +29,8 @@ Options:
   -V, --version  Print Feline's version
   -h, --help     Print this help
 
-Feline's own runtime is not available yet. Listed runtimes are external
-third-party programs you installed yourself; Feline never picks one for you.
+Listed runtimes are Feline's own (in development) or external third-party
+programs you installed yourself; Feline never picks one for you.
 ";
 
 /// Runs a text command. `args` excludes the program name and is never empty
@@ -82,9 +82,10 @@ pub fn run(args: &[&str]) -> ExitCode {
     }
 }
 
-const NO_RUNTIME: &str = "No runtime found. Feline's own runtime is not available yet; \
-                          Feline can also start supported external runtimes you install \
-                          yourself (currently: Sober, Cordial, Stud).";
+const NO_RUNTIME: &str = "No runtime found. Feline's own runtime needs feline-runtime and \
+                          Roblox's engine (libroblox.so and base.apk) in \
+                          ~/.local/share/feline/engine/. Feline can also start supported \
+                          external runtimes you install yourself (currently: Sober, Cordial, Stud).";
 
 fn list_runtimes() -> ExitCode {
     let found = detect_all(&DetectContext::host());
