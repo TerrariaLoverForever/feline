@@ -605,6 +605,24 @@ fn roblox_wheel(env: *mut c_void, x: f32, y: f32, dy: f32) {
     }
 }
 
+/// Logs a key event for bug reports: the key code, scan code and where it
+/// went ("text box" or "game"). Nothing typed into a text box can be read
+/// back from it. Returns `to_text_box` unchanged.
+fn log_key(key: crate::window::Key, to_text_box: bool) -> bool {
+    // In a text box, a character key's code would give away what was
+    // typed: only keys without a character (Enter, Esc, arrows) are logged.
+    if !key.repeat && !(to_text_box && key.unicode != 0) {
+        eprintln!(
+            "feline-runtime: key {} code {} scan {} → {}",
+            if key.down { "down" } else { "up" },
+            key.code,
+            key.scan_code,
+            if to_text_box { "text box" } else { "game" }
+        );
+    }
+    to_text_box
+}
+
 /// Types `key` into the focused text box, if there is one and the key is for
 /// it (see `text.rs`). True if the key was used.
 fn roblox_text(env: *mut c_void, key: crate::window::Key) -> bool {
@@ -827,7 +845,7 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
                 );
             }
         }
-        WindowChange::Key(key) if roblox_text(env, key) || roblox_key(env, key) => {}
+        WindowChange::Key(key) if log_key(key, roblox_text(env, key)) || roblox_key(env, key) => {}
         WindowChange::Touch(touch) => {
             use crate::window::TouchAction;
             /// AINPUT_SOURCE_TOUCHSCREEN, AINPUT_SOURCE_MOUSE.
@@ -1034,11 +1052,32 @@ fn script_action(action: &str) -> Vec<crate::window::WindowChange> {
             .chars()
             .flat_map(|c| [key(true, 0, c as i32), key(false, 0, c as i32)])
             .collect(),
-        "key" => rest
-            .trim()
-            .parse()
-            .map(|code| vec![key(true, code, 0), key(false, code, 0)])
-            .unwrap_or_default(),
+        // `key CODE [SCAN [CHAR]]`: an Android key code, optionally with the
+        // evdev scan code and the character a real keyboard sends with it
+        // (e.g. `key 111 1` for Esc, `key 40 38 l` for L).
+        "key" | "keydown" | "keyup" => {
+            let mut parts = rest.split_whitespace();
+            let Some(code) = parts.next().and_then(|c| c.parse().ok()) else {
+                return Vec::new();
+            };
+            let scan: i32 = parts.next().and_then(|c| c.parse().ok()).unwrap_or(0);
+            let unicode = parts.next().and_then(|c| c.chars().next()).map_or(0, |c| c as i32);
+            let with = |down| {
+                WindowChange::Key(Key {
+                    down,
+                    code,
+                    scan_code: scan,
+                    meta: 0,
+                    unicode,
+                    repeat: false,
+                })
+            };
+            match verb {
+                "keydown" => vec![with(true)],
+                "keyup" => vec![with(false)],
+                _ => vec![with(true), with(false)],
+            }
+        }
         "shot" => {
             crate::egl::request_screenshot(rest.trim());
             Vec::new()

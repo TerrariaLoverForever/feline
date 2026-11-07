@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn dlerror_reports_once_then_clears() {
         // SAFETY (test): a valid C string.
-        let handle = unsafe { dlopen(c"libvulkan.so".as_ptr(), 0) };
+        let handle = unsafe { dlopen(c"libcamera2ndk.so".as_ptr(), 0) };
         assert!(handle.is_null());
         let message = dlerror();
         assert!(!message.is_null());
@@ -240,7 +240,7 @@ mod tests {
         let text = unsafe { CStr::from_ptr(message) }
             .to_string_lossy()
             .into_owned();
-        assert!(text.contains("libvulkan.so"), "{text}");
+        assert!(text.contains("libcamera2ndk.so"), "{text}");
         assert!(dlerror().is_null(), "cleared after being read");
     }
 }

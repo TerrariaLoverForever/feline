@@ -16,9 +16,10 @@
 //! - presenting: the swapchain doesn't wait for the monitor (MAILBOX, or
 //!   IMMEDIATE), so Roblox's frame rate limit decides, as with OpenGL.
 //!
-//! Off unless the runtime setting `renderer` is "vulkan" (or
-//! `FELINE_VULKAN=1`; `=0` forces it off): otherwise `libvulkan.so` stays
-//! unavailable and the engine uses OpenGL ES, as before.
+//! On whenever the desktop has a Vulkan driver (it's much faster than
+//! OpenGL ES here). Without one, or with `FELINE_VULKAN=0` (for
+//! troubleshooting), `libvulkan.so` is unavailable and the engine uses
+//! OpenGL ES, as it did before.
 //!
 //! Unsafe: Vulkan's C API, called with the engine's own arguments.
 #![allow(unsafe_code)]
@@ -45,13 +46,7 @@ const PRESENT_MODE_MAILBOX: u32 = 1;
 /// Whether Vulkan is offered to the engine.
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        let wanted = match std::env::var("FELINE_VULKAN") {
-            Ok(v) => v == "1",
-            Err(_) => crate::prefs::get().renderer == "vulkan",
-        };
-        wanted && host().is_some()
-    })
+    *ON.get_or_init(|| std::env::var("FELINE_VULKAN").map_or(true, |v| v != "0") && host().is_some())
 }
 
 struct Host {
