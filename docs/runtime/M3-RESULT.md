@@ -199,16 +199,19 @@ network fail to load, as expected offline.
   `files/exe/ssl` where the engine reads it.
 - bionic's legacy `__sF` standard streams (`&__sF[1]` = stdout, 152-byte
   `FILE`s) are mapped to glibc's streams in `stdio.rs`.
-- **Known issue:** with the cache folder set, the engine's `HttpClient`
-  thread crashes in about half the runs (SIGSEGV at one engine location,
-  reading small multiples of 0x2000, i.e. an uninitialised table). Its last
-  imported calls (thread-tagged call trace) are `recvfrom`, `inet_pton`,
-  `realpath`, then copies. Not yet explained; calling
-  `LocalStorageManager.initStorageManagerNativeV3(files, cache)`
-  (`FELINE_STORAGE_INIT=1`, a guess) doesn't change the rate.
+- **Fixed: the `HttpClient` crash.** The engine has mimalloc v3 built in
+  and imports no `malloc`/`free`. It calls `realpath(path, NULL)` and frees
+  the result with its own `free`, which looks the pointer up in mimalloc's
+  page map; glibc's heap had no entry there, so the lookup read through a
+  null table (SIGSEGV at 0x1e18ca3, reading small multiples of 0x2000).
+  `realpath`, `getcwd(NULL)` and `vasprintf` are now Feline's own
+  (`alloc.rs`): glibc's result is copied into a buffer from the engine's
+  `malloc` (offset 0x1e15298 in 2.742.0.1059, checked against its code and
+  `operator new`'s call before use). Before: 6 of 6 runs crashed on Arch;
+  after: 0 of 6.
 - Diagnostics added: crash reports name the crashing thread and, outside
   the engine, the host library and symbol; the call trace records the
   calling thread and shows the crashing thread's own last calls.
 
-**Next:** the HttpClient crash, the launcher downloading the client
+**Next:** the launcher downloading the client
 settings, confirming input in the window, login, audio.

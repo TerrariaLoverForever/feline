@@ -343,6 +343,9 @@ pub fn implementation(name: &str) -> Option<u64> {
     if name == "android_get_device_api_level" {
         return Some(android_get_device_api_level as extern "C" fn() -> c_int as usize as u64);
     }
+    if let Some(address) = crate::alloc::implementation(name) {
+        return Some(address);
+    }
     if let Some(address) = crate::dl::implementation(name) {
         return Some(address);
     }

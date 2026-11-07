@@ -95,7 +95,7 @@ const FORWARD_LIBC: &[&str] = &[
     // process's own stdout.
     "snprintf",
     "vsnprintf",
-    "vasprintf",
+    // vasprintf: Feline's own (alloc.rs), the engine frees its result.
     "sscanf",
     "vsscanf",
     "printf",
@@ -128,8 +128,7 @@ const FORWARD_LIBC: &[&str] = &[
     "remove",
     "access",
     "readlink",
-    "realpath",
-    "getcwd",
+    // realpath, getcwd: Feline's own (alloc.rs), the engine frees results.
     "pipe",
     "poll",
     "select",

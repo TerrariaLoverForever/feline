@@ -46,6 +46,11 @@ pub fn set_engine(engine: Engine) {
     let _ = ENGINE.set(engine);
 }
 
+/// Where the engine is, once it's loaded.
+pub fn engine() -> Option<Engine> {
+    ENGINE.get().copied()
+}
+
 thread_local! {
     /// The pending error for `dlerror`, and the last one handed out (kept
     /// alive, because the caller may still be reading it).
