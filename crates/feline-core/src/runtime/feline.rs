@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::config::{Choice, Kind, SettingDef, Val};
+use super::config::{Choice, Kind, SettingDef, TextCheck, Val};
 use super::{
     DetectContext, DoctorReport, InstallKind, Installation, LaunchPlan, LaunchTarget, Origin,
     RuntimeBackend, RuntimeError, find_on_path, tail_lines,
@@ -94,6 +94,65 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
+        key: "vsync",
+        label: "VSync",
+        help: "Waits for your monitor before showing each frame: no tearing, but the frame rate stops at your monitor's refresh rate and input lags a little.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
+        key: "graphicsQuality",
+        label: "Graphics quality",
+        help: "Roblox's own graphics quality, 1 (fastest) to 10 (best looking), set each time the game starts. 0 = Roblox decides (automatic, or what you set in the game).",
+        kind: Kind::Number { min: 0, max: 10 },
+        default: Val::Int(0),
+        link: None,
+    },
+    SettingDef {
+        key: "microphone",
+        label: "Microphone for voice chat",
+        help: "Off: voice chat still works for listening, but your microphone is never opened and others hear silence.",
+        kind: Kind::Toggle,
+        default: Val::Bool(true),
+        link: None,
+    },
+    SettingDef {
+        key: "controllers",
+        label: "Controllers",
+        help: "Passes gamepads (Xbox, PlayStation and others) to Roblox.",
+        kind: Kind::Toggle,
+        default: Val::Bool(true),
+        link: None,
+    },
+    SettingDef {
+        key: "blockTracking",
+        label: "Block Roblox tracking",
+        help: "Roblox's analytics and telemetry servers (usage events, performance metrics, crash and log reports) look unreachable to the app. Games, login, chat and voice don't use them.",
+        kind: Kind::Toggle,
+        default: Val::Bool(true),
+        link: None,
+    },
+    SettingDef {
+        key: "proxy",
+        label: "Proxy",
+        help: "Off when empty. For Roblox's web traffic (login, website and API requests), e.g. socks5://127.0.0.1:9050 or http://proxy:8080. The game connection itself doesn't go through a proxy.",
+        kind: Kind::Text {
+            placeholder: "socks5://host:port",
+            check: TextCheck::Proxy,
+        },
+        default: Val::Str(""),
+        link: None,
+    },
+    SettingDef {
+        key: "detailedLogs",
+        label: "Detailed logs",
+        help: "Logs every call between Roblox and Feline's runtime. Only turn on when a developer asks for a log: the logs get much bigger.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
         key: "startFullscreen",
         label: "Start in fullscreen",
         help: "F11 switches fullscreen on and off while playing.",
@@ -112,19 +171,60 @@ fn no_engine() -> RuntimeError {
 }
 
 /// Grouped as in sections of one page.
-static TABS: &[super::SettingTab] = &[super::SettingTab {
-    name: "Settings",
-    sections: &[
-        super::SettingSection {
-            title: "Game",
-            keys: &["fpsLimit", "startFullscreen"],
-        },
-        super::SettingSection {
-            title: "Appearance",
-            keys: &["theme"],
-        },
-    ],
-}];
+static TABS: &[super::SettingTab] = &[
+    super::SettingTab {
+        name: "Graphics",
+        sections: &[
+            super::SettingSection {
+                title: "Frame rate",
+                keys: &["fpsLimit", "vsync"],
+            },
+            super::SettingSection {
+                title: "Picture",
+                keys: &["graphicsQuality", "startFullscreen"],
+            },
+        ],
+    },
+    super::SettingTab {
+        name: "Audio & controls",
+        sections: &[
+            super::SettingSection {
+                title: "Voice chat",
+                keys: &["microphone"],
+            },
+            super::SettingSection {
+                title: "Controls",
+                keys: &["controllers"],
+            },
+        ],
+    },
+    super::SettingTab {
+        name: "Privacy & network",
+        sections: &[
+            super::SettingSection {
+                title: "Privacy",
+                keys: &["blockTracking"],
+            },
+            super::SettingSection {
+                title: "Network",
+                keys: &["proxy"],
+            },
+        ],
+    },
+    super::SettingTab {
+        name: "Advanced",
+        sections: &[
+            super::SettingSection {
+                title: "Appearance",
+                keys: &["theme"],
+            },
+            super::SettingSection {
+                title: "Troubleshooting",
+                keys: &["detailedLogs"],
+            },
+        ],
+    },
+];
 
 impl RuntimeBackend for FelineRuntime {
     fn id(&self) -> &'static str {
@@ -242,18 +342,27 @@ mod tests {
     #[test]
     fn the_runtimes_settings_file_is_readable() {
         // As feline-runtime writes it (prefs.rs), with non-default values.
-        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"fpsLimit\": 600,\n  \"startFullscreen\": true\n}\n";
+        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"fpsLimit\": 600,\n  \"startFullscreen\": true,\n  \"proxy\": \"socks5://127.0.0.1:9050\",\n  \"blockTracking\": false\n}\n";
         let file = super::super::config::ConfigFile::parse(std::path::Path::new("/x"), text)
             .expect("parses");
         let expected = [
-            serde_json::json!("light"),
-            serde_json::json!(600),
-            serde_json::json!(true),
+            ("theme", serde_json::json!("light")),
+            ("fpsLimit", serde_json::json!(600)),
+            ("startFullscreen", serde_json::json!(true)),
+            ("proxy", serde_json::json!("socks5://127.0.0.1:9050")),
+            ("blockTracking", serde_json::json!(false)),
+            // Not in the file: the default.
+            ("microphone", serde_json::json!(true)),
         ];
-        for (def, value) in SETTINGS.iter().zip(expected) {
+        for def in SETTINGS {
             assert!(def.accepts(&def.default.to_json()), "{}", def.key);
-            assert_eq!(file.get(def), value, "{}", def.key);
         }
+        for (key, value) in expected {
+            let def = SETTINGS.iter().find(|d| d.key == key).expect(key);
+            assert_eq!(file.get(def), value, "{key}");
+        }
+        let proxy = SETTINGS.iter().find(|d| d.key == "proxy").unwrap();
+        assert!(!proxy.accepts(&serde_json::json!("not a proxy")));
     }
 
     #[test]

@@ -168,8 +168,13 @@ unsafe fn text(s: *const c_char) -> String {
     unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned()
 }
 
+/// A line about the engine's Java calls, with the runtime setting
+/// "Detailed logs" only (they were most of every log).
 fn log(what: String) {
-    eprintln!("feline-runtime: jni: {what}");
+    static DETAILED: OnceLock<bool> = OnceLock::new();
+    if *DETAILED.get_or_init(|| crate::prefs::get().detailed_logs) {
+        eprintln!("feline-runtime: jni: {what}");
+    }
 }
 
 /// `FELINE_JNI_TRACE=1` logs every call to Feline's JNI functions (also
@@ -1196,7 +1201,7 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
         // window opens on its Sign In and Create Account screens.
         "gameActivity_onAppReady" => {
             let screen = string_value(read() as usize as Handle).unwrap_or_default();
-            log(format!("app screen: {screen:?}"));
+            eprintln!("feline-runtime: jni: app screen: {screen:?}");
             crate::versions::app_shown(&screen);
             crate::login::screen_shown(&screen);
         }

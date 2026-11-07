@@ -555,7 +555,10 @@ unsafe extern "C" fn create_swapchain(
     // SAFETY: the engine's valid create info.
     let mut copy = unsafe { std::ptr::read(info) };
     let asked = copy.present_mode;
-    if let Some(mode) = no_wait_mode(copy.surface) {
+    // VSync (runtime setting): keep the engine's FIFO.
+    if !crate::prefs::get().vsync
+        && let Some(mode) = no_wait_mode(copy.surface)
+    {
         copy.present_mode = mode;
     }
     // Copying into the images (typed text, see vkoverlay.rs), if allowed.

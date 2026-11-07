@@ -85,6 +85,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     }
     if let Some(tab) = std::env::var("FELINE_START_TAB").ok().and_then(|t| t.parse().ok()) {
         ui.set_settings_tab(tab);
+        ui.set_runtime_tab(tab);
     }
     if let Ok(id) = std::env::var("FELINE_START_RUNTIME") {
         ui.set_page(Page::Runtimes);
@@ -239,6 +240,16 @@ pub fn run() -> Result<(), slint::PlatformError> {
                 // A negative index can't happen with a dropdown; treat it as 0.
                 let index = usize::try_from(index).unwrap_or(0);
                 settings_page::set_runtime_value(&ui, &shared, &tab, &key, Edit::Choice(index));
+            }
+        }
+    });
+    ui.on_set_runtime_text({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |tab, key, value| {
+            if let Some(ui) = weak.upgrade() {
+                let edit = Edit::Text(value.to_string());
+                settings_page::set_runtime_value(&ui, &shared, &tab, &key, edit);
             }
         }
     });

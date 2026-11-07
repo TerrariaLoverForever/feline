@@ -319,7 +319,7 @@ pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface
     // synced to the monitor, capped at its refresh rate.
     if NO_VSYNC_SURFACE.swap(surface as usize, Ordering::Relaxed) != surface as usize {
         // SAFETY: the engine's display, with its context current here.
-        unsafe { (host.swap_interval)(display, 0) };
+        unsafe { (host.swap_interval)(display, swap_interval()) };
     }
     // The focused text box's text, which Android's keyboard would show.
     if let Some((w, h)) = crate::window::native_window().map(|n| n.size()) {
@@ -370,6 +370,11 @@ fn swap_timing(spent: std::time::Duration) {
         ));
         *state = Some((Instant::now(), Duration::ZERO, 0));
     }
+}
+
+/// 0 (no waiting for the compositor), or 1 with the VSync setting.
+fn swap_interval() -> EglInt {
+    EglInt::from(crate::prefs::get().vsync)
 }
 
 /// The last surface the swap interval was set to 0 for.
@@ -461,7 +466,7 @@ pub unsafe extern "C" fn eglSwapInterval(display: EglDisplay, interval: EglInt) 
         ));
     }
     // SAFETY: the engine's display.
-    unsafe { (host.swap_interval)(display, 0) }
+    unsafe { (host.swap_interval)(display, swap_interval()) }
 }
 
 /// Called when the window is resized: the Wayland EGL window follows

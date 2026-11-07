@@ -3,7 +3,7 @@
 // external third-party ones), and each runtime's own page with its settings
 // in tabs, like that runtime's own launcher.
 
-import { ScrollView, ComboBox, SpinBox } from "std-widgets.slint";
+import { ScrollView, ComboBox, SpinBox, LineEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { RuntimeRow, RuntimeTab, SettingKind, Level } from "../types.slint";
 import { Icon, Icons } from "../icons.slint";
@@ -125,6 +125,7 @@ component SettingControl inherits HorizontalLayout {
     callback set-bool(string, string, bool);
     callback set-choice(string, string, int);
     callback set-number(string, string, int);
+    callback set-text(string, string, string);
     property <bool> editable: root.tab.editable && !root.tab.rows[root.index].managed;
 
     if root.tab.rows[root.index].kind == SettingKind.toggle: Toggle {
@@ -141,6 +142,15 @@ component SettingControl inherits HorizontalLayout {
         enabled: root.editable;
         selected => {
             root.set-choice(root.tab.id, root.tab.rows[root.index].key, self.current-index);
+        }
+    }
+    if root.tab.rows[root.index].kind == SettingKind.text: LineEdit {
+        width: 260px;
+        text: root.tab.rows[root.index].text;
+        placeholder-text: root.tab.rows[root.index].placeholder;
+        enabled: root.editable;
+        edited(t) => {
+            root.set-text(root.tab.id, root.tab.rows[root.index].key, t);
         }
     }
     if root.tab.rows[root.index].kind == SettingKind.number: SpinBox {
@@ -166,7 +176,8 @@ component RuntimeDetail inherits VerticalLayout {
     callback set-bool(string, string, bool);
     callback set-choice(string, string, int);
     callback set-number(string, string, int);
-    property <int> current: 0;
+    callback set-text(string, string, string);
+    in-out property <int> current: 0;
     property <bool> has-settings: false;
 
     spacing: 16px;
@@ -281,6 +292,9 @@ component RuntimeDetail inherits VerticalLayout {
                 tone: Theme.level-color(tab.status-level);
             }
             if tab.rows.length > 0: Card {
+                // Spacing 0: other tabs' (hidden) rows take no room.
+                VerticalLayout {
+                spacing: 0px;
                 for row[j] in tab.rows: VerticalLayout {
                     if row.tab == root.current && row.section-start && row.section != "": VerticalLayout {
                         padding-top: j > 0 ? 10px : 0px;
@@ -309,8 +323,12 @@ component RuntimeDetail inherits VerticalLayout {
                             set-number(t, k, v) => {
                                 root.set-number(t, k, v);
                             }
+                            set-text(t, k, v) => {
+                                root.set-text(t, k, v);
+                            }
                         }
                     }
+                }
                 }
             }
             if tab.source != "": BodyText {
@@ -333,12 +351,15 @@ export component RuntimesPage inherits PageBase {
     // settings tabs.
     in property <string> open;
     in property <[RuntimeTab]> tabs;
+    // The open tab of a runtime's page.
+    in-out property <int> runtime-tab;
     callback select(string);
     callback rescan();
     callback open-runtime(string);
     callback set-bool(string, string, bool);
     callback set-choice(string, string, int);
     callback set-number(string, string, int);
+    callback set-text(string, string, string);
     property <bool> has-feline: root.feline-runtimes.length > 0;
 
     ScrollView {
@@ -353,6 +374,7 @@ export component RuntimesPage inherits PageBase {
             spacing: 0px;
             for row in root.feline-runtimes: VerticalLayout {
                 if row.id == root.open: RuntimeDetail {
+                    current <=> root.runtime-tab;
                     entry: row;
                     feline: true;
                     initial: "F";
@@ -372,10 +394,14 @@ export component RuntimesPage inherits PageBase {
                     set-number(t, k, v) => {
                         root.set-number(t, k, v);
                     }
+                    set-text(t, k, v) => {
+                        root.set-text(t, k, v);
+                    }
                 }
             }
             for row in root.runtimes: VerticalLayout {
                 if row.id == root.open: RuntimeDetail {
+                    current <=> root.runtime-tab;
                     entry: row;
                     feline: false;
                     initial: row.name;
@@ -394,6 +420,9 @@ export component RuntimesPage inherits PageBase {
                     }
                     set-number(t, k, v) => {
                         root.set-number(t, k, v);
+                    }
+                    set-text(t, k, v) => {
+                        root.set-text(t, k, v);
                     }
                 }
             }

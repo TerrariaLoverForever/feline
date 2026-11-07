@@ -60,6 +60,7 @@ export enum SettingKind {
     toggle,
     choice,
     number,
+    text,
 }
 
 // One runtime setting on the Settings page.
@@ -76,6 +77,8 @@ export struct SettingRow {
     number: int,
     min: int,
     max: int,
+    text: string,
+    placeholder: string,
     // Locked because a Feline setting overrides it.
     managed: bool,
     managed-reason: string,

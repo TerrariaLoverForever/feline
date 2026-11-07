@@ -10,6 +10,13 @@
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
 //! | `fpsLimit` | 0: Roblox's in-game Maximum Frame Rate decides; otherwise that frame rate (e.g. 600), set as Roblox's cap at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
+//! | `vsync` | wait for the monitor before showing a frame (less tearing; caps at the refresh rate) |
+//! | `graphicsQuality` | 0: Roblox decides; 1–10: Roblox's graphics quality, set at each start |
+//! | `microphone` | let voice chat use the microphone (off: others hear silence) |
+//! | `controllers` | pass gamepads to Roblox |
+//! | `blockTracking` | Roblox's analytics/telemetry hosts look nonexistent to it (see net.rs) |
+//! | `proxy` | "" or an `http://`, `https://`, `socks5://` or `socks5h://` address for Roblox's web traffic |
+//! | `detailedLogs` | log every Java call the engine makes (for bug reports) |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
 //! in-game settings (Esc → Settings), as on PC; see [`Prefs::flags`].
@@ -25,6 +32,15 @@ pub struct Prefs {
     /// Frames per second to cap at; 0 leaves it to Roblox's own setting.
     pub fps_limit: u32,
     pub start_fullscreen: bool,
+    pub vsync: bool,
+    /// Roblox's graphics quality 1–10; 0 leaves it to Roblox.
+    pub graphics_quality: u32,
+    pub microphone: bool,
+    pub controllers: bool,
+    pub block_tracking: bool,
+    /// "" (no proxy) or a checked proxy address.
+    pub proxy: String,
+    pub detailed_logs: bool,
 }
 
 impl Default for Prefs {
@@ -33,8 +49,29 @@ impl Default for Prefs {
             theme: "dark".into(),
             fps_limit: 0,
             start_fullscreen: false,
+            vsync: false,
+            graphics_quality: 0,
+            microphone: true,
+            controllers: true,
+            block_tracking: true,
+            proxy: String::new(),
+            detailed_logs: false,
         }
     }
+}
+
+/// Whether `proxy` is a proxy address Feline passes on: empty (none) or
+/// `scheme://host[:port]` with a scheme Roblox's HTTP client understands.
+pub fn valid_proxy(proxy: &str) -> bool {
+    if proxy.is_empty() {
+        return true;
+    }
+    let Some((scheme, rest)) = proxy.split_once("://") else {
+        return false;
+    };
+    matches!(scheme, "http" | "https" | "socks5" | "socks5h" | "socks4")
+        && !rest.is_empty()
+        && !rest.contains(char::is_whitespace)
 }
 
 /// The settings file.
@@ -69,6 +106,27 @@ impl Prefs {
                 .get("startFullscreen")
                 .and_then(Value::as_bool)
                 .unwrap_or(d.start_fullscreen),
+            vsync: json.get("vsync").and_then(Value::as_bool).unwrap_or(d.vsync),
+            graphics_quality: json
+                .get("graphicsQuality")
+                .and_then(Value::as_u64)
+                .map_or(d.graphics_quality, |q| q.min(10) as u32),
+            microphone: json.get("microphone").and_then(Value::as_bool).unwrap_or(d.microphone),
+            controllers: json.get("controllers").and_then(Value::as_bool).unwrap_or(d.controllers),
+            block_tracking: json
+                .get("blockTracking")
+                .and_then(Value::as_bool)
+                .unwrap_or(d.block_tracking),
+            proxy: json
+                .get("proxy")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|p| valid_proxy(p))
+                .map_or(d.proxy, str::to_owned),
+            detailed_logs: json
+                .get("detailedLogs")
+                .and_then(Value::as_bool)
+                .unwrap_or(d.detailed_logs),
         }
     }
 
@@ -77,6 +135,13 @@ impl Prefs {
             "theme": self.theme,
             "fpsLimit": self.fps_limit,
             "startFullscreen": self.start_fullscreen,
+            "vsync": self.vsync,
+            "graphicsQuality": self.graphics_quality,
+            "microphone": self.microphone,
+            "controllers": self.controllers,
+            "blockTracking": self.block_tracking,
+            "proxy": self.proxy,
+            "detailedLogs": self.detailed_logs,
         })
     }
 
@@ -117,17 +182,52 @@ pub fn write_framerate_cap(app_data: &std::path::Path, fps: u32) {
 /// `text` (Roblox's settings XML) with `FramerateCap` set to `fps`, added
 /// to `<Properties>` if missing. None if the file isn't as expected.
 fn set_framerate_cap(text: &str, fps: i32) -> Option<String> {
-    const OPEN: &str = "<int name=\"FramerateCap\">";
+    set_int(text, "FramerateCap", fps)
+}
+
+/// `text` (Roblox's settings XML) with the int setting `name` set to
+/// `value`, added to `<Properties>` if missing.
+fn set_int(text: &str, name: &str, value: i32) -> Option<String> {
+    set_value(text, "int", name, value)
+}
+
+/// Like [`set_int`] for a setting stored as `<kind name="…">` (Roblox uses
+/// `int` and `token`, e.g. for enums).
+fn set_value(text: &str, kind: &str, name: &str, value: i32) -> Option<String> {
+    let open = format!("<{kind} name=\"{name}\">");
+    let close = format!("</{kind}>");
     let mut text = text.to_owned();
-    if let Some(found) = text.find(OPEN) {
-        let start = found + OPEN.len();
-        let end = start + text[start..].find("</int>")?;
-        text.replace_range(start..end, &fps.to_string());
+    if let Some(found) = text.find(&open) {
+        let start = found + open.len();
+        let end = start + text[start..].find(&close)?;
+        text.replace_range(start..end, &value.to_string());
     } else {
         let at = text.find("<Properties>")? + "<Properties>".len();
-        text.insert_str(at, &format!("\n\t\t{OPEN}{fps}</int>"));
+        text.insert_str(at, &format!("\n\t\t{open}{value}{close}"));
     }
     Some(text)
+}
+
+/// Sets Roblox's graphics quality (its in-game "Graphics Quality" slider,
+/// `SavedQualityLevel` 1–10 in `GlobalBasicSettings_13.xml`) before the
+/// engine reads it. Does nothing if Roblox hasn't written the file yet.
+pub fn write_graphics_quality(app_data: &std::path::Path, level: u32) {
+    let file = app_data.join("GlobalBasicSettings_13.xml");
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return;
+    };
+    // Roblox keeps the slider (a token, 1–10) and its internal level (an
+    // int, 2 × slider + 1: 10 ↔ 21, 1 ↔ 3) side by side.
+    let level = level.clamp(1, 10) as i32;
+    if let Some(updated) = set_value(&text, "token", "SavedQualityLevel", level)
+        .and_then(|t| set_value(&t, "int", "GraphicsQualityLevel", 2 * level + 1))
+        && updated != text
+    {
+        match std::fs::write(&file, updated) {
+            Ok(()) => eprintln!("feline-runtime: Roblox's graphics quality set to {level}"),
+            Err(e) => eprintln!("feline-runtime: couldn't write {}: {e}", file.display()),
+        }
+    }
 }
 
 /// Settings earlier versions had, now Roblox's own in-game ones.
@@ -197,6 +297,29 @@ pub fn add_flags(settings: &str, flags: &[(&'static str, String)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quality_is_written_as_roblox_stores_it() {
+        let xml = "<Properties>\n<int name=\"GraphicsQualityLevel\">21</int>\n<token name=\"SavedQualityLevel\">10</token>\n</Properties>";
+        let out = set_value(xml, "token", "SavedQualityLevel", 3)
+            .and_then(|t| set_value(&t, "int", "GraphicsQualityLevel", 7))
+            .unwrap();
+        assert!(out.contains("<token name=\"SavedQualityLevel\">3</token>"));
+        assert!(out.contains("<int name=\"GraphicsQualityLevel\">7</int>"));
+        assert!(!out.contains("<int name=\"SavedQualityLevel\">"));
+    }
+
+    #[test]
+    fn new_settings_and_proxy_check() {
+        let p = Prefs::from_json(json!({"proxy": "socks5://127.0.0.1:9050", "graphicsQuality": 99, "microphone": false}).as_object().unwrap());
+        assert_eq!(p.proxy, "socks5://127.0.0.1:9050");
+        assert_eq!(p.graphics_quality, 10);
+        assert!(!p.microphone);
+        assert!(p.block_tracking, "tracking is blocked unless turned off");
+        let bad = Prefs::from_json(json!({"proxy": "not a url"}).as_object().unwrap());
+        assert_eq!(bad.proxy, "", "an invalid proxy isn't used");
+        assert!(valid_proxy("") && valid_proxy("http://proxy:8080") && !valid_proxy("ftp://x"));
+    }
 
     #[test]
     fn fps_limit_and_the_old_unlimited_switch() {

@@ -97,6 +97,8 @@ fn main() -> ExitCode {
                 PLAY.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             let _ = ENGINE_PATH.set(std::path::PathBuf::from(path));
+            // Proxy (runtime setting), before any thread starts.
+            feline_runtime::net::use_proxy(&feline_runtime::prefs::get().proxy);
             if flag == "--play" {
                 feline_runtime::versions::started(std::path::Path::new(path));
             }
@@ -450,6 +452,14 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                     "Android",
                 );
                 // The FPS limit: Roblox's own Maximum Frame Rate setting.
+                // Graphics quality: Roblox's own setting, if one is chosen.
+                let quality = feline_runtime::prefs::get().graphics_quality;
+                if quality > 0 {
+                    feline_runtime::prefs::write_graphics_quality(
+                        &data.join("feline/runtime/files/appData"),
+                        quality,
+                    );
+                }
                 let fps_limit = feline_runtime::prefs::get().fps_limit;
                 if fps_limit > 0 {
                     feline_runtime::prefs::write_framerate_cap(

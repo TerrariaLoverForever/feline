@@ -94,6 +94,8 @@ export component SettingsPage inherits PageBase {
     // "delete-roblox-logs", "delete-feline-logs", "forget-login",
     // "clear-cache", "check-update", "refresh"
     callback housekeeping(string);
+    // Opens Feline Runtime's "Privacy & network" tab.
+    callback open-runtime-privacy();
 
     in-out property <int> current: 0;
     property <[string]> toggle-options: ["Let each runtime decide", "On", "Off"];
@@ -315,6 +317,23 @@ export component SettingsPage inherits PageBase {
                     action: "Delete";
                     act => {
                         root.housekeeping("delete-feline-logs");
+                    }
+                }
+            }
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Tracking and proxy";
+                    icon: Icons.shield;
+                }
+                SettingRow {
+                    label: "Block Roblox tracking, use a proxy";
+                    help: "For Feline's own runtime: blocking Roblox's analytics and telemetry (on by default), and a proxy for Roblox's web traffic (off by default). External runtimes have their own network handling.";
+                    SecondaryButton {
+                        text: "Open";
+                        icon: Icons.chevron-right;
+                        clicked => {
+                            root.open-runtime-privacy();
+                        }
                     }
                 }
             }

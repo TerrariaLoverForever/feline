@@ -236,7 +236,16 @@ fn start(record: bool, object: Handle) -> bool {
                 // SAFETY: the leaked buffer of `bytes` bytes, shared with
                 // the engine, which only touches it inside `pass`.
                 let shared = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, bytes) };
-                if record {
+                if record && !crate::prefs::get().microphone {
+                    // Microphone off (runtime setting): silence every 10 ms,
+                    // without opening the microphone.
+                    eprintln!("feline-runtime: voice: microphone is off in Feline's settings");
+                    shared.fill(0);
+                    while !flag.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        pass(env, object as Handle, bytes as i32, native);
+                    }
+                } else if record {
                     let Some(mut mic) =
                         crate::audio::Stream::open(true, rate, channels, bytes as u32, c"Voice chat microphone")
                     else {

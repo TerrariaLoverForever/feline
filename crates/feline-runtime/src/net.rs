@@ -119,6 +119,42 @@ fn log_lookup(node: *const c_char, error: c_int) {
     eprintln!("feline-runtime: looked up {name}: {result}");
 }
 
+/// "Proxy" (runtime setting): Roblox's HTTP client (curl) and Feline's own
+/// requests read these variables. Call before any other thread starts (the
+/// game connection itself isn't HTTP and doesn't use a proxy).
+pub fn use_proxy(proxy: &str) {
+    if proxy.is_empty() {
+        return;
+    }
+    for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+        // SAFETY: called while the process is single-threaded (see above).
+        unsafe { std::env::set_var(name, proxy) };
+    }
+    // SAFETY: as above.
+    unsafe { std::env::set_var("NO_PROXY", "localhost,127.0.0.1,::1") };
+    eprintln!("feline-runtime: Roblox's web traffic goes through the proxy from Feline's settings");
+}
+
+/// Hosts that only collect analytics, telemetry and diagnostics from the
+/// app (seen in Roblox's own logs): nothing a game, the website, login or
+/// voice chat needs. Their requests go nowhere with "Block Roblox tracking".
+const TRACKING_HOSTS: &[&str] = &[
+    "ecsv2.roblox.com",
+    "metrics.roblox.com",
+    "lms.roblox.com",
+    "silver.roblox.com",
+    "ephemeralcounters.api.roblox.com",
+    "client-telemetry.roblox.com",
+];
+
+/// Whether `host` is one of [`TRACKING_HOSTS`] (or a regional `lms-…`
+/// telemetry server).
+pub fn is_tracking_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    TRACKING_HOSTS.contains(&host.as_str())
+        || (host.starts_with("lms-") && host.ends_with(".roblox.com"))
+}
+
 /// `int getaddrinfo(node, service, hints, res)` with bionic's structures.
 ///
 /// # Safety
@@ -130,6 +166,18 @@ pub unsafe extern "C" fn getaddrinfo(
     hints: *const BionicAddrinfo,
     res: *mut *mut BionicAddrinfo,
 ) -> c_int {
+    // "Block Roblox tracking" (runtime setting): analytics hosts don't exist.
+    if !node.is_null() && crate::prefs::get().block_tracking {
+        // SAFETY: the engine's NUL-terminated host name.
+        let name = unsafe { std::ffi::CStr::from_ptr(node) }.to_string_lossy();
+        if is_tracking_host(&name) {
+            static LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 5 {
+                eprintln!("feline-runtime: blocked Roblox tracking host {name}");
+            }
+            return bionic_error(libc::EAI_NONAME);
+        }
+    }
     // SAFETY: an all-zero addrinfo is glibc's "no hints" value.
     let mut glibc_hints: libc::addrinfo = unsafe { std::mem::zeroed() };
     if !hints.is_null() {
@@ -560,5 +608,20 @@ mod tests {
         // SAFETY (test): a static string.
         let text = unsafe { CStr::from_ptr(gai_strerror(8)) };
         assert!(!text.to_bytes().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    #[test]
+    fn only_tracking_hosts_are_blocked() {
+        use super::is_tracking_host;
+        assert!(is_tracking_host("ecsv2.roblox.com"));
+        assert!(is_tracking_host("lms-aws-ap-northeast-3.roblox.com"));
+        assert!(is_tracking_host("METRICS.roblox.com."));
+        assert!(!is_tracking_host("apis.roblox.com"));
+        assert!(!is_tracking_host("www.roblox.com"));
+        assert!(!is_tracking_host("voice.roblox.com"));
+        assert!(!is_tracking_host("lms.example.com"));
     }
 }

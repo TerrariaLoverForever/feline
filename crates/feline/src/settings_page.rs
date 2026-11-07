@@ -227,6 +227,8 @@ fn row(def: &SettingDef, current: &Value, overrides: &Overrides) -> SettingRow {
         number: 0,
         min: 0,
         max: 0,
+        text: SharedString::new(),
+        placeholder: SharedString::new(),
         managed: managed.is_some(),
         // `as_ref()` borrows instead of moving `managed`, which `value`
         // still borrows from.
@@ -250,6 +252,11 @@ fn row(def: &SettingDef, current: &Value, overrides: &Overrides) -> SettingRow {
                 .position(|c| Some(c.value) == value.as_str())
                 .unwrap_or(0) as i32;
         }
+        Kind::Text { placeholder, .. } => {
+            row.kind = SettingKind::Text;
+            row.text = value.as_str().unwrap_or("").into();
+            row.placeholder = placeholder.into();
+        }
         Kind::Number { min, max } => {
             row.kind = SettingKind::Number;
             row.number = value.as_i64().unwrap_or(min) as i32;
@@ -265,13 +272,30 @@ pub enum Edit {
     Bool(bool),
     Choice(usize),
     Number(i64),
+    Text(String),
 }
 
 /// Saves one changed runtime setting, then redraws the page. A number
 /// that saved fine isn't redrawn: it changes with every digit typed, and
 /// redrawing rebuilt its box, which lost the keyboard focus each time.
 pub fn set_runtime_value(ui: &AppWindow, shared: &Shared, backend_id: &str, key: &str, edit: Edit) {
-    let typed_number = matches!(edit, Edit::Number(_));
+    // Text being typed (e.g. half a proxy address) is saved once it's
+    // valid; until then nothing happens, so the box keeps its focus.
+    if let Edit::Text(text) = &edit {
+        let valid = lock(shared)
+            .found
+            .iter()
+            .find(|f| f.installation.backend.id() == backend_id)
+            .and_then(|f| f.installation.backend.settings().iter().find(|d| d.key == key))
+            .is_some_and(|def| match def.kind {
+                Kind::Text { check, .. } => check.accepts(text.trim()),
+                _ => false,
+            });
+        if !valid {
+            return;
+        }
+    }
+    let typed_number = matches!(edit, Edit::Number(_) | Edit::Text(_));
     let result = {
         let state = lock(shared);
         let installation = installation_for(&state, backend_id).cloned();
@@ -316,6 +340,10 @@ fn edit_to_value(def: &SettingDef, edit: Edit) -> Option<Value> {
         (Kind::Toggle, Edit::Bool(b)) => Some(Value::Bool(b)),
         (Kind::Choice(choices), Edit::Choice(i)) => choices.get(i).map(|c| Value::from(c.value)),
         (Kind::Number { .. }, Edit::Number(n)) => Some(Value::from(n)),
+        (Kind::Text { check, .. }, Edit::Text(t)) => {
+            let t = t.trim().to_owned();
+            check.accepts(&t).then(|| Value::from(t))
+        }
         _ => None,
     }
 }

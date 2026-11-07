@@ -66,6 +66,38 @@ pub enum Kind {
     Choice(&'static [Choice]),
     /// A JSON integer in `min..=max`.
     Number { min: i64, max: i64 },
+    /// A JSON string typed in a box ("" = not set).
+    Text {
+        placeholder: &'static str,
+        check: TextCheck,
+    },
+}
+
+/// What a text setting may contain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextCheck {
+    Any,
+    /// "" or `scheme://host[:port]` with an HTTP or SOCKS proxy scheme.
+    Proxy,
+}
+
+impl TextCheck {
+    pub fn accepts(self, text: &str) -> bool {
+        if text.len() > 300 || text.contains(['\n', '\r']) {
+            return false;
+        }
+        match self {
+            Self::Any => true,
+            Self::Proxy => {
+                text.is_empty()
+                    || text.split_once("://").is_some_and(|(scheme, rest)| {
+                        matches!(scheme, "http" | "https" | "socks5" | "socks5h" | "socks4")
+                            && !rest.is_empty()
+                            && !rest.contains(char::is_whitespace)
+                    })
+            }
+        }
+    }
 }
 
 /// Which Feline-wide setting, if any, overrides this runtime setting.
@@ -106,6 +138,7 @@ impl SettingDef {
             (Kind::Number { min, max }, Value::Number(n)) => {
                 n.as_i64().is_some_and(|n| (min..=max).contains(&n))
             }
+            (Kind::Text { check, .. }, Value::String(s)) => check.accepts(s),
             _ => false,
         }
     }

@@ -148,6 +148,9 @@ pub fn poll(env: Handle) {
     let Some(natives) = NATIVES.get() else {
         return;
     };
+    if !crate::prefs::get().controllers {
+        return;
+    }
     STATE.with(|cell| {
         let mut cell = cell.borrow_mut();
         let state = cell.get_or_insert_with(|| State {
