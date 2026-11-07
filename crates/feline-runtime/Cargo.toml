@@ -26,3 +26,6 @@ libc = "0.2"
 # windowing library the launcher uses through Slint. Apache-2.0.
 winit = "0.30"
 miniz_oxide = "0.9.1"
+# Drawing typed text over focused text boxes (Roblox's own font from the
+# APK). Apache-2.0. Already in the build through winit's decorations.
+ab_glyph = "0.2"

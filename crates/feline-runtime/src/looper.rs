@@ -249,11 +249,30 @@ pub unsafe extern "C" fn ALooper_pollOnce(
     let mut event = libc::epoll_event { events: 0, u64: 0 };
     // SAFETY: valid epoll descriptor and one-event buffer.
     let n = unsafe { libc::epoll_wait(looper.epoll, &mut event, 1, timeout) };
+    stats(timeout, if n > 0 { event.u64 as c_int } else { n });
     if n < 0 {
         // EINTR counts as a wake-up, as on Android.
         return ALOOPER_POLL_WAKE;
     }
     if n == 0 {
+        // The engine's main loop polls without waiting, millions of times a
+        // second (a full CPU core) with nothing to do; on Android its frame
+        // waits for vsync. A short pause on empty polls frees the core and
+        // doesn't change the frame rate (measured: 60 per second either
+        // way). FELINE_POLL_NAP=microseconds (0 = no pause), default 500.
+        if timeout == 0 {
+            use std::sync::OnceLock;
+            static NAP: OnceLock<u64> = OnceLock::new();
+            let nap = *NAP.get_or_init(|| {
+                std::env::var("FELINE_POLL_NAP")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(500)
+            });
+            if nap > 0 {
+                std::thread::sleep(std::time::Duration::from_micros(nap));
+            }
+        }
         return ALOOPER_POLL_TIMEOUT;
     }
     let fd = event.u64 as c_int;
@@ -295,6 +314,33 @@ pub unsafe extern "C" fn ALooper_pollOnce(
     }
     let _ = entry.events;
     entry.ident
+}
+
+/// FELINE_LOOPER_LOG=1: every 2 s, how often pollOnce ran, with which
+/// timeouts and results (an fd, 0 = timeout, -1 = error).
+fn stats(timeout: c_int, result: c_int) {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("FELINE_LOOPER_LOG").is_some()) {
+        return;
+    }
+    type Counts = HashMap<(c_int, c_int), u64>;
+    static STATE: Mutex<Option<(Instant, Counts)>> = Mutex::new(None);
+    let mut state = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let (since, counts) = state.get_or_insert_with(|| (Instant::now(), HashMap::new()));
+    *counts.entry((timeout, result)).or_insert(0) += 1;
+    if since.elapsed().as_secs() >= 2 {
+        let mut list: Vec<_> = counts.drain().collect();
+        list.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+        let text: Vec<String> = list
+            .iter()
+            .take(6)
+            .map(|((t, r), n)| format!("timeout {t} -> {r}: {n}"))
+            .collect();
+        eprintln!("feline-runtime: looper, 2 s: {}", text.join(", "));
+        *since = Instant::now();
+    }
 }
 
 pub fn implementation(name: &str) -> Option<u64> {

@@ -270,7 +270,8 @@ impl ApplicationHandler for App {
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(key) = crate::keys::android_key(&event, self.modifiers) {
+                let key = crate::keys::android_key(&event, self.modifiers);
+                if let Some(key) = key {
                     self.changes.push(WindowChange::Key(key));
                 }
             }

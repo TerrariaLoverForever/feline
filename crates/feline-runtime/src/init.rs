@@ -605,17 +605,15 @@ fn roblox_text(env: *mut c_void, key: crate::window::Key) -> bool {
     // SAFETY: the DEX signatures: syncTextboxTextAndCursorPosition2
     // (Ljava/lang/String;I)V, nativePassText (JLjava/lang/String;ZI)V,
     // nativeReturnPressedFromOnScreenKeyboard (J)V, nativeReleaseFocus (J)V.
-    let (sync, pass, ret, release): (
-        extern "C" fn(*mut c_void, *mut c_void, *mut c_void, c_int),
-        extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void, u8, c_int),
-        extern "C" fn(*mut c_void, *mut c_void, i64),
-        extern "C" fn(*mut c_void, *mut c_void, i64),
-    ) = unsafe {
+    type Sync = extern "C" fn(*mut c_void, *mut c_void, *mut c_void, c_int);
+    type Pass = extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void, u8, c_int);
+    type WithBox = extern "C" fn(*mut c_void, *mut c_void, i64);
+    let (sync, pass, ret, release) = unsafe {
         (
-            std::mem::transmute(sync),
-            std::mem::transmute(pass),
-            std::mem::transmute(ret),
-            std::mem::transmute(release),
+            std::mem::transmute::<usize, Sync>(sync),
+            std::mem::transmute::<usize, Pass>(pass),
+            std::mem::transmute::<usize, WithBox>(ret),
+            std::mem::transmute::<usize, WithBox>(release),
         )
     };
     match edit {
@@ -654,6 +652,31 @@ fn roblox_text(env: *mut c_void, key: crate::window::Key) -> bool {
         Edit::Release { text_box } => release(env, class, text_box),
     }
     true
+}
+
+/// Passes the text of a box the engine just left as finished (see
+/// `text::blur`).
+fn finish_left_text_box(env: *mut c_void) {
+    let Some((text_box, text, cursor)) = crate::text::take_left() else {
+        return;
+    };
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return;
+    };
+    let Some(pass) = natives.pass_text else {
+        return;
+    };
+    // SAFETY: nativePassText (JLjava/lang/String;ZI)V.
+    let pass: extern "C" fn(*mut c_void, *mut c_void, i64, *mut c_void, u8, c_int) =
+        unsafe { std::mem::transmute(pass) };
+    pass(
+        env,
+        natives.gl_class as *mut c_void,
+        text_box,
+        crate::jni::new_string(&text),
+        1,
+        cursor,
+    );
 }
 
 /// Sends a key through Roblox's function. False if it isn't available.
@@ -875,6 +898,83 @@ fn synthetic_input() -> Vec<crate::window::WindowChange> {
     ]
 }
 
+/// FELINE_INPUT_SCRIPT: timed test input, steps separated by `;`, each
+/// `seconds:action`: `tap x,y`, `type text` (each character pressed and
+/// released), `key code` (an Android key code, e.g. 66 for Enter), or
+/// `shot path` (the next frame saved as a PPM image). For testing without
+/// anyone at the window.
+fn input_script() -> Vec<(f64, String)> {
+    let Ok(script) = std::env::var("FELINE_INPUT_SCRIPT") else {
+        return Vec::new();
+    };
+    let mut steps: Vec<(f64, String)> = script
+        .split(';')
+        .filter_map(|step| {
+            let (at, action) = step.trim().split_once(':')?;
+            Some((at.trim().parse().ok()?, action.trim().to_owned()))
+        })
+        .collect();
+    steps.sort_by(|a, b| a.0.total_cmp(&b.0));
+    steps
+}
+
+/// The window changes for one script action.
+fn script_action(action: &str) -> Vec<crate::window::WindowChange> {
+    use crate::window::{Key, Touch, TouchAction, WindowChange};
+    eprintln!("feline-runtime: input script: {action}");
+    let key = |down, code, unicode| {
+        WindowChange::Key(Key {
+            down,
+            code,
+            scan_code: 0,
+            meta: 0,
+            unicode,
+            repeat: false,
+        })
+    };
+    let (verb, rest) = action.split_once(' ').unwrap_or((action, ""));
+    match verb {
+        "tap" => {
+            let mut xy = rest.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
+            let (Some(x), Some(y)) = (xy.next(), xy.next()) else {
+                return Vec::new();
+            };
+            let touch = |action| WindowChange::Touch(Touch { action, x, y });
+            vec![
+                touch(TouchAction::Hover),
+                touch(TouchAction::Down),
+                touch(TouchAction::Up),
+            ]
+        }
+        "down" | "up" => {
+            let mut xy = rest.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
+            let (Some(x), Some(y)) = (xy.next(), xy.next()) else {
+                return Vec::new();
+            };
+            let action = if verb == "down" {
+                TouchAction::Down
+            } else {
+                TouchAction::Up
+            };
+            vec![WindowChange::Touch(Touch { action, x, y })]
+        }
+        "type" => rest
+            .chars()
+            .flat_map(|c| [key(true, 0, c as i32), key(false, 0, c as i32)])
+            .collect(),
+        "key" => rest
+            .trim()
+            .parse()
+            .map(|code| vec![key(true, code, 0), key(false, code, 0)])
+            .unwrap_or_default(),
+        "shot" => {
+            crate::egl::request_screenshot(rest.trim());
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Milliseconds since boot, like Android's `SystemClock.uptimeMillis()`
 /// (which event times use).
 fn uptime_millis() -> i64 {
@@ -900,8 +1000,18 @@ pub fn run_window_loop(
     // FELINE_INPUT_TEST=1: after 8 s, a tap in the middle of the window and
     // a press of W, to test input without anyone at the keyboard.
     let mut input_test = std::env::var_os("FELINE_INPUT_TEST").is_some();
+    let mut script = input_script().into_iter().peekable();
     while std::time::Instant::now() < end {
+        if let Some(env) = crate::jni::current_env() {
+            finish_left_text_box(env);
+        }
         let mut changes = window.pump(std::time::Duration::from_millis(1));
+        while let Some((at, _)) = script.peek()
+            && start.elapsed().as_secs_f64() >= *at
+        {
+            let (_, action) = script.next().expect("peeked");
+            changes.extend(script_action(&action));
+        }
         if input_test && start.elapsed() >= std::time::Duration::from_secs(8) {
             input_test = false;
             changes.extend(synthetic_input());

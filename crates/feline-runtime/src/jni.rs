@@ -356,18 +356,122 @@ extern "C" fn is_instance_of(env: Handle, object: Handle, class: Handle) -> JBoo
     JBoolean::from(result)
 }
 
-/// `NewObject{,V,A}(env, class, constructor,
-/// args…)`: a new, empty instance of `class`. No Java constructor runs, so
-/// the arguments are not read (for `NewObject`, the C variadic arguments are
-/// simply left unread, which the x86-64 calling convention allows).
-extern "C" fn new_object(_env: Handle, class: Handle, constructor: Handle) -> Handle {
-    trace("NewObject");
+/// A constructor argument, read by its type in the signature.
+#[derive(Debug, Clone, Copy)]
+pub enum Arg {
+    Int(i64),
+    Float(f64),
+}
+
+/// The parameter types of a method signature, one letter each (`L…;` and
+/// arrays become `L`).
+fn parameter_kinds(signature: &str) -> Vec<u8> {
+    let inner = signature
+        .strip_prefix('(')
+        .and_then(|s| s.split(')').next())
+        .unwrap_or("");
+    let bytes = inner.as_bytes();
+    let (mut kinds, mut at) = (Vec::new(), 0);
+    while at < bytes.len() {
+        let mut c = bytes[at];
+        while c == b'[' {
+            at += 1;
+            c = *bytes.get(at).unwrap_or(&b'I');
+            if c != b'[' {
+                if c == b'L' {
+                    while at < bytes.len() && bytes[at] != b';' {
+                        at += 1;
+                    }
+                }
+                c = b'A';
+            }
+        }
+        if c == b'L' {
+            while at < bytes.len() && bytes[at] != b';' {
+                at += 1;
+            }
+        }
+        kinds.push(if c == b'A' { b'L' } else { c });
+        at += 1;
+    }
+    kinds
+}
+
+/// A new instance of `class`. No Java constructor runs; the arguments are
+/// read (by `next`, per parameter type letter) only for classes whose
+/// values Feline uses: NativeTextBoxInfo, for the text box overlay.
+fn construct(class: Handle, constructor: Handle, next: &mut dyn FnMut(u8) -> Arg) -> Handle {
     let name = class_name(class);
     let signature = member_of(constructor)
         .map(|(_, _, sig)| sig)
         .unwrap_or_default();
     log(format!("new {name} {signature} (no Java constructor runs)"));
+    if name == "com/roblox/engine/jni/model/NativeTextBoxInfo" {
+        let args: Vec<Arg> = parameter_kinds(&signature)
+            .into_iter()
+            .map(&mut *next)
+            .collect();
+        crate::text::set_info(&args);
+    }
     new_instance(&name)
+}
+
+/// `NewObject(env, class, constructor, …)`: C variadic arguments, where
+/// floats arrive as doubles and smaller integers as ints.
+unsafe extern "C" fn new_object(
+    _env: Handle,
+    class: Handle,
+    constructor: Handle,
+    mut args: ...
+) -> Handle {
+    trace("NewObject");
+    construct(class, constructor, &mut |kind| match kind {
+        // SAFETY: the engine passed the constructor's arguments.
+        b'F' | b'D' => Arg::Float(unsafe { args.next_arg::<f64>() }),
+        _ => Arg::Int(unsafe { args.next_arg::<i64>() }),
+    })
+}
+
+/// `NewObjectV(env, class, constructor, va_list)`.
+unsafe extern "C" fn new_object_v(
+    _env: Handle,
+    class: Handle,
+    constructor: Handle,
+    args: *mut c_void,
+) -> Handle {
+    trace("NewObjectV");
+    construct(class, constructor, &mut |kind| match kind {
+        // SAFETY: a live va_list with the constructor's arguments.
+        b'F' | b'D' => Arg::Float(unsafe { va_list_double(args) }),
+        _ => Arg::Int(unsafe { va_list_int(args) }),
+    })
+}
+
+/// `NewObjectA(env, class, constructor, const jvalue*)`: 8 bytes per
+/// argument, each in its own type.
+unsafe extern "C" fn new_object_a(
+    _env: Handle,
+    class: Handle,
+    constructor: Handle,
+    args: *const c_void,
+) -> Handle {
+    trace("NewObjectA");
+    let mut at = 0;
+    construct(class, constructor, &mut |kind| {
+        // SAFETY: one jvalue per argument.
+        let slot = unsafe { args.cast::<u8>().add(at * 8) };
+        at += 1;
+        unsafe {
+            match kind {
+                b'F' => Arg::Float(f64::from(*slot.cast::<f32>())),
+                b'D' => Arg::Float(*slot.cast::<f64>()),
+                b'Z' | b'B' => Arg::Int(i64::from(*slot)),
+                b'C' | b'S' => Arg::Int(i64::from(*slot.cast::<u16>())),
+                b'I' => Arg::Int(i64::from(*slot.cast::<i32>())),
+                _ => Arg::Int(*slot.cast::<i64>()),
+            }
+        }
+    })
 }
 
 /// `NewDirectByteBuffer(env, address, capacity)`: a buffer object over
@@ -754,6 +858,35 @@ unsafe fn va_list_int(list: *mut c_void) -> i64 {
     }
 }
 
+/// The next floating-point argument of a `va_list` (floats are passed as
+/// doubles): from the register save area while there are vector registers
+/// left (offsets 48..176, 16 each), then from the stack.
+///
+/// # Safety
+/// `list` is a live x86-64 `va_list` whose next argument is a double.
+unsafe fn va_list_double(list: *mut c_void) -> f64 {
+    #[repr(C)]
+    struct VaListTag {
+        gp_offset: u32,
+        fp_offset: u32,
+        overflow_arg_area: *mut u8,
+        reg_save_area: *mut u8,
+    }
+    // SAFETY: the caller's promise; this is the ABI's va_list layout.
+    unsafe {
+        let tag = &mut *list.cast::<VaListTag>();
+        if tag.fp_offset < 176 {
+            let v = *tag.reg_save_area.add(tag.fp_offset as usize).cast::<f64>();
+            tag.fp_offset += 16;
+            v
+        } else {
+            let v = *tag.overflow_arg_area.cast::<f64>();
+            tag.overflow_arg_area = tag.overflow_arg_area.add(8);
+            v
+        }
+    }
+}
+
 /// Turning an answer (kept as f64, exact for the values used) into a JNI
 /// return type.
 trait FromAnswer {
@@ -858,6 +991,29 @@ fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -
     None
 }
 
+/// `String.getBytes()` / `getBytes(charsetName)` on one of Feline's
+/// strings: its UTF-8 bytes as a new `byte[]`. (The engine reads typed text
+/// this way; Feline's strings are UTF-8, the charset it asks for.)
+fn string_get_bytes(object: Handle, method: Handle) -> Option<Handle> {
+    let (class, name, _) = member_of(method)?;
+    if class != "java/lang/String" || name != "getBytes" {
+        return None;
+    }
+    let text = {
+        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+        match index(object).and_then(|i| world.objects.get(i)) {
+            Some(Object::Str(s)) => s.as_bytes().to_vec(),
+            _ => return None,
+        }
+    };
+    let array = new_byte_array(std::ptr::null_mut(), text.len() as JInt);
+    if let Some((address, _)) = bytes(array) {
+        // SAFETY: the new array holds exactly `text.len()` bytes.
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), address as *mut u8, text.len()) };
+    }
+    Some(array)
+}
+
 /// The engine's on-screen keyboard requests, for typing into text boxes
 /// (see `text.rs`): `showKeyboard(long textBox, boolean, byte[] text, …)`
 /// and `hideKeyboard()`, on NativeGLJavaInterface and NativeHelper.
@@ -932,7 +1088,10 @@ macro_rules! calls {
     };
     (@body object, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
         trace("Call…ObjectMethod");
-        let _ = ($obj, $read);
+        let _ = $read;
+        if let Some(bytes) = string_get_bytes($obj, $method) {
+            return bytes;
+        }
         object_answer($method, "call")
     }};
     (@body value, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
@@ -1274,6 +1433,10 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
         ("android/content/res/Configuration", "touchscreen") => 3.0,
         ("android/content/res/Configuration", "keyboard") => 2.0,
         ("android/content/res/Configuration", "navigation") => 1.0,
+        // KEYBOARDHIDDEN_NO, HARDKEYBOARDHIDDEN_NO: a physical keyboard is
+        // attached and usable (as with a keyboard on an Android tablet).
+        ("android/content/res/Configuration", "keyboardHidden") => 1.0,
+        ("android/content/res/Configuration", "hardKeyboardHidden") => 1.0,
         // UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_NO
         ("android/content/res/Configuration", "uiMode") => 0x11 as f64,
         // A 1920x1080 desktop screen at Android's baseline density.
@@ -1515,8 +1678,16 @@ fn implemented(name: &str) -> Option<usize> {
             get_direct_buffer_capacity as extern "C" fn(Handle, Handle) -> i64 as usize
         }
         "AllocObject" => alloc_object as extern "C" fn(Handle, Handle) -> Handle as usize,
-        "NewObject" | "NewObjectV" | "NewObjectA" => {
-            new_object as extern "C" fn(Handle, Handle, Handle) -> Handle as usize
+        "NewObject" => {
+            new_object as unsafe extern "C" fn(Handle, Handle, Handle, ...) -> Handle as usize
+        }
+        "NewObjectV" => {
+            new_object_v as unsafe extern "C" fn(Handle, Handle, Handle, *mut c_void) -> Handle
+                as usize
+        }
+        "NewObjectA" => {
+            new_object_a as unsafe extern "C" fn(Handle, Handle, Handle, *const c_void) -> Handle
+                as usize
         }
         "GetJavaVM" => get_java_vm as unsafe extern "C" fn(Handle, *mut Handle) -> JInt as usize,
         _ => return None,

@@ -229,12 +229,27 @@ network fail to load, as expected offline.
   works (buttons, login screen). Arguments follow mocktail's input adapter
   (Apache-2.0). JNI `byte[]` support added (the engine passes text box text
   in one).
-- **Typing (in progress, not working yet):** `showKeyboard`/`hideKeyboard`
-  are caught and the focused text box is tracked (works: "text box …
-  focused" in the log), and `text.rs` sends edits through
-  `syncTextboxTextAndCursorPosition2` + `nativePassText`. But typed text
-  doesn't appear: not yet known whether the window's key events reach
-  `text::key` at all (next: log key events).
+- **Typing works.** A focused text box gets its text the way Android's
+  keyboard sends it (`text.rs`): `showKeyboard`/`hideKeyboard` tell Feline
+  which box is focused, each edit goes through
+  `syncTextboxTextAndCursorPosition2` + `nativePassText`, Enter through
+  `nativeReturnPressedFromOnScreenKeyboard`, and a box left by clicking
+  elsewhere gets its text passed as finished. The engine reads the text
+  with Java's `String.getBytes`, now answered with the string's UTF-8 bytes
+  (it was `null`, so every edit arrived empty). While Android's keyboard
+  edits a box the engine doesn't draw its text, so Feline draws it
+  (`overlay.rs`): the box's background, the text in Builder Sans from the
+  APK at the box's size and color, a steady caret, bullets for passwords
+  (Roblox's `TextInputType` 5). Box geometry comes from `NativeTextBoxInfo`,
+  whose constructor arguments `NewObject{,V,A}` now read.
+- **Frame rate:** 60 per second once loaded (16.7 ms per frame, 0.1 ms of it
+  in `eglSwapBuffers`); the idle app menu drops to about 6.5 per second on
+  its own. The earlier "15 per second" figures averaged in the loading time.
+  The engine's main loop also polled the looper about 2.6 million times a
+  second (a whole core); empty polls now pause 0.5 ms
+  (`FELINE_POLL_NAP`), with no change to the frame rate.
+- Test tools: `FELINE_INPUT_SCRIPT` (timed `tap`/`down`/`up`/`type`/`key`/
+  `shot`), `FELINE_SWAP_LOG`, `FELINE_LOOPER_LOG`, `FELINE_INPUT_LOG`.
 - Diagnostics added: crash reports name the crashing thread and, outside
   the engine, the host library and symbol; the call trace records the
   calling thread and shows the crashing thread's own last calls.

@@ -27,6 +27,53 @@ struct Session {
 
 static FOCUSED: Mutex<Option<Session>> = Mutex::new(None);
 
+/// Where and how the engine shows the focused text box, from the
+/// `NativeTextBoxInfo` it builds for showKeyboard: (x, y, width, height,
+/// fontSize, multiline, xAlignment, yAlignment, textColor, font,
+/// textInputType, returnKeyType, manualFocusRelease, textWrapped, …), as
+/// mocktail's reader names them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BoxInfo {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub font_size: f32,
+    pub x_alignment: i32,
+    pub y_alignment: i32,
+    /// 0xAARRGGBB or 0xRRGGBB, as Android colors.
+    pub text_color: u32,
+    pub input_type: i32,
+}
+
+static INFO: Mutex<Option<BoxInfo>> = Mutex::new(None);
+
+/// The latest NativeTextBoxInfo (the constructor's arguments).
+pub fn set_info(args: &[crate::jni::Arg]) {
+    use crate::jni::Arg;
+    let float = |i: usize| match args.get(i) {
+        Some(Arg::Float(v)) => *v as f32,
+        _ => 0.0,
+    };
+    let int = |i: usize| match args.get(i) {
+        Some(Arg::Int(v)) => *v as i32,
+        _ => 0,
+    };
+    let info = BoxInfo {
+        x: float(0),
+        y: float(1),
+        width: float(2),
+        height: float(3),
+        font_size: float(4),
+        x_alignment: int(6),
+        y_alignment: int(7),
+        text_color: int(8) as u32,
+        input_type: int(10),
+    };
+    eprintln!("feline-runtime: text box info {info:?} (all: {args:?})");
+    *INFO.lock().unwrap_or_else(|p| p.into_inner()) = Some(info);
+}
+
 /// What a key did to the focused text box.
 pub enum Edit {
     /// The text changed (or the key belongs to the box but changed nothing).
@@ -67,12 +114,35 @@ pub fn focus(text_box: i64, initial: String) {
     });
 }
 
+/// The focused box's text and where to show it, for the overlay (the
+/// engine doesn't draw a box's text while the keyboard edits it).
+pub fn shown() -> Option<(BoxInfo, String)> {
+    let focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
+    let text = focused.as_ref()?.text.clone();
+    let info = (*INFO.lock().unwrap_or_else(|p| p.into_inner()))?;
+    Some((info, text))
+}
+
 /// The engine hid the keyboard: no box is focused.
+/// The engine hid the keyboard (e.g. another box or button was clicked):
+/// the box's text still has to be passed as finished, as Android's keyboard
+/// does, or the engine drops it. That happens from the main loop
+/// ([`take_left`]), not inside the engine's own callback.
 pub fn blur() {
     let mut focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
-    if focused.take().is_some() {
+    if let Some(session) = focused.take() {
         eprintln!("feline-runtime: text box left");
+        *LEFT.lock().unwrap_or_else(|p| p.into_inner()) = Some((session.text_box, session.text));
     }
+}
+
+static LEFT: Mutex<Option<(i64, String)>> = Mutex::new(None);
+
+/// A box that was left with text to finish: (box, text, UTF-16 cursor).
+pub fn take_left() -> Option<(i64, String, i32)> {
+    let (text_box, text) = LEFT.lock().unwrap_or_else(|p| p.into_inner()).take()?;
+    let at = cursor(&text);
+    Some((text_box, text, at))
 }
 
 /// Android KEYCODE_DEL (Backspace), KEYCODE_ENTER, KEYCODE_NUMPAD_ENTER,

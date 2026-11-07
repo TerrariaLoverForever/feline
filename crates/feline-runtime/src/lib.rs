@@ -38,6 +38,7 @@ pub mod load;
 pub mod looper;
 pub mod manifest;
 pub mod net;
+pub mod overlay;
 pub mod packed;
 pub mod sem;
 pub mod sig;

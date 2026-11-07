@@ -313,9 +313,19 @@ pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface
         // SAFETY: the engine's display, with its context current here.
         unsafe { (host.swap_interval)(display, 0) };
     }
+    // The focused text box's text, which Android's keyboard would show.
+    if let Some((w, h)) = crate::window::native_window().map(|n| n.size()) {
+        crate::overlay::draw(w, h);
+    }
+    if let Some(path) = SCREENSHOT.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        save_screenshot(&path);
+    }
     // SAFETY: forwarding the engine's own handles.
+    let started = std::time::Instant::now();
     let ok = unsafe { (host.swap_buffers)(display, surface) };
+    let spent = started.elapsed();
     let n = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+    swap_timing(spent);
     if n == 1 || (n.is_power_of_two() && n >= 64) {
         if ok == 0 {
             // SAFETY: a plain EGL call.
@@ -329,7 +339,95 @@ pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface
     ok
 }
 
+/// FELINE_SWAP_LOG=1: every 64 frames, the time spent in the host's
+/// eglSwapBuffers and between swaps (the engine's own frame time).
+fn swap_timing(spent: std::time::Duration) {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("FELINE_SWAP_LOG").is_some()) {
+        return;
+    }
+    static STATE: Mutex<Option<(Instant, Duration, u32)>> = Mutex::new(None);
+    let mut state = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let (since, total, count) = state.get_or_insert((Instant::now(), Duration::ZERO, 0));
+    *total += spent;
+    *count += 1;
+    if *count == 64 {
+        let wall = since.elapsed();
+        log(format!(
+            "64 frames: {:.1} ms per frame, {:.1} ms of it in eglSwapBuffers",
+            wall.as_secs_f64() * 1000.0 / 64.0,
+            total.as_secs_f64() * 1000.0 / 64.0
+        ));
+        *state = Some((Instant::now(), Duration::ZERO, 0));
+    }
+}
+
 static NO_VSYNC_SET: AtomicBool = AtomicBool::new(false);
+
+/// A pending screenshot (FELINE_INPUT_SCRIPT's `shot`): the path to save
+/// the next presented frame to.
+static SCREENSHOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn request_screenshot(path: &str) {
+    *SCREENSHOT.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.to_owned());
+}
+
+/// Saves the current back buffer (before it's presented) as a binary PPM.
+fn save_screenshot(path: &str) {
+    type ReadPixels = unsafe extern "C" fn(i32, i32, i32, i32, u32, u32, *mut c_void);
+    const GL_RGBA: u32 = 0x1908;
+    const GL_UNSIGNED_BYTE: u32 = 0x1401;
+    let Some(read) = gl_function::<ReadPixels>("glReadPixels") else {
+        return;
+    };
+    let (w, h) = crate::window::native_window().map_or((0, 0), |n| n.size());
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    // SAFETY: the engine's context is current on this thread; the buffer
+    // holds w*h RGBA pixels.
+    unsafe {
+        read(
+            0,
+            0,
+            w,
+            h,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            rgba.as_mut_ptr().cast(),
+        )
+    };
+    let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
+    // GL's rows start at the bottom.
+    for row in (0..h as usize).rev() {
+        for px in rgba[row * w as usize * 4..(row + 1) * w as usize * 4].chunks(4) {
+            ppm.extend_from_slice(&px[..3]);
+        }
+    }
+    match std::fs::write(path, ppm) {
+        Ok(()) => log(format!("screenshot saved to {path}")),
+        Err(e) => log(format!("couldn't save the screenshot to {path}: {e}")),
+    }
+}
+
+/// A GL ES function from the host, through eglGetProcAddress.
+pub fn gl_function<F: Copy>(name: &str) -> Option<F> {
+    let host = host()?;
+    let name = CString::new(name).ok()?;
+    // SAFETY: a valid C string.
+    let address = unsafe { (host.get_proc_address)(name.as_ptr()) };
+    // SAFETY: the caller names F as the function's C signature.
+    unsafe {
+        function(if address.is_null() {
+            None
+        } else {
+            Some(address)
+        })
+    }
+}
 
 /// `EGLBoolean eglSwapInterval(dpy, interval)`: always 0 on the host. On
 /// Wayland, with an interval of 1 `eglSwapBuffers` waits for the
