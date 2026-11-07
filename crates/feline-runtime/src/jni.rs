@@ -1562,9 +1562,12 @@ fn known_field(class: &str, field: &str) -> Option<f64> {
         ("android/content/res/Configuration", "fontScale") => 1.0,
         // ORIENTATION_LANDSCAPE
         ("android/content/res/Configuration", "orientation") => 2.0,
-        // TOUCHSCREEN_FINGER (the mouse arrives as a finger; with NOTOUCH,
-        // 1, Roblox's UI ignored every tap), KEYBOARD_QWERTY, NAVIGATION_NONAV
-        ("android/content/res/Configuration", "touchscreen") => 3.0,
+        // TOUCHSCREEN_NOTOUCH, KEYBOARD_QWERTY, NAVIGATION_NONAV: a desktop
+        // with keyboard and mouse. (FINGER, 3, was needed while the mouse
+        // arrived as a finger; it now goes through Roblox's mouse input.
+        // With FINGER, games that guess the device from its inputs saw
+        // touch, keyboard and mouse at once and called the OS "unknown".)
+        ("android/content/res/Configuration", "touchscreen") => 1.0,
         ("android/content/res/Configuration", "keyboard") => 2.0,
         ("android/content/res/Configuration", "navigation") => 1.0,
         // KEYBOARDHIDDEN_NO, HARDKEYBOARDHIDDEN_NO: a physical keyboard is

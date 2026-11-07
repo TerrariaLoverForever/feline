@@ -307,9 +307,12 @@ pub fn frames() -> usize {
 /// Called by the engine like EGL's.
 pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface) -> EglBoolean {
     let Some(host) = host() else { return 0 };
-    // Before the first frame: no waiting for the compositor (see
-    // `eglSwapInterval`), even if the engine never sets an interval.
-    if !NO_VSYNC_SET.swap(true, Ordering::Relaxed) {
+    // Before the first frame of each surface: no waiting for the
+    // compositor (see `eglSwapInterval`), even if the engine never sets an
+    // interval. The interval belongs to the surface, and the engine makes
+    // new ones (e.g. joining a game): setting it only once left games
+    // synced to the monitor, capped at its refresh rate.
+    if NO_VSYNC_SURFACE.swap(surface as usize, Ordering::Relaxed) != surface as usize {
         // SAFETY: the engine's display, with its context current here.
         unsafe { (host.swap_interval)(display, 0) };
     }
@@ -364,7 +367,8 @@ fn swap_timing(spent: std::time::Duration) {
     }
 }
 
-static NO_VSYNC_SET: AtomicBool = AtomicBool::new(false);
+/// The last surface the swap interval was set to 0 for.
+static NO_VSYNC_SURFACE: AtomicUsize = AtomicUsize::new(0);
 
 /// A pending screenshot (FELINE_INPUT_SCRIPT's `shot`): the path to save
 /// the next presented frame to.

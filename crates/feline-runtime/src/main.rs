@@ -432,10 +432,12 @@ fn run_init(data: &[u8]) -> ExitCode {
                     "getPlatformName",
                     "Android",
                 );
-                // Unlimited FPS: Roblox's own Maximum Frame Rate setting.
-                if feline_runtime::prefs::get().unlimited_fps {
-                    feline_runtime::prefs::write_unlimited_framerate_cap(
+                // The FPS limit: Roblox's own Maximum Frame Rate setting.
+                let fps_limit = feline_runtime::prefs::get().fps_limit;
+                if fps_limit > 0 {
+                    feline_runtime::prefs::write_framerate_cap(
                         &data.join("feline/runtime/files/appData"),
+                        fps_limit,
                     );
                 }
                 call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;

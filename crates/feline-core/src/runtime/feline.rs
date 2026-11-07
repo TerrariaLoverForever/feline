@@ -86,11 +86,11 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
-        key: "unlimitedFps",
-        label: "Unlimited FPS",
-        help: "Sets Roblox's in-game Maximum Frame Rate to no limit each time it starts (past Roblox's usual 240). Turn this off to pick a limit in the game again.",
-        kind: Kind::Toggle,
-        default: Val::Bool(false),
+        key: "fpsLimit",
+        label: "FPS limit",
+        help: "The highest frame rate, e.g. 600 or 999 (9999 = no limit); it can go past Roblox's usual 240. Set each time the game starts. 0 = use Roblox's in-game Maximum Frame Rate.",
+        kind: Kind::Number { min: 0, max: 9999 },
+        default: Val::Int(0),
         link: None,
     },
     SettingDef {
@@ -216,12 +216,12 @@ mod tests {
     #[test]
     fn the_runtimes_settings_file_is_readable() {
         // As feline-runtime writes it (prefs.rs), with non-default values.
-        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"unlimitedFps\": true,\n  \"startFullscreen\": true\n}\n";
+        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"fpsLimit\": 600,\n  \"startFullscreen\": true\n}\n";
         let file = super::super::config::ConfigFile::parse(std::path::Path::new("/x"), text)
             .expect("parses");
         let expected = [
             serde_json::json!("light"),
-            serde_json::json!(true),
+            serde_json::json!(600),
             serde_json::json!(true),
         ];
         for (def, value) in SETTINGS.iter().zip(expected) {

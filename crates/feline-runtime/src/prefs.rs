@@ -8,7 +8,7 @@
 //! | Key | What it does |
 //! |---|---|
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
-//! | `unlimitedFps` | set Roblox's in-game Maximum Frame Rate to no limit at each start |
+//! | `fpsLimit` | 0: Roblox's in-game Maximum Frame Rate decides; otherwise that frame rate (e.g. 600), set as Roblox's cap at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
@@ -22,7 +22,8 @@ use serde_json::{Map, Value, json};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prefs {
     pub theme: String,
-    pub unlimited_fps: bool,
+    /// Frames per second to cap at; 0 leaves it to Roblox's own setting.
+    pub fps_limit: u32,
     pub start_fullscreen: bool,
 }
 
@@ -30,7 +31,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
-            unlimited_fps: false,
+            fps_limit: 0,
             start_fullscreen: false,
         }
     }
@@ -56,10 +57,14 @@ impl Prefs {
                 Some(t @ ("dark" | "light")) => t.to_owned(),
                 _ => d.theme,
             },
-            unlimited_fps: json
-                .get("unlimitedFps")
-                .and_then(Value::as_bool)
-                .unwrap_or(d.unlimited_fps),
+            fps_limit: match json.get("fpsLimit").and_then(Value::as_u64) {
+                Some(n) => (n as u32).min(MAX_FPS_LIMIT),
+                // The earlier "Unlimited FPS" switch.
+                None if json.get("unlimitedFps").and_then(Value::as_bool) == Some(true) => {
+                    MAX_FPS_LIMIT
+                }
+                None => d.fps_limit,
+            },
             start_fullscreen: json
                 .get("startFullscreen")
                 .and_then(Value::as_bool)
@@ -70,7 +75,7 @@ impl Prefs {
     fn to_json(&self) -> Value {
         json!({
             "theme": self.theme,
-            "unlimitedFps": self.unlimited_fps,
+            "fpsLimit": self.fps_limit,
             "startFullscreen": self.start_fullscreen,
         })
     }
@@ -79,31 +84,31 @@ impl Prefs {
     /// "Maximum Frame Rate" setting, which Roblox turns on for PC
     /// (`FFlagGameBasicSettingsFramerateCap5` is True in the PC client's
     /// settings and absent from Android's).
-    /// (`unlimitedFps` isn't a flag: Roblox stops `DFIntTaskSchedulerTargetFps`
-    /// at 240. See [`write_unlimited_framerate_cap`].)
+    /// (`fpsLimit` isn't a flag: see [`write_framerate_cap`].)
     pub fn flags(&self) -> Vec<(&'static str, String)> {
         vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())]
     }
 }
 
-/// What Roblox's `FramerateCap` setting holds for "no limit", as Mocktail
-/// and Nightcap write it (<https://github.com/CoderDayton/nightcap>,
-/// Apache-2.0, docs/PERFORMANCE.md).
-const UNLIMITED_FRAMERATE_CAP: i32 = 9999;
+/// The highest `fpsLimit`: what Roblox's `FramerateCap` holds for "no
+/// limit", as Mocktail and Nightcap write it
+/// (<https://github.com/CoderDayton/nightcap>, Apache-2.0, docs/PERFORMANCE.md).
+pub const MAX_FPS_LIMIT: u32 = 9999;
 
 /// Sets Roblox's own in-game Maximum Frame Rate (`FramerateCap` in
-/// `GlobalBasicSettings_13.xml`) to no limit, before the engine reads it.
-/// Does nothing if Roblox hasn't written the file yet (first start).
-pub fn write_unlimited_framerate_cap(app_data: &std::path::Path) {
+/// `GlobalBasicSettings_13.xml`) to `fps`, before the engine reads it.
+/// (Roblox stops `DFIntTaskSchedulerTargetFps` at 240; this setting
+/// isn't.) Does nothing if Roblox hasn't written the file yet (first start).
+pub fn write_framerate_cap(app_data: &std::path::Path, fps: u32) {
     let file = app_data.join("GlobalBasicSettings_13.xml");
     let Ok(text) = std::fs::read_to_string(&file) else {
         return;
     };
-    if let Some(updated) = set_framerate_cap(&text, UNLIMITED_FRAMERATE_CAP)
+    if let Some(updated) = set_framerate_cap(&text, fps as i32)
         && updated != text
     {
         match std::fs::write(&file, updated) {
-            Ok(()) => eprintln!("feline-runtime: Roblox's frame rate cap set to unlimited"),
+            Ok(()) => eprintln!("feline-runtime: Roblox's frame rate cap set to {fps}"),
             Err(e) => eprintln!("feline-runtime: couldn't write {}: {e}", file.display()),
         }
     }
@@ -126,7 +131,7 @@ fn set_framerate_cap(text: &str, fps: i32) -> Option<String> {
 }
 
 /// Settings earlier versions had, now Roblox's own in-game ones.
-const OBSOLETE: [&str; 3] = ["maxFps", "mouseSensitivity", "graphicsQuality"];
+const OBSOLETE: [&str; 4] = ["maxFps", "mouseSensitivity", "graphicsQuality", "unlimitedFps"];
 
 /// The settings for this start (read once; the file is created with the
 /// defaults if it's missing, and missing keys are added).
@@ -192,6 +197,17 @@ pub fn add_flags(settings: &str, flags: &[(&'static str, String)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fps_limit_and_the_old_unlimited_switch() {
+        let from = |j: serde_json::Value| Prefs::from_json(j.as_object().unwrap()).fps_limit;
+        assert_eq!(from(json!({})), 0);
+        assert_eq!(from(json!({"fpsLimit": 600})), 600);
+        assert_eq!(from(json!({"fpsLimit": 123456})), MAX_FPS_LIMIT);
+        assert_eq!(from(json!({"unlimitedFps": true})), MAX_FPS_LIMIT);
+        assert_eq!(from(json!({"unlimitedFps": false})), 0);
+        assert_eq!(from(json!({"fpsLimit": 144, "unlimitedFps": true})), 144);
+    }
 
     #[test]
     fn framerate_cap_is_replaced_or_added() {
