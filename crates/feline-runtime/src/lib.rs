@@ -35,6 +35,7 @@ pub mod jni_names;
 pub mod keys;
 pub mod liblog;
 pub mod load;
+pub mod login;
 pub mod looper;
 pub mod manifest;
 pub mod net;

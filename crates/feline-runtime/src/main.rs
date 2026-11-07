@@ -16,6 +16,8 @@ Usage: feline-runtime --check <libroblox.so>
        feline-runtime --imports <libroblox.so>
        feline-runtime --init <libroblox.so>
        feline-runtime --natives <base.apk>
+       feline-runtime --save-cookie   (reads the cookie from standard input)
+       feline-runtime --logout
 
 --check  reads the engine library and reports what loading it would involve.
 --load   also puts it into memory: binds every import (forwarded to glibc
@@ -28,6 +30,9 @@ Usage: feline-runtime --check <libroblox.so>
          the first of its code to run. Stops at the first function Feline
          doesn't provide yet, and names it. Run it without network access,
          e.g. `unshare -rn feline-runtime --init …`.
+
+--save-cookie  saves a Roblox session cookie (.ROBLOSECURITY) so the app
+         starts logged in; readable only by you. --logout forgets it.
 
 Only --init runs any of the library's code. Roblox's code isn't disassembled;
 only its ELF interface is read.
@@ -95,6 +100,36 @@ fn main() -> ExitCode {
             // may run, so this never returns normally.
             run_init(&data)
         }
+        [flag] if flag == "--save-cookie" => {
+            let mut text = String::new();
+            if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+                eprintln!("feline-runtime: couldn't read the cookie: {e}");
+                return ExitCode::FAILURE;
+            }
+            let saved = runtime_data().and_then(|d| feline_runtime::login::save_cookie(&d, &text));
+            text.clear();
+            match saved {
+                Ok(path) => {
+                    println!("Logged in: the session is saved in {}", path.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("feline-runtime: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [flag] if flag == "--logout" => match runtime_data() {
+            Ok(d) => {
+                feline_runtime::login::forget_cookie(&d);
+                println!("Logged out: the saved session is gone");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("feline-runtime: {e}");
+                ExitCode::FAILURE
+            }
+        },
         [flag, path] if flag == "--natives" => {
             // Declarations only (see dex.rs): native methods' names and
             // type signatures from the APK's DEX files.
@@ -244,6 +279,22 @@ fn run_init(data: &[u8]) -> ExitCode {
                         as usize,
                 ],
             )?;
+            // The saved login (see login.rs), as the Android app's Java code
+            // hands it over: the cookie for Roblox's website.
+            if let Some(cookie) = feline_runtime::login::saved_cookie(&runtime_data()?) {
+                feline_runtime::init::call_java_native(
+                    &elf,
+                    image,
+                    "com/roblox/engine/jni/NativeSettingsInterface",
+                    "nativeSetMultipleCookies",
+                    true,
+                    &[
+                        feline_runtime::jni::new_string("https://www.roblox.com/") as usize,
+                        feline_runtime::jni::new_string(&cookie) as usize,
+                    ],
+                )?;
+                eprintln!("feline-runtime: logged in with the saved session");
+            }
             // Roblox's own input functions, for the window's mouse and keys.
             feline_runtime::init::prepare_input_natives(&elf, image)?;
             // FELINE_STORAGE_INIT=1 (experiment): LocalStorageManager's
