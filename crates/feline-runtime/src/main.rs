@@ -616,11 +616,12 @@ fn wanted(variable: &str) -> bool {
 
 /// Gives the saved login (see login.rs) to the engine, in two steps:
 ///
-/// - `"early"` (before the app starts): asks Roblox whose session it is and
+/// - `"early"` (before the app starts): asks Roblox whose session it is,
+///   tells the engine (`NativeSettingsInterface.nativeSetUserId`: without
+///   it the app shows its logged-out screen even with a valid session) and
 ///   answers the app's account questions with it (NativeUserJavaInterface's
 ///   `getUserId`, `getUsername`, `getDisplayName`; SessionReporter's last
-///   logged-in user). Without these the app shows its logged-out screen
-///   even with a valid session. An expired session is forgotten.
+///   logged-in user). An expired session is forgotten.
 /// - `"started"` (right after StartApp): the cookie, as the Android app's
 ///   Java code hands it over. Earlier, the engine has no cookie store yet
 ///   and silently drops it.
@@ -651,6 +652,15 @@ fn session_step(
                     set_known_string(USER, "getDisplayName", &account.display_name);
                     set_known_string(REPORTER, "getLastLoggedInUserId", &account.id.to_string());
                     set_known_string(REPORTER, "getLastLoggedInUser", &account.name);
+                    // The engine's own record of the current user.
+                    feline_runtime::init::call_java_native(
+                        elf,
+                        image,
+                        SETTINGS,
+                        "nativeSetUserId",
+                        true,
+                        &[feline_runtime::jni::new_string(&account.id.to_string()) as usize],
+                    )?;
                     eprintln!("feline-runtime: logged in as {}", account.name);
                 }
                 Err(feline_runtime::login::AccountError::Expired) => {
