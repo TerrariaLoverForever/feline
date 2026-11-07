@@ -97,6 +97,9 @@ fn main() -> ExitCode {
                 PLAY.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             let _ = ENGINE_PATH.set(std::path::PathBuf::from(path));
+            if flag == "--play" {
+                feline_runtime::versions::started(std::path::Path::new(path));
+            }
             let data = match feline_runtime::load::map_file(std::path::Path::new(path)) {
                 Ok(data) => data,
                 Err(e) => {
@@ -485,6 +488,7 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                 );
                 let init = new_instance("com/roblox/engine/jni/autovalue/InitParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2InitWithParams", &[init])?;
+                session_step(&elf, image, "starting")?;
                 let start = new_instance("com/roblox/engine/jni/autovalue/StartAppParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2StartAppWithParams", &[start])?;
                 session_step(&elf, image, "started")?;
@@ -721,6 +725,7 @@ fn session_step(
                         &[feline_runtime::jni::new_string(&account.id.to_string()) as usize],
                     )?;
                     eprintln!("feline-runtime: logged in as {}", account.name);
+                    feline_runtime::versions::logged_in();
                 }
                 Err(feline_runtime::login::AccountError::Expired) => {
                     feline_runtime::login::forget_cookie(&data);
@@ -735,6 +740,27 @@ fn session_step(
                 }
             }
             *ACCEPTED.lock().unwrap_or_else(|p| p.into_inner()) = Some(cookie);
+        }
+        // Just before the app starts, and again once it has: newer Roblox
+        // versions (2.746) ask for the logged-in user within about a
+        // second of starting, before the "started" handover arrived, and
+        // logged out ("Authentication token is missing").
+        "starting" => {
+            let cookie = ACCEPTED.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            if let Some(cookie) = cookie {
+                feline_runtime::init::call_java_native(
+                    elf,
+                    image,
+                    SETTINGS,
+                    "nativeSetMultipleCookies",
+                    true,
+                    &[
+                        feline_runtime::jni::new_string("https://www.roblox.com/") as usize,
+                        feline_runtime::jni::new_string(&cookie) as usize,
+                    ],
+                )?;
+                eprintln!("feline-runtime: gave the saved session to the app (before it starts)");
+            }
         }
         "started" => {
             let cookie = ACCEPTED.lock().unwrap_or_else(|p| p.into_inner()).take();

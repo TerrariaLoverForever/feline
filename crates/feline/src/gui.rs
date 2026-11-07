@@ -275,6 +275,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     });
 
     start_detection(&ui, &shared);
+    start_roblox_update(&ui, &shared);
     start_system_scan(&ui, &shared);
     ui.run()
 }
@@ -573,6 +574,55 @@ fn run_diagnostic(
 // ---------------------------------------------------------------------------
 // Runtimes
 // ---------------------------------------------------------------------------
+
+/// Keeps Roblox's app up to date for Feline's runtime, in the background,
+/// when that's the chosen runtime (others bring their own Roblox; no need
+/// to download 240 MB for them). The status shows on the Home page.
+fn start_roblox_update(ui: &AppWindow, shared: &Shared) {
+    let feline_chosen = lock(shared)
+        .settings
+        .runtime
+        .as_deref()
+        .is_some_and(|k| k.starts_with("feline:"));
+    if !feline_chosen {
+        return;
+    }
+    let weak = ui.as_weak();
+    let show = move |weak: &slint::Weak<AppWindow>, text: String| {
+        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_roblox_status(text.into()));
+    };
+    let _ = thread::Builder::new()
+        .name("feline-roblox-update".into())
+        .spawn(move || {
+            use feline_core::engine::{Outcome, Progress};
+            let mut last = None;
+            let result = feline_core::engine::update(&mut |p| {
+                let text = match p {
+                    Progress::Checking => return,
+                    Progress::Downloading(done, Some(total)) => {
+                        let percent = done * 100 / total.max(1);
+                        if last == Some(percent) {
+                            return;
+                        }
+                        last = Some(percent);
+                        format!("Downloading a Roblox update… {percent}%")
+                    }
+                    Progress::Downloading(done, None) => format!("Downloading a Roblox update… {} MB", done >> 20),
+                    Progress::Verifying => "Checking the update is signed by Roblox…".to_owned(),
+                    Progress::Installing => "Installing the Roblox update…".to_owned(),
+                };
+                show(&weak, text);
+            });
+            let text = match result {
+                Ok(Outcome::UpToDate(v)) => format!("Roblox {v} (up to date)"),
+                Ok(Outcome::Installed { version, .. }) => {
+                    format!("Roblox updated to {version}. It's used from the next start.")
+                }
+                Err(e) => format!("Couldn't update Roblox: {e}"),
+            };
+            show(&weak, text);
+        });
+}
 
 fn start_detection(ui: &AppWindow, shared: &Shared) {
     {

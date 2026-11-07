@@ -8,6 +8,7 @@
 // No `unsafe` anywhere in the core library, and nothing may override that.
 #![forbid(unsafe_code)]
 
+pub mod engine;
 pub mod launch;
 pub mod link;
 pub mod monitor;

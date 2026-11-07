@@ -1197,6 +1197,7 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
         "gameActivity_onAppReady" => {
             let screen = string_value(read() as usize as Handle).unwrap_or_default();
             log(format!("app screen: {screen:?}"));
+            crate::versions::app_shown(&screen);
             crate::login::screen_shown(&screen);
         }
         _ => {}

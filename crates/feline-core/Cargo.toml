@@ -18,3 +18,14 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # HTTPS client for Roblox's public web API (game names and icons for the
 # Discord status). Pure-Rust TLS (rustls), no OpenSSL needed; gzip off.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Checking downloaded Roblox packages: SHA-256/512 and the RSA/ECDSA
+# signature of Android's APK signing scheme. Already in the build through
+# rustls. Apache-2.0 AND ISC.
+ring = "0.17"
+# Unpacking downloaded Roblox packages (zip's deflate). MIT OR Zlib OR
+# Apache-2.0. Already used by feline-runtime.
+miniz_oxide = "0.9"
+# RSA PKCS#1 v1.5 signature checks for Roblox's APK: its signing key is
+# 1024-bit RSA (from 2010), below ring's 2048-bit minimum. Verification
+# only. MIT OR Apache-2.0.
+rsa = { version = "0.9", default-features = false, features = ["std", "sha2"] }

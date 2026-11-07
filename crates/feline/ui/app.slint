@@ -47,6 +47,7 @@ export component AppWindow inherits Window {
     in property <string> stat-time;
     in property <string> stat-cpu;
     in property <string> stat-memory;
+    in property <string> roblox-status;
 
     // Link check (set from Rust)
 
@@ -226,6 +227,7 @@ export component AppWindow inherits Window {
             stat-time: root.stat-time;
             stat-cpu: root.stat-cpu;
             stat-memory: root.stat-memory;
+            roblox-status: root.roblox-status;
             play => {
                 root.play();
             }

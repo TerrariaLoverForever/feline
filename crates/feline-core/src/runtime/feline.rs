@@ -196,14 +196,21 @@ impl RuntimeBackend for FelineRuntime {
         installation: &Installation,
         target: &LaunchTarget,
     ) -> Result<LaunchPlan, RuntimeError> {
+        // A Roblox update that never reached the app twice: back to the
+        // last version that worked (see `crate::engine`).
+        let rolled_back = crate::engine::roll_back_if_broken();
         let engine = engine(&DetectContext::host()).ok_or_else(no_engine)?;
         let mut command = installation.command();
         command.arg("--play").arg(engine);
-        let note = matches!(target, LaunchTarget::Game(_)).then(|| {
+        let link_note = matches!(target, LaunchTarget::Game(_)).then(|| {
             "Feline's runtime can't join from a link yet, so it opens the Roblox app: \
              find the experience there."
                 .to_owned()
         });
+        let note = match (rolled_back, link_note) {
+            (Some(a), Some(b)) => Some(format!("{a} {b}")),
+            (a, b) => a.or(b),
+        };
         Ok(LaunchPlan { command, note })
     }
 }

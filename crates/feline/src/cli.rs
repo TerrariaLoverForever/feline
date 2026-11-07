@@ -20,6 +20,9 @@ Options:
   --info         Print information about this system (for bug reports)
   --runtimes     List the runtimes found on this system, numbered
   --doctor <N>   Run the self-check of runtime number N from --runtimes
+  --update-roblox
+                 Download the newest Roblox app for Feline's runtime, if
+                 there is one (checked against Roblox's signature)
   --presence     Show the Discord status for the game that is starting or
                  running, then exit when it ends (Feline starts this itself)
   --install-desktop-entry
@@ -43,6 +46,7 @@ pub fn run(args: &[&str]) -> ExitCode {
             ExitCode::SUCCESS
         }
         ["--runtimes"] => list_runtimes(),
+        ["--update-roblox"] => update_roblox(),
         ["--doctor", number] => doctor(number),
         ["--doctor"] => {
             eprintln!(
@@ -187,6 +191,45 @@ fn uninstall_desktop_entry() -> ExitCode {
         }
         Err(e) => {
             eprintln!("feline: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `--update-roblox`: installs the newest Roblox version for Feline's
+/// runtime (see `feline_core::engine`).
+fn update_roblox() -> ExitCode {
+    use feline_core::engine::{Outcome, Progress};
+    let mut last_percent = None;
+    let result = feline_core::engine::update(&mut |p| match p {
+        Progress::Checking => eprintln!("Checking for a new Roblox version…"),
+        Progress::Downloading(done, total) => {
+            let percent = total.map(|t| done * 100 / t.max(1));
+            if percent != last_percent {
+                last_percent = percent;
+                match percent {
+                    Some(p) => eprint!("\rDownloading… {p}%  "),
+                    None => eprint!("\rDownloading… {} MB  ", done >> 20),
+                }
+            }
+        }
+        Progress::Verifying => eprintln!("\nChecking it's signed by Roblox…"),
+        Progress::Installing => eprintln!("Installing…"),
+    });
+    match result {
+        Ok(Outcome::UpToDate(v)) => {
+            println!("Roblox {v} is the newest version.");
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Installed { version, previous }) => {
+            match previous {
+                Some(p) => println!("Roblox updated from {p} to {version}."),
+                None => println!("Roblox {version} installed."),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("feline: Roblox update failed: {e}");
             ExitCode::FAILURE
         }
     }

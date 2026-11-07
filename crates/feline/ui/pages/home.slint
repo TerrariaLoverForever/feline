@@ -54,6 +54,8 @@ export component HomePage inherits PageBase {
     in property <string> stat-time;
     in property <string> stat-cpu;
     in property <string> stat-memory;
+    // Roblox app updates for Feline's runtime ("" = nothing to show).
+    in property <string> roblox-status;
 
     // Link check (set from Rust).
 
@@ -289,6 +291,12 @@ export component HomePage inherits PageBase {
                 }
                 BodyText {
                     text: "Feline's own runtime is early and in development. Pick it on the Runtimes page, or use an external runtime you installed yourself.";
+                }
+                if root.roblox-status != "": Text {
+                    text: root.roblox-status;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    color: Theme.text-muted;
                 }
                 Divider { }
                 Eyebrow {

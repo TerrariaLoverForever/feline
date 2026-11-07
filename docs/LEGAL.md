@@ -7,12 +7,23 @@ Roblox Corporation and is used here only to describe what Feline works with.
 ## What Feline does and doesn't do
 
 - Feline **does not ship any Roblox files**: no APKs, no engine libraries, no assets.
-- Feline's own runtime **does not exist yet**. Today Feline can optionally
-  start an **external third-party runtime** that you installed yourself
-  (currently supported: [Sober](https://sober.vinegarhq.org),
-  [Cordial](https://github.com/luohoa97/cordial) and [Stud](https://github.com/CatPieLeaf/Stud)),
+- **Automatic Roblox updates (Feline's own runtime only):** when Feline's
+  runtime is the chosen runtime, the launcher downloads Roblox's official
+  Android app (`com.roblox.client`, x86_64) onto your computer from APKPure,
+  as Mocktail does, for your own use. Nothing is accepted unless it passes
+  Android's APK Signature Scheme v2/v3 check **and** is signed with Roblox's
+  own certificate (SHA-256 `44932ea3…ba1477`, pinned in
+  `feline-core/src/engine/mod.rs`). Feline never modifies, repackages or
+  redistributes the app. `feline --update-roblox` does the same by hand.
+- Feline's own runtime (`feline-runtime`, in development) runs that app.
+  Feline can also start an **external third-party runtime** that you
+  installed yourself (Sober, Cordial, Stud, Tipsy, Mocktail, Nightcap),
   through that program's public command line. Feline never selects one for you.
-- Feline **never handles your Roblox login**. Sign-in happens inside the runtime.
+- **Your Roblox login:** with external runtimes, sign-in happens inside them.
+  With Feline's own runtime, you sign in on Roblox's own website in Feline's
+  login window; the resulting session cookie is saved only on your computer
+  (`~/.local/share/feline/runtime/roblox-cookie`, readable only by you) and
+  sent only to Roblox. Feline never sees or stores your password.
 - Feline **does not modify, inject into or inspect** the Roblox client or its
   network traffic.
 
@@ -75,6 +86,8 @@ reviewed before the first release. Not legal advice.
 | [libc](https://github.com/rust-lang/libc) 0.2 (runtime only: `dlopen`/`dlsym`) | MIT OR Apache-2.0 | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [rustix](https://github.com/bytecodealliance/rustix) 1.1 (runtime only: `mm`, `param`; + `linux-raw-sys`, `bitflags`) | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [gilrs](https://gitlab.com/gilrs-project/gilrs) 0.11 (runtime only: controllers; + `gilrs-core`, `vec_map`, `inotify`/`inotify-sys` (ISC), `objc2-io-kit` (macOS only, not built on Linux)) | MIT OR Apache-2.0 (its bundled SDL controller database: zlib) | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
+| [ring](https://github.com/briansmith/ring) 0.17 (launcher: hashing and signature checks of Roblox downloads; already in the build through rustls) | Apache-2.0 AND ISC | Compatible with GPL-3.0 |
+| [rsa](https://github.com/RustCrypto/RSA) 0.9 (launcher: RSA checks of Roblox's 1024-bit signing key, below ring's minimum; + `num-bigint-dig`, `sha2`, `pkcs1`, `der` etc.) | MIT OR Apache-2.0 | Compatible with GPL-3.0 |
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |
