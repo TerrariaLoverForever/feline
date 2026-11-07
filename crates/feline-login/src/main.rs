@@ -5,8 +5,10 @@
 //! page's security checks run in one), which Feline doesn't have. So you log
 //! in here instead: Roblox's own website in a WebKitGTK window. As soon as
 //! the site sets the `.ROBLOSECURITY` session cookie, the window writes that
-//! cookie's value to standard output and closes. `feline-runtime --login`
-//! runs this program and saves the cookie (see feline-runtime's login.rs).
+//! cookie's value to standard output and closes. `feline-runtime` runs this
+//! program when you press Sign In or Create Account in the app, saves the
+//! cookie and restarts the app logged in (see feline-runtime's login.rs).
+//! `--signup` starts on the sign-up page instead of the login page.
 //!
 //! What it keeps: nothing. The browser session is ephemeral (no cookies,
 //! cache or history on disk), and the cookie only goes to the pipe. It
@@ -23,6 +25,8 @@ use webkit6::prelude::*;
 use webkit6::{gio, glib, gtk};
 
 const LOGIN_URL: &str = "https://www.roblox.com/login";
+/// Roblox's home page shows the sign-up form when you're logged out.
+const SIGNUP_URL: &str = "https://www.roblox.com/";
 const COOKIE_URL: &str = "https://www.roblox.com/";
 const COOKIE_NAME: &str = ".ROBLOSECURITY";
 
@@ -48,11 +52,33 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
+    // X11 (XWayland) first: on Wayland, WebKitGTK 2.54 with GTK 4.24 gives
+    // pages a device pixel ratio of 0 (seen on KDE), so the site thinks the
+    // window is tiny and lays out its narrowest page, with no input boxes.
+    // FELINE_LOGIN_WAYLAND=1 tries Wayland anyway.
+    if std::env::var_os("FELINE_LOGIN_WAYLAND").is_none() {
+        webkit6::gdk::set_allowed_backends("x11,wayland,*");
+    }
     if let Err(e) = gtk::init() {
         eprintln!("feline-login: couldn't open a window: {e}");
         return ExitCode::FAILURE;
     }
 
+    // Started by the app with a pipe as standard input: when the app exits,
+    // the pipe closes, and the window goes with it.
+    let stdin_is_pipe = std::fs::metadata("/proc/self/fd/0")
+        .is_ok_and(|m| std::os::unix::fs::FileTypeExt::is_fifo(&m.file_type()));
+    if stdin_is_pipe {
+        std::thread::spawn(|| {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            std::process::exit(1);
+        });
+    }
+    let start = if std::env::args().nth(1).as_deref() == Some("--signup") {
+        SIGNUP_URL
+    } else {
+        LOGIN_URL
+    };
     let main_loop = glib::MainLoop::new(None, false);
     let logged_in = Rc::new(Cell::new(false));
 
@@ -63,7 +89,7 @@ fn main() -> ExitCode {
     // Only Roblox's website in the window itself. Navigation decisions also
     // come for embedded frames (the captcha is one), which must load, so
     // the page's own address is checked as it loads instead.
-    view.connect_load_changed(|view, event| {
+    view.connect_load_changed(move |view, event| {
         if !matches!(
             event,
             webkit6::LoadEvent::Started | webkit6::LoadEvent::Redirected
@@ -79,9 +105,48 @@ fn main() -> ExitCode {
                 uri.split(['?', '#']).next().unwrap_or("")
             );
             view.stop_loading();
-            view.load_uri(LOGIN_URL);
+            view.load_uri(start);
         }
     });
+    // FELINE_LOGIN_LOG=1: pages and files that failed to load (addresses
+    // without their query), to see why a page looks wrong.
+    if std::env::var_os("FELINE_LOGIN_LOG").is_some() {
+        view.connect_resource_load_started(|_, resource, _| {
+            resource.connect_failed(|resource, error| {
+                let uri = resource.uri().unwrap_or_default();
+                eprintln!(
+                    "feline-login: failed: {} ({error})",
+                    uri.split(['?', '#']).next().unwrap_or("")
+                );
+            });
+            resource.connect_finished(|resource| {
+                let uri = resource.uri().unwrap_or_default();
+                let status = resource.response().map_or(0, |r| r.status_code());
+                if status >= 400 {
+                    eprintln!(
+                        "feline-login: HTTP {status}: {}",
+                        uri.split(['?', '#']).next().unwrap_or("")
+                    );
+                }
+            });
+        });
+    }
+    // FELINE_LOGIN_SHOT=<file.png>: saves what the page shows after 15 s.
+    if let Some(path) = std::env::var_os("FELINE_LOGIN_SHOT") {
+        let view = view.clone();
+        glib::timeout_add_seconds_local_once(15, move || {
+            view.snapshot(
+                webkit6::SnapshotRegion::Visible,
+                webkit6::SnapshotOptions::NONE,
+                None::<&gio::Cancellable>,
+                move |shot| match shot.map(|t| t.save_to_png(&path)) {
+                    Ok(Ok(())) => eprintln!("feline-login: screenshot saved"),
+                    Ok(Err(e)) => eprintln!("feline-login: no screenshot: {e}"),
+                    Err(e) => eprintln!("feline-login: no screenshot: {e}"),
+                },
+            );
+        });
+    }
     // No pop-up windows: a link meant for one opens here if it's Roblox's.
     view.connect_create(|view, action| {
         if let Some(uri) = action.clone().request().and_then(|r| r.uri())
@@ -94,7 +159,7 @@ fn main() -> ExitCode {
 
     let window = gtk::Window::builder()
         .title("Log in to Roblox – Feline")
-        .default_width(520)
+        .default_width(1000)
         .default_height(760)
         .child(&view)
         .build();
@@ -147,7 +212,7 @@ fn main() -> ExitCode {
         });
     }
 
-    view.load_uri(LOGIN_URL);
+    view.load_uri(start);
     window.present();
     main_loop.run();
 

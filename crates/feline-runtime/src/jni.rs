@@ -1014,9 +1014,19 @@ fn string_get_bytes(object: Handle, method: Handle) -> Option<Handle> {
     Some(array)
 }
 
-/// The engine's on-screen keyboard requests, for typing into text boxes
-/// (see `text.rs`): `showKeyboard(long textBox, boolean, byte[] text, …)`
-/// and `hideKeyboard()`, on NativeGLJavaInterface and NativeHelper.
+/// The text of one of Feline's Java strings.
+fn string_value(object: Handle) -> Option<String> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    match index(object).and_then(|i| world.objects.get(i)) {
+        Some(Object::Str(s)) => Some(s.to_string_lossy().into_owned()),
+        _ => None,
+    }
+}
+
+/// Java calls Feline acts on: the engine's on-screen keyboard requests, for
+/// typing into text boxes (see `text.rs`): `showKeyboard(long textBox,
+/// boolean, byte[] text, …)` and `hideKeyboard()`, on NativeGLJavaInterface
+/// and NativeHelper; and the app's screen changes (`onAppReady`).
 fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
     let Some((_, name, _)) = member_of(method) else {
         return;
@@ -1036,6 +1046,13 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
             crate::text::focus(text_box, initial);
         }
         "hideKeyboard" | "gameActivity_hideKeyboard" => crate::text::blur(),
+        // The app's current screen ("Landing", "Login", …): the login
+        // window opens on its Sign In and Create Account screens.
+        "gameActivity_onAppReady" => {
+            let screen = string_value(read() as usize as Handle).unwrap_or_default();
+            log(format!("app screen: {screen:?}"));
+            crate::login::screen_shown(&screen);
+        }
         _ => {}
     }
 }
