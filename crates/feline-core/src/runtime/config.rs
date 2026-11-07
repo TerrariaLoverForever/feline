@@ -409,9 +409,22 @@ fn any_process_named_in(proc_dir: &Path, names: &[&str]) -> bool {
             .file_name()
             .to_str()
             .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()));
-        is_pid
-            && fs::read_to_string(entry.path().join("comm"))
-                .is_ok_and(|comm| names.contains(&comm.trim_end()))
+        if !is_pid {
+            return false;
+        }
+        if fs::read_to_string(entry.path().join("comm"))
+            .is_ok_and(|comm| names.contains(&comm.trim_end()))
+        {
+            return true;
+        }
+        // A program can rename its main thread, which renames `comm`:
+        // Roblox's engine calls it "Main" inside feline-runtime. The program
+        // file's name (cut to comm's 15 characters) still tells.
+        fs::read_link(entry.path().join("exe")).is_ok_and(|exe| {
+            exe.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| names.contains(&&n[..n.len().min(15)]))
+        })
     })
 }
 
