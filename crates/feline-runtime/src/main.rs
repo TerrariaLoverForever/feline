@@ -339,6 +339,9 @@ fn run_init(data: &[u8]) -> ExitCode {
         }
         // FELINE_START=1: continue like Android's GameActivity does (M4).
         let started = if wanted("FELINE_START") {
+            if let Ok(data) = runtime_data() {
+                freshen_flag_cache(&data.join("cache/cache"));
+            }
             eprintln!("feline-runtime: calling GameActivity.initializeNativeCode…");
             let handle = feline_runtime::init::call_initialize_native_code(&elf, image)?;
             // FELINE_WINDOW=1: open the window first (refused while a game
@@ -752,6 +755,30 @@ fn session_step(
         _ => {}
     }
     Ok(())
+}
+
+/// Marks Roblox's saved client settings (`flag_cache.dat`, and the
+/// `tombstone.dat` next to it) as just written. The app treats a cache
+/// older than about a minute as expired (the tombstone holds "expiry 1"),
+/// expecting Android's Java side to fetch new settings; with no Java side
+/// it reported onFlagsFailed, then ignored surface changes
+/// ("Flags-Not-Received"), ran near 60 FPS and left parts of Home empty.
+/// Every start within a minute of the previous one loaded fine. The
+/// settings themselves are refreshed by the engine at each start.
+fn freshen_flag_cache(dir: &std::path::Path) {
+    let now = std::time::SystemTime::now();
+    for name in ["flag_cache.dat", "tombstone.dat"] {
+        let path = dir.join(name);
+        let result = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .and_then(|file| file.set_modified(now));
+        match result {
+            Ok(()) => eprintln!("feline-runtime: {name} marked fresh"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("feline-runtime: couldn't freshen {}: {e}", path.display()),
+        }
+    }
 }
 
 fn runtime_data() -> Result<std::path::PathBuf, String> {
