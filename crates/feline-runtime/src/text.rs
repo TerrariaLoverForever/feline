@@ -103,6 +103,25 @@ fn cursor(text: &str) -> i32 {
 
 /// The engine focused `text_box`, whose text is `initial`.
 pub fn focus(text_box: i64, initial: String) {
+    // A box with no size can't be seen or typed into. Roblox focuses one
+    // right after a chat message is sent; taking keys for it swallowed
+    // movement keys and the next `/` (chat needed two presses). Keys stay
+    // with the game; a visible box that was being edited is finished.
+    let invisible = INFO
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_some_and(|info| info.width <= 0.0 || info.height <= 0.0);
+    if invisible {
+        let same = FOCUSED
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .is_some_and(|s| s.text_box == text_box);
+        if !same {
+            blur();
+        }
+        return;
+    }
     let mut focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
     // showKeyboard comes twice per focus (two Java classes); keep the text
     // already typed if it's the same box.
