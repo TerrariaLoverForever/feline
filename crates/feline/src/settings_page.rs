@@ -10,7 +10,7 @@ use feline_core::runtime::config::{ConfigError, Kind, SettingDef, managed_value}
 use feline_core::runtime::{ApplyOutcome, DetectContext, Installation, backends};
 use feline_core::settings::{Overrides, Renderer, Settings, Toggle};
 use serde_json::Value;
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::gui::{
     AppWindow, Level, RuntimeTab, SettingKind, SettingRow, Shared, State, lock, tilde,
@@ -53,6 +53,16 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     ui.set_discord_game(p.game_button);
     ui.set_discord_menus(p.in_menus);
     ui.set_link_handler(state.settings.link_handler);
+    ui.set_roblox_updates(state.settings.roblox_updates);
+    ui.set_log_days_index(match state.settings.log_days {
+        0 => 0,
+        1 => 1,
+        2..=7 => 2,
+        _ => 3,
+    });
+    ui.set_has_saved_login(
+        feline_core::housekeeping::saved_login().is_some_and(|p| p.exists()),
+    );
     if let Some(status) = crate::presence_helper::status() {
         ui.set_presence_status(status.into());
     }
@@ -60,7 +70,6 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     let ctx = DetectContext::host();
     let tabs: Vec<RuntimeTab> = backends()
         .iter()
-        .filter(|b| !b.settings().is_empty())
         .map(|backend| {
             let message = state
                 .settings_message
@@ -103,8 +112,17 @@ fn build_tab(
         status: SharedString::new(),
         status_level: Level::Neutral,
         editable: false,
+        tabs: ModelRc::default(),
         rows: ModelRc::default(),
     };
+
+    if installation.is_some_and(|i| i.backend.settings().is_empty()) {
+        tab.status = format!(
+            "{name} has its own settings window. Feline can't change {name}'s settings yet."
+        )
+        .into();
+        return tab;
+    }
     let Some(installation) = installation else {
         tab.status =
             format!("{name} isn't installed. The Runtimes page lists what Feline found.").into();
@@ -116,12 +134,8 @@ fn build_tab(
 
     match installation.load_config(ctx) {
         Ok(file) => {
-            let rows: Vec<SettingRow> = installation
-                .backend
-                .settings()
-                .iter()
-                .map(|def| row(def, &file.get(def), overrides))
-                .collect();
+            let (names, rows) = grouped_rows(installation, &file, overrides);
+            tab.tabs = ModelRc::new(VecModel::from(names));
             tab.rows = ModelRc::new(VecModel::from(rows));
             if installation.is_running() {
                 tab.status =
@@ -159,6 +173,44 @@ fn kind_name(installation: &Installation) -> &'static str {
     }
 }
 
+/// The runtime's rows in its tabs' order (see `RuntimeBackend::setting_tabs`),
+/// each knowing its tab and section, and the tab names.
+fn grouped_rows(
+    installation: &Installation,
+    file: &feline_core::runtime::config::ConfigFile,
+    overrides: &Overrides,
+) -> (Vec<SharedString>, Vec<SettingRow>) {
+    let defs = installation.backend.settings();
+    let tabs = installation.backend.setting_tabs();
+    if tabs.is_empty() {
+        let rows = defs
+            .iter()
+            .enumerate()
+            .map(|(i, def)| SettingRow {
+                section_start: i == 0,
+                ..row(def, &file.get(def), overrides)
+            })
+            .collect();
+        return (vec!["Settings".into()], rows);
+    }
+    let mut rows = Vec::new();
+    for (t, tab) in tabs.iter().enumerate() {
+        for section in tab.sections {
+            for (k, key) in section.keys.iter().enumerate() {
+                if let Some(def) = defs.iter().find(|d| d.key == *key) {
+                    rows.push(SettingRow {
+                        tab: t as i32,
+                        section: section.title.into(),
+                        section_start: k == 0,
+                        ..row(def, &file.get(def), overrides)
+                    });
+                }
+            }
+        }
+    }
+    (tabs.iter().map(|t| t.name.into()).collect(), rows)
+}
+
 /// One row, showing the value Feline will enforce if the setting is managed.
 fn row(def: &SettingDef, current: &Value, overrides: &Overrides) -> SettingRow {
     let managed = def.link.and_then(|link| managed_value(link, overrides));
@@ -183,6 +235,9 @@ fn row(def: &SettingDef, current: &Value, overrides: &Overrides) -> SettingRow {
             .map(|(_, why)| *why)
             .unwrap_or_default()
             .into(),
+        tab: 0,
+        section: SharedString::new(),
+        section_start: false,
     };
     match def.kind {
         Kind::Toggle => row.on = value.as_bool().unwrap_or(false),
@@ -396,4 +451,94 @@ fn apply_everywhere(
         status.push('.');
         (status, Level::Warning)
     }
+}
+
+/// Saves Feline's own settings file (for settings no runtime uses).
+fn save_own(shared: &Shared) -> Result<(), String> {
+    let state = lock(shared);
+    match Settings::path() {
+        Some(path) => state.settings.save_to(&path).map_err(|e| e.to_string()),
+        None => Err("no home folder".to_owned()),
+    }
+}
+
+pub fn set_roblox_updates(ui: &AppWindow, shared: &Shared, on: bool) {
+    lock(shared).settings.roblox_updates = on;
+    if let Err(e) = save_own(shared) {
+        ui.set_housekeeping_status(format!("Couldn't save: {e}").into());
+    }
+}
+
+/// "Delete logs automatically": Keep them, 1, 7 or 30 days.
+pub fn set_log_days(ui: &AppWindow, shared: &Shared, index: i32) {
+    let days = [0, 1, 7, 30][index.clamp(0, 3) as usize];
+    lock(shared).settings.log_days = days;
+    if let Err(e) = save_own(shared) {
+        ui.set_housekeeping_status(format!("Couldn't save: {e}").into());
+        return;
+    }
+    if days > 0 {
+        let deleted = feline_core::housekeeping::delete_old_logs(days);
+        if deleted > 0 {
+            ui.set_housekeeping_status(format!("Deleted {deleted} old log files.").into());
+        }
+        refresh_sizes(ui);
+    }
+}
+
+/// The Privacy and Storage tabs' buttons.
+pub fn housekeeping(ui: &AppWindow, shared: &Shared, action: &str) {
+    use feline_core::housekeeping as hk;
+    let status = match action {
+        "delete-roblox-logs" => Some(match hk::delete_roblox_logs() {
+            0 => "There were no Roblox logs to delete.".to_owned(),
+            n => format!("Deleted {n} Roblox log files."),
+        }),
+        "delete-feline-logs" => Some(match hk::delete_feline_logs() {
+            0 => "There were no Feline logs to delete.".to_owned(),
+            n => format!("Deleted {n} Feline log files."),
+        }),
+        "forget-login" => Some(if hk::forget_login() {
+            "Signed out. Feline's runtime asks you to sign in next time.".to_owned()
+        } else {
+            "There was no saved login.".to_owned()
+        }),
+        "clear-cache" => Some(if hk::clear_roblox_cache() {
+            "Roblox's cache is cleared.".to_owned()
+        } else {
+            "Roblox's cache couldn't be cleared (is a game running?).".to_owned()
+        }),
+        "check-update" => {
+            crate::gui::check_roblox_update(ui, shared);
+            None
+        }
+        _ => None,
+    };
+    if let Some(status) = status {
+        ui.set_housekeeping_status(status.into());
+    }
+    ui.set_has_saved_login(hk::saved_login().is_some_and(|p| p.exists()));
+    refresh_sizes(ui);
+}
+
+/// Measures the folders shown on the Storage and Privacy tabs, off the UI
+/// thread (the cache can hold many files).
+pub fn refresh_sizes(ui: &AppWindow) {
+    let weak = ui.as_weak();
+    let _ = std::thread::Builder::new()
+        .name("feline-sizes".into())
+        .spawn(move || {
+            use feline_core::housekeeping as hk;
+            let measure = |dir: Option<std::path::PathBuf>| hk::human(dir.map_or(0, |d| hk::size(&d)));
+            let cache = measure(hk::roblox_cache_dir());
+            let roblox_logs = measure(hk::roblox_log_dir());
+            let feline_logs = measure(feline_core::paths::log_dir());
+            let versions = measure(hk::roblox_versions_dir());
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                ui.set_size_roblox_cache(cache.into());
+                ui.set_size_roblox_logs(roblox_logs.into());
+                ui.set_size_feline_logs(feline_logs.into());
+                ui.set_size_roblox_versions(versions.into());
+            });
+        });
 }

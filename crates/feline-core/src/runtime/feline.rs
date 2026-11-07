@@ -111,6 +111,21 @@ fn no_engine() -> RuntimeError {
     }
 }
 
+/// Grouped as in sections of one page.
+static TABS: &[super::SettingTab] = &[super::SettingTab {
+    name: "Settings",
+    sections: &[
+        super::SettingSection {
+            title: "Game",
+            keys: &["fpsLimit", "startFullscreen"],
+        },
+        super::SettingSection {
+            title: "Appearance",
+            keys: &["theme"],
+        },
+    ],
+}];
+
 impl RuntimeBackend for FelineRuntime {
     fn id(&self) -> &'static str {
         "feline"
@@ -173,6 +188,10 @@ impl RuntimeBackend for FelineRuntime {
 
     fn settings(&self) -> &'static [SettingDef] {
         SETTINGS
+    }
+
+    fn setting_tabs(&self) -> &'static [super::SettingTab] {
+        TABS
     }
 
     fn config_path(&self, _installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
@@ -239,8 +258,7 @@ mod tests {
 
     #[test]
     fn engine_needs_the_apk_next_to_it() {
-        let root =
-            std::env::temp_dir().join(format!("feline-test-engine-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("feline-test-engine-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let first = root.join("engine");
         let second = root.join("feline-engine");

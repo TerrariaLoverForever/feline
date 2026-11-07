@@ -140,6 +140,36 @@ static SETTINGS: &[SettingDef] = &[
     },
 ];
 
+/// Grouped as in Cordial's own settings window (General, Graphics).
+static TABS: &[super::SettingTab] = &[
+    super::SettingTab {
+        name: "General",
+        sections: &[
+            super::SettingSection {
+                title: "Session",
+                keys: &["close_on_leave"],
+            },
+            super::SettingSection {
+                title: "Performance",
+                keys: &["gamemode", "throttle", "mangohud", "vkbasalt"],
+            },
+        ],
+    },
+    super::SettingTab {
+        name: "Graphics",
+        sections: &[
+            super::SettingSection {
+                title: "Frame pacing",
+                keys: &["present_mode"],
+            },
+            super::SettingSection {
+                title: "Frame rate",
+                keys: &["frame_rate_limit"],
+            },
+        ],
+    },
+];
+
 impl RuntimeBackend for Cordial {
     fn id(&self) -> &'static str {
         "cordial"
@@ -222,6 +252,10 @@ impl RuntimeBackend for Cordial {
 
     fn settings(&self) -> &'static [SettingDef] {
         SETTINGS
+    }
+
+    fn setting_tabs(&self) -> &'static [super::SettingTab] {
+        TABS
     }
 
     fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {

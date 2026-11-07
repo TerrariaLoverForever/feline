@@ -13,6 +13,10 @@
 // into a smooth transition. Elements inside `if` are created each time the
 // condition becomes true, so they animate in every time.
 
+import { TextEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+
 // The base of every page: fades in and settles to full size when opened.
 export component PageBase inherits Rectangle {
     property <bool> shown: false;
@@ -25,11 +29,7 @@ export component PageBase inherits Rectangle {
     }
 }
 
-import { TextEdit } from "std-widgets.slint";
-import { Theme } from "theme.slint";
-import { Icon, Icons } from "icons.slint";
-
-// The Feline logo with rounded corners and an optional purple glow.
+// The Feline logo with rounded corners and an optional soft glow.
 // With `playful`, the cat tilts its head when you hover over it.
 export component Logo inherits Rectangle {
     in property <length> size: 48px;
@@ -38,8 +38,8 @@ export component Logo inherits Rectangle {
     width: size;
     height: size;
     border-radius: size * 0.24;
-    drop-shadow-blur: glow ? (hover.has-hover ? size * 0.5 : size * 0.35) : 0px;
-    drop-shadow-color: #a974f080;
+    drop-shadow-blur: glow ? (hover.has-hover ? size * 0.5 : size * 0.32) : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.45);
     transform-rotation: hover.has-hover ? -6deg : 0deg;
     transform-scale: hover.has-hover ? 1.04 : 1;
     animate transform-rotation, transform-scale { duration: Theme.slow; easing: ease-out-back; }
@@ -59,15 +59,13 @@ export component Logo inherits Rectangle {
     }
 }
 
-// A small rounded label, e.g. "External" or "In development".
+// A small rounded label, e.g. "Third-party" or "In development".
 export component Pill inherits Rectangle {
     in property <string> text;
     in property <color> tone: Theme.accent;
     height: 22px;
     border-radius: 11px;
-    background: tone.with-alpha(0.14);
-    border-width: 1px;
-    border-color: tone.with-alpha(0.28);
+    background: tone.with-alpha(0.13);
     HorizontalLayout {
         padding-left: 9px;
         padding-right: 9px;
@@ -87,13 +85,13 @@ export component StatusDot inherits Rectangle {
     in property <color> tone;
     in property <bool> pulse: false;
     property <bool> dim: false;
-    width: 9px;
-    height: 9px;
-    border-radius: 4.5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
     background: tone;
     opacity: root.pulse && root.dim ? 0.35 : 1;
-    drop-shadow-blur: root.pulse && root.dim ? 2px : 8px;
-    drop-shadow-color: tone.with-alpha(0.7);
+    drop-shadow-blur: root.pulse && root.dim ? 2px : 7px;
+    drop-shadow-color: tone.with-alpha(0.6);
     animate opacity, drop-shadow-blur { duration: 600ms; easing: ease-in-out-sine; }
     animate background { duration: Theme.normal; }
     Timer {
@@ -114,15 +112,14 @@ export component NavItem inherits Rectangle {
     in property <bool> soon;
     callback clicked;
 
-    height: 42px;
+    height: 40px;
     border-radius: Theme.radius-small;
-    background: active ? @linear-gradient(90deg, #a974f02e 0%, #a974f00a 100%)
-        : touch.has-hover ? Theme.surface-hover : transparent;
+    background: active ? Theme.accent-soft : touch.has-hover ? Theme.surface-hover.with-alpha(0.7) : transparent;
     animate background { duration: Theme.fast; }
 
     HorizontalLayout {
         // A small nudge to the right on hover.
-        padding-left: touch.has-hover && !root.active ? 15px : 12px;
+        padding-left: touch.has-hover && !root.active ? 14px : 12px;
         animate padding-left { duration: Theme.normal; easing: ease-out-quint; }
         padding-right: 8px;
         spacing: 12px;
@@ -131,6 +128,7 @@ export component NavItem inherits Rectangle {
             Icon {
                 commands: root.icon;
                 tone: root.active ? Theme.accent : touch.has-hover ? Theme.text : Theme.text-faint;
+                animate tone { duration: Theme.fast; }
             }
         }
         Text {
@@ -139,7 +137,7 @@ export component NavItem inherits Rectangle {
             vertical-alignment: center;
             font-size: 14px;
             font-weight: root.active ? 600 : 500;
-            color: root.active ? Theme.lavender : touch.has-hover ? Theme.text : Theme.text-muted;
+            color: root.active ? Theme.text : touch.has-hover ? Theme.text : Theme.text-muted;
         }
         if root.soon: VerticalLayout {
             alignment: center;
@@ -148,17 +146,6 @@ export component NavItem inherits Rectangle {
                 tone: Theme.text-faint;
             }
         }
-    }
-
-    // Active indicator on the left edge
-    Rectangle {
-        x: 0;
-        y: (parent.height - self.height) / 2;
-        width: 3px;
-        height: root.active ? 20px : 0px;
-        border-radius: 2px;
-        background: Theme.accent;
-        animate height { duration: Theme.normal; easing: ease-out-back; }
     }
 
     touch := TouchArea {
@@ -175,16 +162,17 @@ export component PlayButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked;
 
-    height: 54px;
-    min-width: 200px;
-    border-radius: 27px;
+    height: 52px;
+    min-width: 196px;
+    border-radius: 26px;
     background: !root.enabled ? Theme.surface-hover
-        : touch.pressed ? @linear-gradient(90deg, #8a55e6 0%, #6c3fd1 100%)
-        : touch.has-hover ? @linear-gradient(90deg, #c49bff 0%, #9a63f0 100%)
-        : @linear-gradient(90deg, #b07cf5 0%, #8550e6 100%);
-    drop-shadow-blur: root.enabled ? (touch.has-hover ? 28px : 18px) : 0px;
-    drop-shadow-color: #9b5cf090;
-    transform-scale: !root.enabled ? 1 : touch.pressed ? 0.96 : touch.has-hover ? 1.03 : 1;
+        : touch.pressed ? Theme.accent-strong.darker(0.15)
+        : touch.has-hover ? @linear-gradient(100deg, #a596ff 0%, #8471f5 100%)
+        : @linear-gradient(100deg, #9988fa 0%, #7a67f2 100%);
+    drop-shadow-blur: root.enabled ? (touch.has-hover ? 26px : 16px) : 0px;
+    drop-shadow-offset-y: root.enabled ? 4px : 0px;
+    drop-shadow-color: Theme.accent.with-alpha(0.38);
+    transform-scale: !root.enabled ? 1 : touch.pressed ? 0.96 : touch.has-hover ? 1.025 : 1;
     animate drop-shadow-blur { duration: 180ms; }
     animate transform-scale { duration: Theme.normal; easing: ease-out-back; }
     animate background { duration: Theme.fast; }
@@ -197,8 +185,8 @@ export component PlayButton inherits Rectangle {
         VerticalLayout {
             alignment: center;
             Path {
-                width: 18px;
-                height: 18px;
+                width: 17px;
+                height: 17px;
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: Icons.play;
@@ -209,8 +197,8 @@ export component PlayButton inherits Rectangle {
         Text {
             text: root.text;
             vertical-alignment: center;
-            font-size: 17px;
-            font-weight: 800;
+            font-size: 16px;
+            font-weight: 700;
             color: root.enabled ? Theme.on-accent : Theme.text-faint;
         }
     }
@@ -224,27 +212,34 @@ export component PlayButton inherits Rectangle {
     }
 }
 
-// A quieter button, optionally with an icon.
+// A quieter button, optionally with an icon. `danger` for actions that
+// delete something; `primary` for the main action of a section.
 export component SecondaryButton inherits Rectangle {
     in property <string> text;
     in property <string> icon: "";
     in property <bool> enabled: true;
+    in property <bool> danger: false;
+    in property <bool> primary: false;
     callback clicked;
 
-    height: 38px;
+    property <color> tone: root.danger ? Theme.danger : Theme.accent;
+    height: 36px;
     border-radius: Theme.radius-small;
     background: !root.enabled ? transparent
-        : touch.pressed ? Theme.border
-        : touch.has-hover ? Theme.surface-hover : Theme.surface-raised;
+        : root.primary ? (touch.pressed ? Theme.accent-strong : touch.has-hover ? #9d8efa : Theme.accent)
+        : touch.pressed ? root.tone.with-alpha(0.22)
+        : touch.has-hover ? root.tone.with-alpha(0.14) : Theme.surface-raised;
     border-width: 1px;
-    border-color: touch.has-hover && root.enabled ? Theme.accent.with-alpha(0.5) : Theme.border;
+    border-color: !root.enabled ? Theme.border
+        : root.primary ? transparent
+        : touch.has-hover ? root.tone.with-alpha(0.45) : Theme.border;
     transform-scale: root.enabled && touch.pressed ? 0.96 : 1;
     animate background, border-color { duration: Theme.fast; }
     animate transform-scale { duration: Theme.fast; easing: ease-out-quad; }
 
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
+        padding-left: 14px;
+        padding-right: 15px;
         spacing: 8px;
         alignment: center;
         if root.icon != "": VerticalLayout {
@@ -253,7 +248,7 @@ export component SecondaryButton inherits Rectangle {
                 width: 16px;
                 height: 16px;
                 commands: root.icon;
-                tone: root.enabled ? Theme.lavender : Theme.text-faint;
+                tone: !root.enabled ? Theme.text-faint : root.primary ? Theme.on-accent : root.danger ? Theme.danger : Theme.lavender;
             }
         }
         Text {
@@ -261,7 +256,7 @@ export component SecondaryButton inherits Rectangle {
             vertical-alignment: center;
             font-size: 13px;
             font-weight: 600;
-            color: root.enabled ? Theme.text : Theme.text-faint;
+            color: !root.enabled ? Theme.text-faint : root.primary ? Theme.on-accent : root.danger && touch.has-hover ? Theme.danger : Theme.text;
         }
     }
 
@@ -274,23 +269,149 @@ export component SecondaryButton inherits Rectangle {
     }
 }
 
-// A bordered panel that stacks its children vertically. Fades and settles in
-// when it appears.
+// A button for something that can't be undone: the first click asks
+// ("Click again to confirm" for 3 seconds), the second one acts.
+export component ConfirmButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> enabled: true;
+    callback confirmed;
+    property <bool> armed: false;
+    width: button.preferred-width;
+    height: button.preferred-height;
+    button := SecondaryButton {
+        width: 100%;
+        text: root.armed ? "Click again to confirm" : root.text;
+        icon: root.armed ? "" : root.icon;
+        danger: true;
+        primary: false;
+        enabled: root.enabled;
+        clicked => {
+            if root.armed {
+                root.armed = false;
+                root.confirmed();
+            } else {
+                root.armed = true;
+                disarm.running = true;
+            }
+        }
+    }
+    disarm := Timer {
+        interval: 3s;
+        running: false;
+        triggered => {
+            root.armed = false;
+            self.running = false;
+        }
+    }
+}
+
+// An on/off switch with a sliding knob.
+export component Toggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    width: 42px;
+    height: 24px;
+    border-radius: 12px;
+    background: !root.enabled ? (root.checked ? Theme.accent.with-alpha(0.35) : Theme.surface-hover)
+        : root.checked ? (touch.has-hover ? #9d8efa : Theme.accent)
+        : touch.has-hover ? Theme.border-strong : Theme.surface-hover;
+    animate background { duration: Theme.normal; }
+    opacity: root.enabled ? 1 : 0.7;
+
+    Rectangle {
+        y: 3px;
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: root.checked ? (root.enabled ? #ffffff : #ffffffaa) : Theme.text-muted;
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #00000055;
+        animate x { duration: Theme.normal; easing: ease-out-back; }
+        animate background { duration: Theme.normal; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+// A row of equal-width tabs with a sliding highlight under the chosen one.
+export component TabBar inherits Rectangle {
+    in property <[string]> tabs;
+    in-out property <int> current: 0;
+    callback changed(int);
+    property <length> tab-width: root.tabs.length > 0 ? (root.width - 8px) / root.tabs.length : 0px;
+
+    height: 40px;
+    border-radius: Theme.radius-small + 2px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    // The highlight slides to the chosen tab.
+    Rectangle {
+        x: 4px + root.current * root.tab-width;
+        y: 4px;
+        width: root.tab-width;
+        height: parent.height - 8px;
+        border-radius: Theme.radius-small - 1px;
+        background: Theme.surface-hover;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        animate x { duration: Theme.normal; easing: ease-out-quint; }
+    }
+
+    for tab[i] in root.tabs: Rectangle {
+        x: 4px + i * root.tab-width;
+        y: 4px;
+        width: root.tab-width;
+        height: parent.height - 8px;
+        Text {
+            text: tab;
+            font-size: 13px;
+            font-weight: root.current == i ? 600 : 500;
+            color: root.current == i ? Theme.text : area.has-hover ? Theme.text : Theme.text-muted;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            animate color { duration: Theme.fast; }
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.current = i;
+                root.changed(i);
+            }
+        }
+    }
+}
+
+// A panel that stacks its children vertically. Fades and settles in when
+// it appears.
 export component Card inherits Rectangle {
+    in property <length> inner-padding: 20px;
     property <bool> shown: false;
     background: Theme.surface;
     border-radius: Theme.radius;
     border-width: 1px;
     border-color: Theme.border;
     opacity: root.shown ? 1 : 0;
-    transform-scale: root.shown ? 1 : 0.98;
+    transform-scale: root.shown ? 1 : 0.985;
     animate opacity { duration: Theme.normal; easing: ease-out-quad; }
     animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
     init => {
         root.shown = true;
     }
     VerticalLayout {
-        padding: 22px;
+        padding: root.inner-padding;
         spacing: 12px;
         alignment: start;
         @children
@@ -298,7 +419,7 @@ export component Card inherits Rectangle {
 }
 
 export component CardTitle inherits Text {
-    font-size: 16px;
+    font-size: Theme.text-title;
     font-weight: 700;
     color: Theme.text;
 }
@@ -307,18 +428,18 @@ export component CardTitle inherits Text {
 export component Eyebrow inherits Text {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 1.2px;
+    letter-spacing: 1.1px;
     color: Theme.text-faint;
 }
 
 export component BodyText inherits Text {
-    font-size: 13px;
+    font-size: Theme.text-body;
     color: Theme.text-muted;
     wrap: word-wrap;
 }
 
 export component PageTitle inherits Text {
-    font-size: 30px;
+    font-size: Theme.text-page;
     font-weight: 800;
     color: Theme.text;
 }
@@ -326,6 +447,179 @@ export component PageTitle inherits Text {
 export component Divider inherits Rectangle {
     height: 1px;
     background: Theme.border;
+}
+
+// A page's title, description and optional actions on the right.
+export component PageHeader inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> description;
+    spacing: 16px;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 6px;
+        PageTitle {
+            text: root.title;
+        }
+        if root.description != "": BodyText {
+            text: root.description;
+        }
+    }
+    VerticalLayout {
+        alignment: start;
+        @children
+    }
+}
+
+// A section heading with an icon, inside a card.
+export component SectionTitle inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> icon: "";
+    spacing: 10px;
+    alignment: start;
+    if root.icon != "": Rectangle {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: Theme.accent-soft;
+        Icon {
+            width: 17px;
+            height: 17px;
+            commands: root.icon;
+            tone: Theme.lavender;
+        }
+    }
+    Text {
+        text: root.text;
+        font-size: 15px;
+        font-weight: 700;
+        color: Theme.text;
+        vertical-alignment: center;
+    }
+}
+
+// A setting: label and help text on the left, a control (the children) on
+// the right. `managed-reason` replaces the help when Feline overrides it.
+export component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> help;
+    in property <string> managed-reason;
+    spacing: 20px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Text {
+                text: root.label;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            if root.managed-reason != "": Pill {
+                text: "Set by Feline";
+                tone: Theme.lavender;
+            }
+        }
+        if root.managed-reason != "": BodyText {
+            text: root.managed-reason + ".";
+            color: Theme.lavender.with-alpha(0.8);
+        }
+        if root.managed-reason == "" && root.help != "": BodyText {
+            text: root.help;
+        }
+    }
+    // The control keeps its own size; the text takes the rest.
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 0;
+        @children
+    }
+}
+
+// A message box: a status line with a colored dot.
+export component Banner inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: Theme.accent;
+    border-radius: Theme.radius-small;
+    background: root.tone.with-alpha(0.08);
+    border-width: 1px;
+    border-color: root.tone.with-alpha(0.3);
+    HorizontalLayout {
+        padding: 12px;
+        padding-left: 14px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: start;
+            padding-top: 5px;
+            StatusDot {
+                tone: root.tone;
+            }
+        }
+        BodyText {
+            horizontal-stretch: 1;
+            text: root.text;
+            color: Theme.text;
+        }
+    }
+}
+
+// A small tile with an icon, a label and a value (Home page facts, stats).
+export component StatTile inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> value;
+    in property <color> tone: Theme.lavender;
+    property <bool> shown: false;
+    min-height: 74px;
+    border-radius: Theme.radius;
+    background: area.has-hover ? Theme.surface-raised : Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Theme.slow; easing: ease-out-quad; }
+    animate background { duration: Theme.fast; }
+    init => {
+        root.shown = true;
+    }
+    area := TouchArea { }
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 11px;
+            background: root.tone.with-alpha(0.12);
+            Icon {
+                commands: root.icon;
+                tone: root.tone;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                font-size: 12px;
+                color: Theme.text-faint;
+            }
+            Text {
+                text: root.value;
+                font-size: 14px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+        }
+    }
 }
 
 // A read-only, scrollable box of monospace text with a Copy button, for
@@ -338,7 +632,7 @@ export component OutputBox inherits Rectangle {
 
     min-height: 160px;
     border-radius: Theme.radius-small;
-    background: #08060c;
+    background: #0b0c10;
     border-width: 1px;
     border-color: Theme.border;
 

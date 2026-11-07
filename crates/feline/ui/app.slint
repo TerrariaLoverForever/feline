@@ -4,7 +4,7 @@
 import { Theme } from "theme.slint";
 import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab } from "types.slint";
 import { Icons } from "icons.slint";
-import { Logo, NavItem } from "components.slint";
+import { Logo, NavItem, Eyebrow, StatusDot } from "components.slint";
 import { HomePage } from "pages/home.slint";
 import { RuntimesPage } from "pages/runtimes.slint";
 import { SettingsPage } from "pages/settings.slint";
@@ -19,9 +19,9 @@ export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, S
 export component AppWindow inherits Window {
     title: "Feline";
     icon: @image-url("../../../assets/icons/hicolor/256x256/apps/feline.png");
-    preferred-width: 1140px;
-    preferred-height: 740px;
-    min-width: 940px;
+    preferred-width: 1160px;
+    preferred-height: 760px;
+    min-width: 960px;
     min-height: 660px;
     background: Theme.bg;
     default-font-size: 14px;
@@ -38,6 +38,10 @@ export component AppWindow inherits Window {
     in property <string> selected-detail;
     in property <bool> selected-has-doctor;
     in property <bool> selected-has-info;
+    // The runtime whose own page is open on Runtimes ("" = the list).
+    in-out property <string> runtime-open;
+    // The open tab of the Settings page.
+    in-out property <int> settings-tab;
 
     // Launching (set from Rust)
     in property <LaunchState> launch-state: LaunchState.idle;
@@ -48,8 +52,6 @@ export component AppWindow inherits Window {
     in property <string> stat-cpu;
     in property <string> stat-memory;
     in property <string> roblox-status;
-
-    // Link check (set from Rust)
 
     callback play();
     callback select-runtime(string);
@@ -78,7 +80,7 @@ export component AppWindow inherits Window {
     callback run-runtime-info();
     callback build-report();
 
-    // Settings page (set from Rust)
+    // Feline's settings (set from Rust)
     in property <int> renderer-index;
     in property <int> gamemode-index;
     in property <int> close-index;
@@ -92,46 +94,60 @@ export component AppWindow inherits Window {
     in property <bool> discord-menus;
     in property <bool> link-handler;
     in property <string> link-status;
-    callback set-link-handler(bool);
     in property <string> presence-status;
+    // Updates, privacy and storage
+    in property <bool> roblox-updates;
+    in property <int> log-days-index;
+    in property <bool> has-saved-login;
+    in property <string> size-roblox-cache;
+    in property <string> size-roblox-logs;
+    in property <string> size-feline-logs;
+    in property <string> size-roblox-versions;
+    in property <string> housekeeping-status;
+    callback set-link-handler(bool);
     callback set-presence(string, bool);
     callback settings-opened();
     callback set-override(string, int);
     callback set-runtime-bool(string, string, bool);
     callback set-runtime-choice(string, string, int);
     callback set-runtime-number(string, string, int);
+    callback set-roblox-updates(bool);
+    callback set-log-days(int);
+    callback housekeeping(string);
 
     HorizontalLayout {
         // Sidebar
         Rectangle {
-            width: 236px;
-            background: @linear-gradient(180deg, #120c1d 0%, Theme.sidebar 100%);
+            width: 232px;
+            background: Theme.sidebar;
             VerticalLayout {
-                padding: 16px;
-                spacing: 4px;
+                padding: 14px;
+                padding-top: 18px;
+                spacing: 3px;
 
                 HorizontalLayout {
-                    padding-left: 6px;
-                    padding-top: 8px;
-                    padding-bottom: 26px;
+                    padding-left: 8px;
+                    padding-bottom: 22px;
                     spacing: 12px;
                     alignment: start;
                     Logo {
-                        size: 40px;
+                        size: 38px;
                         glow: true;
+                        playful: true;
                     }
                     VerticalLayout {
                         alignment: center;
+                        spacing: 1px;
                         Text {
                             text: "Feline";
-                            font-size: 19px;
+                            font-size: 18px;
                             font-weight: 800;
                             color: Theme.text;
                         }
                         Text {
-                            text: "for Linux";
-                            font-size: 12px;
-                            color: Theme.lavender.with-alpha(0.7);
+                            text: "Roblox on Linux";
+                            font-size: 11.5px;
+                            color: Theme.text-faint;
                         }
                     }
                 }
@@ -149,8 +165,31 @@ export component AppWindow inherits Window {
                     icon: Icons.runtimes;
                     active: root.page == Page.runtimes;
                     clicked => {
+                        if root.page == Page.runtimes {
+                            root.runtime-open = "";
+                        }
                         root.page = Page.runtimes;
+                        root.settings-opened();
                     }
+                }
+                NavItem {
+                    label: "Settings";
+                    icon: Icons.settings;
+                    active: root.page == Page.settings;
+                    clicked => {
+                        root.page = Page.settings;
+                        root.settings-opened();
+                    }
+                }
+
+                Eyebrow {
+                    text: "HELP";
+                    height: 34px;
+                    vertical-alignment: bottom;
+                    horizontal-alignment: left;
+                }
+                Rectangle {
+                    height: 4px;
                 }
                 NavItem {
                     label: "System";
@@ -162,19 +201,10 @@ export component AppWindow inherits Window {
                 }
                 NavItem {
                     label: "Diagnostics";
-                    icon: Icons.diagnostics;
+                    icon: Icons.stethoscope;
                     active: root.page == Page.diagnostics;
                     clicked => {
                         root.page = Page.diagnostics;
-                    }
-                }
-                NavItem {
-                    label: "Settings";
-                    icon: Icons.settings;
-                    active: root.page == Page.settings;
-                    clicked => {
-                        root.page = Page.settings;
-                        root.settings-opened();
                     }
                 }
                 NavItem {
@@ -191,21 +221,58 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                 }
 
-                Text {
-                    text: "Version " + root.version;
-                    font-size: 11px;
-                    color: Theme.text-faint;
+                // The chosen runtime, and whether a game is running.
+                Rectangle {
+                    border-radius: Theme.radius;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    HorizontalLayout {
+                        padding: 12px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            StatusDot {
+                                tone: root.launch-state == LaunchState.running ? Theme.success
+                                    : root.launch-state == LaunchState.starting ? Theme.warning
+                                    : root.selected-name != "" ? Theme.accent : Theme.text-faint;
+                                pulse: root.launch-state == LaunchState.starting;
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: root.launch-state == LaunchState.running ? "Playing"
+                                    : root.launch-state == LaunchState.starting ? "Starting…" : "Runtime";
+                                font-size: 11px;
+                                color: Theme.text-faint;
+                            }
+                            Text {
+                                text: root.selected-name != "" ? root.selected-name : "None chosen";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.page = Page.runtimes;
+                            root.runtime-open = "";
+                        }
+                    }
                 }
                 Text {
-                    text: "Free software · GPL-3.0-or-later";
-                    font-size: 11px;
+                    text: "v" + root.version + " · GPL-3.0 · not affiliated with Roblox";
+                    font-size: 10.5px;
                     color: Theme.text-faint;
-                }
-                Text {
-                    text: "Not affiliated with Roblox Corporation";
-                    font-size: 11px;
-                    color: Theme.text-faint;
+                    horizontal-alignment: center;
                     wrap: word-wrap;
+                    height: 30px;
+                    vertical-alignment: center;
                 }
             }
         }
@@ -228,11 +295,13 @@ export component AppWindow inherits Window {
             stat-cpu: root.stat-cpu;
             stat-memory: root.stat-memory;
             roblox-status: root.roblox-status;
+            discord-on: root.discord-on;
             play => {
                 root.play();
             }
             choose-runtime => {
                 root.page = Page.runtimes;
+                root.runtime-open = "";
             }
             open-logs => {
                 root.open-logs();
@@ -244,37 +313,17 @@ export component AppWindow inherits Window {
             feline-runtimes: root.feline-runtimes;
             detecting: root.detecting;
             error: root.runtimes-error;
+            open: root.runtime-open;
+            tabs: root.settings-tabs;
             select(key) => {
                 root.select-runtime(key);
             }
             rescan => {
                 root.rescan();
             }
-        }
-        if root.page == Page.settings: SettingsPage {
-            horizontal-stretch: 1;
-            renderer-index: root.renderer-index;
-            gamemode-index: root.gamemode-index;
-            close-index: root.close-index;
-            apply-status: root.apply-status;
-            apply-level: root.apply-level;
-            tabs: root.settings-tabs;
-            discord-on: root.discord-on;
-            discord-user: root.discord-user;
-            discord-join: root.discord-join;
-            discord-game: root.discord-game;
-            discord-menus: root.discord-menus;
-            link-handler: root.link-handler;
-            link-status: root.link-status;
-            set-link-handler(on) => {
-                root.set-link-handler(on);
-            }
-            presence-status: root.presence-status;
-            set-presence(which, value) => {
-                root.set-presence(which, value);
-            }
-            set-override(which, index) => {
-                root.set-override(which, index);
+            open-runtime(id) => {
+                root.runtime-open = id;
+                root.settings-opened();
             }
             set-bool(tab, key, value) => {
                 root.set-runtime-bool(tab, key, value);
@@ -285,8 +334,49 @@ export component AppWindow inherits Window {
             set-number(tab, key, value) => {
                 root.set-runtime-number(tab, key, value);
             }
-            reload => {
-                root.settings-opened();
+        }
+        if root.page == Page.settings: SettingsPage {
+            horizontal-stretch: 1;
+            current <=> root.settings-tab;
+            renderer-index: root.renderer-index;
+            gamemode-index: root.gamemode-index;
+            close-index: root.close-index;
+            apply-status: root.apply-status;
+            apply-level: root.apply-level;
+            discord-on: root.discord-on;
+            discord-user: root.discord-user;
+            discord-join: root.discord-join;
+            discord-game: root.discord-game;
+            discord-menus: root.discord-menus;
+            link-handler: root.link-handler;
+            link-status: root.link-status;
+            presence-status: root.presence-status;
+            roblox-updates: root.roblox-updates;
+            roblox-status: root.roblox-status;
+            log-days-index: root.log-days-index;
+            has-saved-login: root.has-saved-login;
+            size-roblox-cache: root.size-roblox-cache;
+            size-roblox-logs: root.size-roblox-logs;
+            size-feline-logs: root.size-feline-logs;
+            size-roblox-versions: root.size-roblox-versions;
+            housekeeping-status: root.housekeeping-status;
+            set-link-handler(on) => {
+                root.set-link-handler(on);
+            }
+            set-presence(which, value) => {
+                root.set-presence(which, value);
+            }
+            set-override(which, index) => {
+                root.set-override(which, index);
+            }
+            set-roblox-updates(on) => {
+                root.set-roblox-updates(on);
+            }
+            set-log-days(i) => {
+                root.set-log-days(i);
+            }
+            housekeeping(action) => {
+                root.housekeeping(action);
             }
         }
         if root.page == Page.system: SystemPage {
@@ -324,6 +414,7 @@ export component AppWindow inherits Window {
             }
             choose-runtime => {
                 root.page = Page.runtimes;
+                root.runtime-open = "";
             }
         }
         if root.page == Page.about: AboutPage {

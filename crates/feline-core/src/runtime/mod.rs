@@ -363,6 +363,20 @@ pub struct DoctorReport {
     pub output: String,
 }
 
+/// One tab of a runtime's settings page (see [`RuntimeBackend::setting_tabs`]).
+#[derive(Debug, Clone, Copy)]
+pub struct SettingTab {
+    pub name: &'static str,
+    pub sections: &'static [SettingSection],
+}
+
+/// A titled group of settings inside a tab ("" for no title).
+#[derive(Debug, Clone, Copy)]
+pub struct SettingSection {
+    pub title: &'static str,
+    pub keys: &'static [&'static str],
+}
+
 /// A runtime project Feline can work with.
 ///
 /// `Send + Sync` lets backends be used from background threads (the GUI runs
@@ -402,6 +416,11 @@ pub trait RuntimeBackend: Send + Sync {
     /// The settings of this runtime that Feline shows and may change. Empty
     /// for runtimes whose settings file Feline doesn't edit.
     fn settings(&self) -> &'static [SettingDef] {
+        &[]
+    }
+    /// How `settings` are grouped, like the runtime's own launcher: tabs of
+    /// titled sections of setting keys. Empty: one tab with everything.
+    fn setting_tabs(&self) -> &'static [SettingTab] {
         &[]
     }
     /// Where `installation` keeps the settings file described by `settings`.
@@ -614,6 +633,30 @@ mod tests {
             Some("1.2")
         );
         assert_eq!(parse_metainfo_version("<component/>"), None);
+    }
+
+    #[test]
+    fn every_setting_is_in_exactly_one_tab() {
+        for backend in backends() {
+            let tabs = backend.setting_tabs();
+            if tabs.is_empty() {
+                continue;
+            }
+            let mut listed: Vec<&str> = tabs
+                .iter()
+                .flat_map(|t| t.sections.iter())
+                .flat_map(|s| s.keys.iter().copied())
+                .collect();
+            let mut defined: Vec<&str> = backend.settings().iter().map(|d| d.key).collect();
+            listed.sort_unstable();
+            defined.sort_unstable();
+            assert_eq!(
+                listed,
+                defined,
+                "{}: tabs and settings differ",
+                backend.id()
+            );
+        }
     }
 
     #[test]

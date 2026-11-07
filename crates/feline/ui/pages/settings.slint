@@ -1,89 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Settings page: Feline's own settings (which override the runtimes'), and a
-// tab per runtime that edits that runtime's own settings file.
+// Settings page: Feline's own settings, in tabs. Each runtime's own settings
+// are on its page under Runtimes.
 
-import { ScrollView, Switch, ComboBox, SpinBox } from "std-widgets.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Level, SettingKind, SettingRow, RuntimeTab } from "../types.slint";
-import { PageBase, Pill, StatusDot, Card, Eyebrow, BodyText, PageTitle, Divider } from "../components.slint";
+import { Level } from "../types.slint";
+import { Icons } from "../icons.slint";
+import { PageBase, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, TabBar, SettingRow, SectionTitle, SecondaryButton, ConfirmButton, Banner } from "../components.slint";
 
-// A tab in the tab bar.
-component Tab inherits Rectangle {
-    in property <string> text;
-    in property <bool> active;
-    callback clicked;
-
-    height: 36px;
-    border-radius: 18px;
-    background: root.active ? Theme.accent.with-alpha(0.18) : touch.has-hover ? Theme.surface-hover : transparent;
-    border-width: 1px;
-    border-color: root.active ? Theme.accent.with-alpha(0.6) : Theme.border;
-    animate background, border-color { duration: Theme.fast; }
-
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        Text {
-            text: root.text;
-            vertical-alignment: center;
-            font-size: 13px;
-            font-weight: root.active ? 700 : 500;
-            color: root.active ? Theme.lavender : Theme.text-muted;
-        }
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-// Label and help text on the left, a control on the right.
-component SettingLine inherits HorizontalLayout {
-    in property <string> label;
-    in property <string> help;
-    // Shown instead of the help text when a Feline setting overrides this one.
-    in property <string> managed-reason;
-    spacing: 20px;
-    padding-top: 10px;
-    padding-bottom: 10px;
-
-    VerticalLayout {
-        horizontal-stretch: 1;
-        alignment: center;
-        spacing: 3px;
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
-            Text {
-                text: root.label;
-                font-size: 14px;
-                font-weight: 600;
-                color: Theme.text;
-                vertical-alignment: center;
-            }
-            if root.managed-reason != "": Pill {
-                text: "Managed by Feline";
-                tone: Theme.lavender;
-            }
-        }
-        if root.managed-reason != "": BodyText {
-            text: root.managed-reason + ".";
-            color: Theme.lavender.with-alpha(0.8);
-        }
-        if root.managed-reason == "" && root.help != "": BodyText {
-            text: root.help;
-        }
-    }
-    VerticalLayout {
-        alignment: center;
-        @children
-    }
-}
-
-// One of Feline's own override settings: a dropdown.
-component OverrideLine inherits SettingLine {
+// One of Feline's override settings: a dropdown.
+component OverrideRow inherits SettingRow {
     in property <[string]> options;
     in property <int> index;
     callback changed(int);
@@ -93,6 +19,39 @@ component OverrideLine inherits SettingLine {
         current-index: root.index;
         selected => {
             root.changed(self.current-index);
+        }
+    }
+}
+
+// A storage line: what it is, how big, and a button.
+component StorageRow inherits SettingRow {
+    in property <string> size;
+    in property <string> action;
+    in property <bool> danger: true;
+    callback act();
+    HorizontalLayout {
+        spacing: 14px;
+        Text {
+            text: root.size;
+            font-size: 13px;
+            font-weight: 600;
+            color: Theme.text-muted;
+            vertical-alignment: center;
+            min-width: 70px;
+            horizontal-alignment: right;
+        }
+        if root.danger: ConfirmButton {
+            text: root.action;
+            icon: Icons.trash;
+            confirmed => {
+                root.act();
+            }
+        }
+        if !root.danger: SecondaryButton {
+            text: root.action;
+            clicked => {
+                root.act();
+            }
         }
     }
 }
@@ -112,71 +71,92 @@ export component SettingsPage inherits PageBase {
     in property <bool> discord-join;
     in property <bool> discord-game;
     in property <bool> discord-menus;
+    in property <string> presence-status;
     in property <bool> link-handler;
     in property <string> link-status;
+
+    // Updates, privacy and storage.
+    in property <bool> roblox-updates;
+    in property <string> roblox-status;
+    in property <int> log-days-index;
+    in property <bool> has-saved-login;
+    in property <string> size-roblox-cache;
+    in property <string> size-roblox-logs;
+    in property <string> size-feline-logs;
+    in property <string> size-roblox-versions;
+    in property <string> housekeeping-status;
+
     callback set-link-handler(bool);
-    in property <string> presence-status;
-
-    in property <[RuntimeTab]> tabs;
-    // 0 = Feline, 1.. = tabs[n - 1]
-    in-out property <int> current: 0;
-
-    callback set-override(string, int);
     callback set-presence(string, bool);
-    callback set-bool(string, string, bool);
-    callback set-choice(string, string, int);
-    callback set-number(string, string, int);
-    callback reload();
+    callback set-override(string, int);
+    callback set-roblox-updates(bool);
+    callback set-log-days(int);
+    // "delete-roblox-logs", "delete-feline-logs", "forget-login",
+    // "clear-cache", "check-update", "refresh"
+    callback housekeeping(string);
 
+    in-out property <int> current: 0;
     property <[string]> toggle-options: ["Let each runtime decide", "On", "Off"];
 
     ScrollView {
         VerticalLayout {
-            padding: 32px;
+            padding: 30px;
             spacing: 16px;
             alignment: start;
 
-            VerticalLayout {
-                spacing: 6px;
-                PageTitle {
-                    text: "Settings";
-                }
-                BodyText {
-                    text: "Feline's own settings, and the settings of each runtime, in one place.";
-                }
+            PageHeader {
+                title: "Settings";
+                description: "Feline's own settings. Each runtime's settings are on its page under Runtimes.";
             }
 
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: start;
-                Tab {
-                    text: "Feline";
-                    active: root.current == 0;
-                    clicked => {
-                        root.current = 0;
-                    }
-                }
-                for tab[i] in root.tabs: Tab {
-                    text: tab.name;
-                    active: root.current == i + 1;
-                    clicked => {
-                        root.current = i + 1;
-                        root.reload();
+            TabBar {
+                tabs: ["General", "Overrides", "Discord", "Privacy", "Storage", "Updates"];
+                current <=> root.current;
+                changed(i) => {
+                    if i == 4 {
+                        root.housekeeping("refresh");
                     }
                 }
             }
 
-            // ---------------- Feline tab
+            if root.housekeeping-status != "": Banner {
+                text: root.housekeeping-status;
+                tone: Theme.success;
+            }
+
+            // ---------------- General
             if root.current == 0: Card {
-                Eyebrow {
-                    text: "OVERRIDES FOR EVERY RUNTIME";
+                SectionTitle {
+                    text: "Roblox links";
+                    icon: Icons.link;
+                }
+                SettingRow {
+                    label: "Open Roblox links from the website with Feline";
+                    help: "When you press Play on roblox.com, Feline starts your chosen runtime (with your Discord status, if it's on). Feline gives the links back to the app that had them when you switch this off.";
+                    Toggle {
+                        checked: root.link-handler;
+                        toggled(on) => {
+                            root.set-link-handler(on);
+                        }
+                    }
+                }
+                if root.link-status != "": BodyText {
+                    text: root.link-status;
+                }
+            }
+
+            // ---------------- Overrides
+            if root.current == 1: Card {
+                SectionTitle {
+                    text: "For every runtime";
+                    icon: Icons.sliders;
                 }
                 BodyText {
                     text: "These replace the matching setting of Sober, Cordial and Stud. Feline writes them into each runtime's settings file now, and again every time it starts a game.";
                 }
-                OverrideLine {
+                OverrideRow {
                     label: "Renderer";
-                    help: "Cordial's renderer isn't changed: its OpenGL ES setting isn't documented.";
+                    help: "Cordial's renderer isn't changed: its OpenGL ES setting isn't documented. Feline's own runtime always uses Vulkan when it can.";
                     options: ["Let each runtime decide", "Vulkan", "OpenGL"];
                     index: root.renderer-index;
                     changed(i) => {
@@ -184,7 +164,7 @@ export component SettingsPage inherits PageBase {
                     }
                 }
                 Divider { }
-                OverrideLine {
+                OverrideRow {
                     label: "GameMode";
                     help: "Feral GameMode can boost performance while you play, if it's installed.";
                     options: root.toggle-options;
@@ -194,7 +174,7 @@ export component SettingsPage inherits PageBase {
                     }
                 }
                 Divider { }
-                OverrideLine {
+                OverrideRow {
                     label: "Close the runtime when leaving a game";
                     options: root.toggle-options;
                     index: root.close-index;
@@ -202,202 +182,216 @@ export component SettingsPage inherits PageBase {
                         root.set-override("close-on-leave", i);
                     }
                 }
-                if root.apply-status != "": HorizontalLayout {
-                    spacing: 10px;
-                    padding-top: 6px;
-                    VerticalLayout {
-                        alignment: start;
-                        padding-top: 5px;
-                        StatusDot {
-                            tone: Theme.level-color(root.apply-level);
-                        }
-                    }
-                    BodyText {
-                        horizontal-stretch: 1;
-                        text: root.apply-status;
-                    }
+                if root.apply-status != "": Banner {
+                    text: root.apply-status;
+                    tone: Theme.level-color(root.apply-level);
                 }
             }
-            if root.current == 0: Card {
-                Eyebrow {
-                    text: "DISCORD STATUS";
+
+            // ---------------- Discord
+            if root.current == 2: Card {
+                SectionTitle {
+                    text: "Discord status";
+                    icon: Icons.discord;
                 }
-                SettingLine {
+                SettingRow {
                     label: "Show what you're playing on Discord";
                     help: "Works with every runtime, and keeps going if you close Feline's window, until the game ends. Turns off Sober's and Stud's own Discord status, so they don't fight over it.";
-                    Switch {
+                    Toggle {
                         checked: root.discord-on;
-                        toggled => {
-                            root.set-presence("enabled", self.checked);
+                        toggled(on) => {
+                            root.set-presence("enabled", on);
                         }
                     }
                 }
                 Divider { }
-                SettingLine {
+                SettingRow {
                     label: "\"See this game\" button";
                     help: "Links to the game's Roblox page.";
-                    Switch {
+                    Toggle {
                         checked: root.discord-game;
                         enabled: root.discord-on;
-                        toggled => {
-                            root.set-presence("game-button", self.checked);
+                        toggled(on) => {
+                            root.set-presence("game-button", on);
                         }
                     }
                 }
                 Divider { }
-                SettingLine {
+                SettingRow {
                     label: "\"Join server\" button";
                     help: "Anyone who can see your Discord profile could join the server you're on.";
-                    Switch {
+                    Toggle {
                         checked: root.discord-join;
                         enabled: root.discord-on;
-                        toggled => {
-                            root.set-presence("join-button", self.checked);
+                        toggled(on) => {
+                            root.set-presence("join-button", on);
                         }
                     }
                 }
                 Divider { }
-                SettingLine {
+                SettingRow {
                     label: "Show your Roblox username and avatar";
-                    Switch {
+                    Toggle {
                         checked: root.discord-user;
                         enabled: root.discord-on;
-                        toggled => {
-                            root.set-presence("show-user", self.checked);
+                        toggled(on) => {
+                            root.set-presence("show-user", on);
                         }
                     }
                 }
                 Divider { }
-                SettingLine {
+                SettingRow {
                     label: "Show a status in the Roblox menus";
                     help: "Otherwise there's no status between games.";
-                    Switch {
+                    Toggle {
                         checked: root.discord-menus;
                         enabled: root.discord-on;
-                        toggled => {
-                            root.set-presence("in-menus", self.checked);
+                        toggled(on) => {
+                            root.set-presence("in-menus", on);
                         }
                     }
                 }
-                if root.discord-on && root.presence-status != "": HorizontalLayout {
-                    spacing: 10px;
-                    padding-top: 6px;
-                    VerticalLayout {
-                        alignment: start;
-                        padding-top: 5px;
-                        StatusDot {
-                            tone: Theme.accent;
+                if root.discord-on && root.presence-status != "": Banner {
+                    text: root.presence-status;
+                }
+            }
+
+            // ---------------- Privacy & security
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Your Roblox login";
+                    icon: Icons.lock;
+                }
+                SettingRow {
+                    label: "Saved login for Feline's runtime";
+                    help: root.has-saved-login
+                        ? "Saved only on this computer, readable only by you, and sent only to Roblox. Feline never sees your password."
+                        : "Not signed in. Feline's runtime asks you to sign in when it starts.";
+                    ConfirmButton {
+                        text: "Sign out";
+                        icon: Icons.logout;
+                        enabled: root.has-saved-login;
+                        confirmed => {
+                            root.housekeeping("forget-login");
                         }
-                    }
-                    BodyText {
-                        horizontal-stretch: 1;
-                        text: root.presence-status;
                     }
                 }
             }
-            if root.current == 0: Card {
-                Eyebrow {
-                    text: "ROBLOX LINKS";
-                }
-                SettingLine {
-                    label: "Open Roblox links from the website with Feline";
-                    help: "When you press Play on roblox.com, Feline starts your chosen runtime (with your Discord status, if it's on). Feline remembers which app opened these links before and gives them back when you switch this off.";
-                    Switch {
-                        checked: root.link-handler;
-                        toggled => {
-                            root.set-link-handler(self.checked);
-                        }
-                    }
-                }
-                if root.link-status != "": BodyText {
-                    text: root.link-status;
-                }
-            }
-            if root.current == 0: Card {
-                Eyebrow {
-                    text: "FRAME RATE";
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Logs";
+                    icon: Icons.log;
                 }
                 BodyText {
-                    text: "Set the FPS limit in Roblox itself: Settings → Maximum Frame Rate, in any experience. Cordial also has its own limit on its tab.";
+                    text: "Roblox writes its own logs while it runs, and Feline keeps one log per game for bug reports. Logs can contain your username and the games you played; typed text is never in Feline's logs.";
+                }
+                SettingRow {
+                    label: "Delete logs automatically";
+                    help: "Old logs are removed each time Feline opens.";
+                    ComboBox {
+                        width: 180px;
+                        model: ["Keep them", "After 1 day", "After 7 days", "After 30 days"];
+                        current-index: root.log-days-index;
+                        selected => {
+                            root.set-log-days(self.current-index);
+                        }
+                    }
+                }
+                Divider { }
+                StorageRow {
+                    label: "Roblox's logs";
+                    help: "What the Roblox app itself writes (Feline's runtime).";
+                    size: root.size-roblox-logs;
+                    action: "Delete";
+                    act => {
+                        root.housekeeping("delete-roblox-logs");
+                    }
+                }
+                Divider { }
+                StorageRow {
+                    label: "Feline's logs";
+                    help: "One per game, from every runtime.";
+                    size: root.size-feline-logs;
+                    action: "Delete";
+                    act => {
+                        root.housekeeping("delete-feline-logs");
+                    }
+                }
+            }
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Security";
+                    icon: Icons.shield-check;
+                }
+                BodyText {
+                    text: "Roblox updates are only installed if they're signed with Roblox's own certificate (Android's APK signature, checked in full). Feline contains no Roblox files and never sends your data anywhere but Roblox and, if it's on, Discord on this computer.";
                 }
             }
 
-            // ---------------- Runtime tabs
-            // `if` (not `visible`) so a tab's content is rebuilt, and its
-            // cards animate in, every time the tab is opened.
-            for tab[i] in root.tabs: VerticalLayout {
-                if root.current == i + 1: VerticalLayout {
-                    spacing: 16px;
-
-                    if tab.source != "": BodyText {
-                        text: "Editing: " + tab.source;
+            // ---------------- Storage
+            if root.current == 4: Card {
+                SectionTitle {
+                    text: "Space used by Feline's runtime";
+                    icon: Icons.storage;
+                }
+                StorageRow {
+                    label: "Roblox's content cache";
+                    help: "Game models, textures and sounds Roblox saved. Safe to clear; games load a little slower the next time.";
+                    size: root.size-roblox-cache;
+                    action: "Clear";
+                    act => {
+                        root.housekeeping("clear-cache");
                     }
-                    if tab.status != "": Rectangle {
-                        border-radius: Theme.radius-small;
-                        background: Theme.level-color(tab.status-level).with-alpha(0.08);
-                        border-width: 1px;
-                        border-color: Theme.level-color(tab.status-level).with-alpha(0.35);
-                        HorizontalLayout {
-                            padding: 14px;
-                            spacing: 12px;
-                            VerticalLayout {
-                                alignment: start;
-                                padding-top: 5px;
-                                StatusDot {
-                                    tone: Theme.level-color(tab.status-level);
-                                }
-                            }
-                            BodyText {
-                                horizontal-stretch: 1;
-                                text: tab.status;
-                                color: Theme.text;
-                            }
+                }
+                Divider { }
+                StorageRow {
+                    label: "Roblox app versions";
+                    help: "The current Roblox app, and the last one that worked (kept so Feline can go back if an update breaks).";
+                    size: root.size-roblox-versions;
+                    action: "Refresh";
+                    danger: false;
+                    act => {
+                        root.housekeeping("refresh");
+                    }
+                }
+                Divider { }
+                StorageRow {
+                    label: "Logs";
+                    help: "Roblox's and Feline's (see Privacy).";
+                    size: root.size-roblox-logs + " + " + root.size-feline-logs;
+                    action: "Delete";
+                    act => {
+                        root.housekeeping("delete-roblox-logs");
+                        root.housekeeping("delete-feline-logs");
+                    }
+                }
+            }
+
+            // ---------------- Updates
+            if root.current == 5: Card {
+                SectionTitle {
+                    text: "Roblox app";
+                    icon: Icons.download;
+                }
+                SettingRow {
+                    label: "Keep Roblox up to date";
+                    help: "For Feline's own runtime: when Feline opens, it downloads a new Roblox version if there is one (checked against Roblox's signature). If a new version doesn't work, Feline goes back to the last one that did.";
+                    Toggle {
+                        checked: root.roblox-updates;
+                        toggled(on) => {
+                            root.set-roblox-updates(on);
                         }
                     }
-                    if tab.rows.length > 0: Card {
-                        for row[j] in tab.rows: VerticalLayout {
-                            if j > 0: Divider { }
-                            if row.kind == SettingKind.toggle: SettingLine {
-                                label: row.label;
-                                help: row.help;
-                                managed-reason: row.managed-reason;
-                                Switch {
-                                    checked: row.on;
-                                    enabled: tab.editable && !row.managed;
-                                    toggled => {
-                                        root.set-bool(tab.id, row.key, self.checked);
-                                    }
-                                }
-                            }
-                            if row.kind == SettingKind.choice: SettingLine {
-                                label: row.label;
-                                help: row.help;
-                                managed-reason: row.managed-reason;
-                                ComboBox {
-                                    width: 230px;
-                                    model: row.choices;
-                                    current-index: row.choice-index;
-                                    enabled: tab.editable && !row.managed;
-                                    selected => {
-                                        root.set-choice(tab.id, row.key, self.current-index);
-                                    }
-                                }
-                            }
-                            if row.kind == SettingKind.number: SettingLine {
-                                label: row.label;
-                                help: row.help;
-                                managed-reason: row.managed-reason;
-                                SpinBox {
-                                    width: 130px;
-                                    minimum: row.min;
-                                    maximum: row.max;
-                                    value: row.number;
-                                    enabled: tab.editable && !row.managed;
-                                    edited(v) => {
-                                        root.set-number(tab.id, row.key, v);
-                                    }
-                                }
-                            }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Check now";
+                    help: root.roblox-status != "" ? root.roblox-status : "Not checked yet.";
+                    SecondaryButton {
+                        text: "Check for updates";
+                        icon: Icons.refresh;
+                        clicked => {
+                            root.housekeeping("check-update");
                         }
                     }
                 }

@@ -120,7 +120,7 @@ impl Toggle {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// [`Installation::key`](crate::runtime::Installation::key) of the runtime
     /// the user chose. `None` until they choose one: Feline never picks.
@@ -135,6 +135,26 @@ pub struct Settings {
     /// The desktop entry that handled `roblox://` links before Feline took
     /// over, e.g. `froststrap.desktop`, so it can be given back.
     pub previous_link_handler: Option<String>,
+    /// Keep Roblox's app up to date for Feline's runtime (on by default).
+    pub roblox_updates: bool,
+    /// Delete Roblox's and Feline's logs older than this many days (0 =
+    /// keep them).
+    pub log_days: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            runtime: None,
+            account_notice: 0,
+            overrides: Overrides::default(),
+            presence: PresenceOptions::default(),
+            link_handler: false,
+            previous_link_handler: None,
+            roblox_updates: true,
+            log_days: 0,
+        }
+    }
 }
 
 impl Settings {
@@ -179,6 +199,8 @@ impl Settings {
                 // These two default to on, so only "off" changes them.
                 "discord_game_button" => settings.presence.game_button = value != "off",
                 "discord_in_menus" => settings.presence.in_menus = value != "off",
+                "roblox_updates" => settings.roblox_updates = value != "off",
+                "log_days" => settings.log_days = value.parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -212,6 +234,12 @@ impl Settings {
         }
         if let Some(previous) = &self.previous_link_handler {
             text.push_str(&format!("previous_link_handler = {previous}\n"));
+        }
+        if !self.roblox_updates {
+            text.push_str("roblox_updates = off\n");
+        }
+        if self.log_days > 0 {
+            text.push_str(&format!("log_days = {}\n", self.log_days));
         }
         let p = &self.presence;
         let defaults = PresenceOptions::default();
@@ -317,6 +345,8 @@ mod tests {
             },
             link_handler: true,
             previous_link_handler: Some("froststrap.desktop".into()),
+            roblox_updates: false,
+            log_days: 14,
         };
         settings.save_to(&path).unwrap();
         let loaded = Settings::load_from(&path).unwrap();

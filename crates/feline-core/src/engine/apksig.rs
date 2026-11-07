@@ -43,7 +43,12 @@ impl<'a> Reader<'a> {
 }
 
 /// (signature algorithm id) → (verification, content digest algorithm).
-fn algorithm(id: u32) -> Option<(&'static dyn VerificationAlgorithm, &'static digest::Algorithm)> {
+fn algorithm(
+    id: u32,
+) -> Option<(
+    &'static dyn VerificationAlgorithm,
+    &'static digest::Algorithm,
+)> {
     Some(match id {
         0x0101 => (&signature::RSA_PSS_2048_8192_SHA256, &digest::SHA256),
         0x0102 => (&signature::RSA_PSS_2048_8192_SHA512, &digest::SHA512),
@@ -100,18 +105,32 @@ fn verify_rsa_pkcs1(id: u32, key: &[u8], data: &[u8], sig: &[u8]) -> bool {
     if id == 0x0103 {
         let hashed = digest::digest(&digest::SHA256, data);
         public
-            .verify(rsa::Pkcs1v15Sign::new::<rsa::sha2::Sha256>(), hashed.as_ref(), sig)
+            .verify(
+                rsa::Pkcs1v15Sign::new::<rsa::sha2::Sha256>(),
+                hashed.as_ref(),
+                sig,
+            )
             .is_ok()
     } else {
         let hashed = digest::digest(&digest::SHA512, data);
         public
-            .verify(rsa::Pkcs1v15Sign::new::<rsa::sha2::Sha512>(), hashed.as_ref(), sig)
+            .verify(
+                rsa::Pkcs1v15Sign::new::<rsa::sha2::Sha512>(),
+                hashed.as_ref(),
+                sig,
+            )
             .is_ok()
     }
 }
 
 /// Hashes the file outside the signing block, the v2/v3 way.
-fn content_digest(apk: &[u8], block_start: usize, cd_start: usize, eocd: usize, alg: &'static digest::Algorithm) -> Vec<u8> {
+fn content_digest(
+    apk: &[u8],
+    block_start: usize,
+    cd_start: usize,
+    eocd: usize,
+    alg: &'static digest::Algorithm,
+) -> Vec<u8> {
     // The end record, with its central directory offset pointing where the
     // signing block starts (as it did before signing).
     let mut end = apk[eocd..].to_vec();
@@ -153,7 +172,11 @@ pub fn verify(apk: &[u8]) -> Result<Signer, String> {
     if &apk[cd_start - 16..cd_start] != MAGIC {
         return Err("the APK isn't signed with scheme v2/v3".into());
     }
-    let size = u64::from_le_bytes(apk[cd_start - 24..cd_start - 16].try_into().unwrap_or_default()) as usize;
+    let size = u64::from_le_bytes(
+        apk[cd_start - 24..cd_start - 16]
+            .try_into()
+            .unwrap_or_default(),
+    ) as usize;
     let block_start = cd_start
         .checked_sub(size + 8)
         .ok_or("bad signing block size")?;
@@ -162,7 +185,12 @@ pub fn verify(apk: &[u8]) -> Result<Signer, String> {
     while pairs.len() >= 12 {
         let len = u64::from_le_bytes(pairs[..8].try_into().unwrap_or_default()) as usize;
         let pair = pairs.get(8..8 + len).ok_or("bad signing block entry")?;
-        let id = u32::from_le_bytes(pair.get(..4).ok_or("bad entry")?.try_into().unwrap_or_default());
+        let id = u32::from_le_bytes(
+            pair.get(..4)
+                .ok_or("bad entry")?
+                .try_into()
+                .unwrap_or_default(),
+        );
         match id {
             V2_BLOCK => v2 = Some(&pair[4..]),
             V3_BLOCK => v3 = Some(&pair[4..]),
@@ -227,7 +255,10 @@ pub fn verify(apk: &[u8]) -> Result<Signer, String> {
     let expected = expected.ok_or("no digest for the signature's algorithm")?;
     let certificate = certificates.prefixed()?;
     // The certificate must hold the key that signed.
-    if !certificate.windows(public_key.len()).any(|w| w == public_key) {
+    if !certificate
+        .windows(public_key.len())
+        .any(|w| w == public_key)
+    {
         return Err("the certificate doesn't match the signing key".into());
     }
     if content_digest(apk, block_start, cd_start, eocd, digest_alg) != expected {

@@ -135,6 +135,33 @@ pub static SOBER: Sober = Sober;
 
 pub struct Sober;
 
+/// Grouped as in Sober's single settings page.
+static TABS: &[super::SettingTab] = &[super::SettingTab {
+    name: "Settings",
+    sections: &[
+        super::SettingSection {
+            title: "Graphics",
+            keys: &["use_opengl", "graphics_optimization_mode", "enable_hidpi"],
+        },
+        super::SettingSection {
+            title: "Performance",
+            keys: &["enable_gamemode"],
+        },
+        super::SettingSection {
+            title: "Game",
+            keys: &[
+                "close_on_leave",
+                "server_location_indicator_enabled",
+                "allow_gamepad_permission",
+            ],
+        },
+        super::SettingSection {
+            title: "Discord",
+            keys: &["discord_rpc_enabled", "discord_rpc_show_join_button"],
+        },
+    ],
+}];
+
 impl RuntimeBackend for Sober {
     fn id(&self) -> &'static str {
         "sober"
@@ -166,6 +193,10 @@ impl RuntimeBackend for Sober {
 
     fn settings(&self) -> &'static [SettingDef] {
         SETTINGS
+    }
+
+    fn setting_tabs(&self) -> &'static [super::SettingTab] {
+        TABS
     }
 
     fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {

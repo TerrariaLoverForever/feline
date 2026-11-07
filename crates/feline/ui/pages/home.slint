@@ -1,44 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Home page: one-click Play, the selected runtime, and joining a specific
-// experience by link.
+// Home page: the Play button with the chosen runtime, the launch status, live
+// stats while a game runs, and a few facts at a glance.
 
-import { LineEdit } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { LaunchState } from "../types.slint";
-import { Icons } from "../icons.slint";
-import { PageBase, Logo, Pill, StatusDot, PlayButton, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
-
-// One number in the monitoring row, e.g. "CPU 12%".
-component Stat inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
-    property <bool> shown: false;
-    opacity: self.shown ? 1 : 0;
-    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
-    init => {
-        self.shown = true;
-    }
-    border-radius: Theme.radius-small;
-    background: Theme.surface-raised;
-    border-width: 1px;
-    border-color: Theme.border;
-    VerticalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        padding-top: 8px;
-        padding-bottom: 8px;
-        spacing: 2px;
-        Eyebrow {
-            text: root.label;
-        }
-        Text {
-            text: root.value;
-            font-size: 17px;
-            font-weight: 700;
-            color: Theme.text;
-        }
-    }
-}
+import { Icon, Icons } from "../icons.slint";
+import { PageBase, Logo, PlayButton, SecondaryButton, StatusDot, BodyText, StatTile, Banner } from "../components.slint";
 
 export component HomePage inherits PageBase {
     // Selected runtime (set from Rust). Empty name = nothing selected.
@@ -56,8 +24,7 @@ export component HomePage inherits PageBase {
     in property <string> stat-memory;
     // Roblox app updates for Feline's runtime ("" = nothing to show).
     in property <string> roblox-status;
-
-    // Link check (set from Rust).
+    in property <bool> discord-on;
 
     callback play();
     callback choose-runtime();
@@ -66,245 +33,247 @@ export component HomePage inherits PageBase {
     property <bool> has-runtime: root.selected-name != "";
     property <bool> busy: root.launch-state == LaunchState.starting || root.launch-state == LaunchState.running;
 
-    VerticalLayout {
-        padding: 32px;
-        spacing: 20px;
-        alignment: start;
+    ScrollView {
+        VerticalLayout {
+            padding: 30px;
+            spacing: 18px;
+            alignment: start;
 
-        // Hero
-        Rectangle {
-            height: 252px;
-            border-radius: 20px;
-            border-width: 1px;
-            border-color: #a974f033;
-            background: @linear-gradient(120deg, #2e1858 0%, #1a1031 48%, #0f0b17 100%);
-            clip: true;
-
-            // Decorative orbits echoing the logo
+            // Hero
             Rectangle {
-                x: parent.width - 330px;
-                y: -90px;
-                width: 440px;
-                height: 330px;
-                border-radius: 220px;
-                border-width: 2px;
-                border-color: #a974f026;
-            }
-            Rectangle {
-                x: parent.width - 250px;
-                y: 120px;
-                width: 340px;
-                height: 220px;
-                border-radius: 170px;
+                height: 236px;
+                border-radius: Theme.radius-large;
                 border-width: 1px;
-                border-color: #dcc6ff14;
-            }
-            // Soft light behind the logo
-            Rectangle {
-                x: -60px;
-                y: -60px;
-                width: 300px;
-                height: 300px;
-                border-radius: 150px;
-                background: @radial-gradient(circle, #a974f038 0%, #a974f000 70%);
-            }
+                border-color: Theme.border;
+                background: @linear-gradient(125deg, #231f3d 0%, #1a1a28 45%, #15161e 100%);
+                clip: true;
 
-            HorizontalLayout {
-                padding-left: 36px;
-                padding-right: 36px;
-                spacing: 30px;
-                VerticalLayout {
-                    alignment: center;
-                    Logo {
-                        size: 136px;
-                        glow: true;
-                        playful: true;
-                    }
+                // Soft light behind the logo, and a faint ring
+                Rectangle {
+                    x: -80px;
+                    y: -80px;
+                    width: 330px;
+                    height: 330px;
+                    border-radius: 165px;
+                    background: @radial-gradient(circle, #8f7ef72e 0%, #8f7ef700 70%);
                 }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 4px;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: "Feline";
-                        font-size: 46px;
-                        font-weight: 800;
-                        letter-spacing: -0.5px;
-                        color: Theme.text;
-                    }
-                    Text {
-                        text: "Roblox on Linux. Always lands on its feet.";
-                        font-size: 15px;
-                        color: Theme.lavender;
-                    }
-                    Rectangle {
-                        height: 18px;
-                    }
-                    HorizontalLayout {
-                        spacing: 18px;
-                        alignment: start;
-                        PlayButton {
-                            text: root.launch-state == LaunchState.starting ? "Starting…"
-                                : root.launch-state == LaunchState.running ? "Running" : "Play Roblox";
-                            enabled: root.has-runtime && !root.busy;
-                            clicked => {
-                                root.play();
-                            }
-                        }
-                        // Selected runtime; click to change it
-                        chip := Rectangle {
-                            border-radius: Theme.radius-small;
-                            background: chip-touch.has-hover ? #ffffff0d : transparent;
-                            animate background { duration: Theme.fast; }
-                            HorizontalLayout {
-                                padding: 8px;
-                                spacing: 10px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    StatusDot {
-                                        tone: root.detecting ? Theme.text-faint
-                                            : root.has-runtime ? Theme.success : Theme.warning;
-                                        pulse: root.detecting;
-                                    }
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 2px;
-                                    Text {
-                                        text: root.detecting ? "Sniffing around for runtimes…"
-                                            : root.has-runtime ? root.selected-name : "No runtime selected";
-                                        font-size: 14px;
-                                        font-weight: 600;
-                                        color: Theme.text;
-                                    }
-                                    Text {
-                                        text: root.has-runtime ? root.selected-detail : "Choose one to start playing →";
-                                        font-size: 12px;
-                                        color: root.has-runtime ? Theme.text-muted : Theme.lavender;
-                                    }
-                                }
-                            }
-                            chip-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.choose-runtime();
-                                }
-                            }
-                        }
-                    }
+                Rectangle {
+                    x: parent.width - 300px;
+                    y: -110px;
+                    width: 420px;
+                    height: 420px;
+                    border-radius: 210px;
+                    border-width: 1px;
+                    border-color: #8f7ef71a;
                 }
-            }
-        }
 
-        // Launch status, only while something is happening or just happened
-        if root.launch-state != LaunchState.idle: Rectangle {
-            property <bool> shown: false;
-            opacity: self.shown ? 1 : 0;
-            transform-scale: self.shown ? 1 : 0.98;
-            animate opacity { duration: Theme.normal; easing: ease-out-quad; }
-            animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
-            animate background, border-color { duration: Theme.normal; }
-            init => {
-                self.shown = true;
-            }
-            border-radius: Theme.radius;
-            border-width: 1px;
-            background: root.launch-state == LaunchState.failed ? #f27d8e12 : Theme.surface;
-            border-color: root.launch-state == LaunchState.failed ? #f27d8e55 : Theme.border;
-            HorizontalLayout {
-                padding: 18px;
-                spacing: 14px;
-                VerticalLayout {
-                    alignment: start;
-                    padding-top: 5px;
-                    StatusDot {
-                        tone: root.launch-state == LaunchState.failed ? Theme.danger
-                            : root.launch-state == LaunchState.ended ? Theme.text-faint
-                            : root.launch-state == LaunchState.running ? Theme.success : Theme.accent;
-                        pulse: root.launch-state == LaunchState.starting;
-                    }
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: root.launch-title;
-                        font-size: 14px;
-                        font-weight: 700;
-                        color: Theme.text;
-                        wrap: word-wrap;
-                    }
-                    if root.launch-detail != "": BodyText {
-                        text: root.launch-detail;
-                    }
-                    if root.launch-state == LaunchState.running && root.stat-time != "": HorizontalLayout {
-                        spacing: 10px;
-                        padding-top: 8px;
-                        alignment: start;
-                        Stat {
-                            label: "PLAYING FOR";
-                            value: root.stat-time;
-                        }
-                        Stat {
-                            label: "CPU";
-                            value: root.stat-cpu;
-                        }
-                        Stat {
-                            label: "MEMORY";
-                            value: root.stat-memory;
-                        }
-                    }
-                }
-                if root.launch-state == LaunchState.failed || root.launch-state == LaunchState.ended: VerticalLayout {
-                    alignment: start;
-                    SecondaryButton {
-                        text: "Open logs";
-                        icon: Icons.folder;
-                        clicked => {
-                            root.open-logs();
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 20px;
-
-            Card {
-                // A small base width, so the 2-part share of the stretch decides the size.
-                preferred-width: 100px;
-                horizontal-stretch: 2;
                 HorizontalLayout {
-                    spacing: 10px;
-                    alignment: start;
+                    padding-left: 34px;
+                    padding-right: 34px;
+                    spacing: 28px;
                     VerticalLayout {
                         alignment: center;
-                        Eyebrow {
-                            text: "FELINE RUNTIME";
+                        Logo {
+                            size: 120px;
+                            glow: true;
+                            playful: true;
                         }
                     }
-                    Pill {
-                        text: "In development";
-                        tone: Theme.lavender;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.launch-state == LaunchState.running ? "Have fun!" : "Ready to play?";
+                            font-size: 36px;
+                            font-weight: 800;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "Roblox on Linux. Always lands on its feet.";
+                            font-size: 14px;
+                            color: Theme.text-muted;
+                        }
+                        Rectangle {
+                            height: 14px;
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            alignment: start;
+                            PlayButton {
+                                text: root.launch-state == LaunchState.starting ? "Starting…"
+                                    : root.launch-state == LaunchState.running ? "Running" : "Play Roblox";
+                                enabled: root.has-runtime && !root.busy;
+                                clicked => {
+                                    root.play();
+                                }
+                            }
+                            // The chosen runtime; click to change it
+                            chip := Rectangle {
+                                border-radius: Theme.radius;
+                                background: chip-touch.has-hover ? #ffffff0c : #ffffff06;
+                                border-width: 1px;
+                                border-color: chip-touch.has-hover ? Theme.border-strong : Theme.border;
+                                animate background, border-color { duration: Theme.fast; }
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    spacing: 11px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        StatusDot {
+                                            tone: root.detecting ? Theme.text-faint
+                                                : root.has-runtime ? Theme.success : Theme.warning;
+                                            pulse: root.detecting;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text {
+                                            text: root.detecting ? "Looking for runtimes…"
+                                                : root.has-runtime ? root.selected-name : "No runtime chosen";
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                            color: Theme.text;
+                                        }
+                                        Text {
+                                            text: root.has-runtime ? root.selected-detail : "Choose one to start playing";
+                                            font-size: 12px;
+                                            color: root.has-runtime ? Theme.text-faint : Theme.lavender;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Icon {
+                                            width: 15px;
+                                            height: 15px;
+                                            commands: Icons.chevron-right;
+                                            tone: chip-touch.has-hover ? Theme.text : Theme.text-faint;
+                                        }
+                                    }
+                                }
+                                chip-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.choose-runtime();
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                BodyText {
-                    text: "Feline's own runtime is early and in development. Pick it on the Runtimes page, or use an external runtime you installed yourself.";
+            }
+
+            // Launch status, only while something is happening or just happened
+            if root.launch-state != LaunchState.idle: Rectangle {
+                property <bool> shown: false;
+                opacity: self.shown ? 1 : 0;
+                transform-scale: self.shown ? 1 : 0.985;
+                animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+                animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
+                animate background, border-color { duration: Theme.normal; }
+                init => {
+                    self.shown = true;
                 }
-                if root.roblox-status != "": Text {
-                    text: root.roblox-status;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                    color: Theme.text-muted;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                background: root.launch-state == LaunchState.failed ? Theme.danger.with-alpha(0.07) : Theme.surface;
+                border-color: root.launch-state == LaunchState.failed ? Theme.danger.with-alpha(0.35) : Theme.border;
+                HorizontalLayout {
+                    padding: 18px;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 5px;
+                        StatusDot {
+                            tone: root.launch-state == LaunchState.failed ? Theme.danger
+                                : root.launch-state == LaunchState.ended ? Theme.text-faint
+                                : root.launch-state == LaunchState.running ? Theme.success : Theme.accent;
+                            pulse: root.launch-state == LaunchState.starting;
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.launch-title;
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
+                        if root.launch-detail != "": BodyText {
+                            text: root.launch-detail;
+                        }
+                    }
+                    if root.launch-state == LaunchState.failed || root.launch-state == LaunchState.ended: VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "Open logs";
+                            icon: Icons.folder;
+                            clicked => {
+                                root.open-logs();
+                            }
+                        }
+                    }
                 }
-                Divider { }
-                Eyebrow {
-                    text: "BEFORE YOU PLAY";
+            }
+
+            // Live stats while a game runs
+            if root.launch-state == LaunchState.running && root.stat-time != "": HorizontalLayout {
+                spacing: 12px;
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.clock;
+                    label: "Playing for";
+                    value: root.stat-time;
+                    tone: Theme.success;
                 }
-                BodyText {
-                    text: "Roblox doesn't support third-party clients on Linux. Using one can put your account at risk.";
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.cpu;
+                    label: "CPU";
+                    value: root.stat-cpu;
+                    tone: Theme.info;
                 }
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.memory;
+                    label: "Memory";
+                    value: root.stat-memory;
+                    tone: Theme.warning;
+                }
+            }
+
+            // At a glance
+            HorizontalLayout {
+                spacing: 12px;
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.runtimes;
+                    label: "Runtime";
+                    value: root.has-runtime ? root.selected-name : "Not chosen";
+                }
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.download;
+                    label: "Roblox app";
+                    value: root.roblox-status != "" ? root.roblox-status : "Managed by the runtime";
+                }
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.discord;
+                    label: "Discord status";
+                    value: root.discord-on ? "On" : "Off";
+                    tone: root.discord-on ? Theme.lavender : Theme.text-faint;
+                }
+            }
+
+            Banner {
+                text: "Roblox doesn't support third-party clients on Linux. Using one can put your account at risk.";
+                tone: Theme.warning;
             }
         }
     }

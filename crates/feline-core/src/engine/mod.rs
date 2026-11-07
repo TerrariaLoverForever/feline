@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 /// SHA-256 of Roblox's APK signing certificate ("Roblox Corporation",
 /// San Mateo; 1024-bit RSA from 2010), as `apksigner` prints it. A
 /// download signed by anything else is rejected.
-pub const ROBLOX_CERT_SHA256: &str = "44932ea35a17a267372d71b54d1a0cb3da0dca5113e94406ae2fe18090ba1477";
+pub const ROBLOX_CERT_SHA256: &str =
+    "44932ea35a17a267372d71b54d1a0cb3da0dca5113e94406ae2fe18090ba1477";
 
 const LIBRARY: &str = "lib/x86_64/libroblox.so";
 /// Bigger downloads are refused (the APK is about 240 MB).
@@ -52,7 +53,10 @@ pub enum Progress {
 pub enum Outcome {
     UpToDate(String),
     /// A new version, and the one it replaced.
-    Installed { version: String, previous: Option<String> },
+    Installed {
+        version: String,
+        previous: Option<String>,
+    },
 }
 
 /// Installs the newest Roblox version, if it's newer than the current one
@@ -78,7 +82,11 @@ pub fn update(progress: &mut dyn FnMut(Progress)) -> Result<Outcome, String> {
     })
 }
 
-fn install(engine: &Path, release: &apkpure::Release, progress: &mut dyn FnMut(Progress)) -> Result<(), String> {
+fn install(
+    engine: &Path,
+    release: &apkpure::Release,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<(), String> {
     let versions = versions_dir(engine);
     std::fs::create_dir_all(&versions).map_err(|e| e.to_string())?;
     // Already downloaded and checked before: just switch to it.
@@ -116,7 +124,10 @@ fn fetch(url: &str, path: &Path, progress: &mut dyn FnMut(Progress)) -> Result<(
         .timeout_connect(Some(std::time::Duration::from_secs(15)))
         .build()
         .new_agent();
-    let mut response = agent.get(url).call().map_err(|e| format!("download: {e}"))?;
+    let mut response = agent
+        .get(url)
+        .call()
+        .map_err(|e| format!("download: {e}"))?;
     let total = response
         .headers()
         .get("content-length")
@@ -124,12 +135,18 @@ fn fetch(url: &str, path: &Path, progress: &mut dyn FnMut(Progress)) -> Result<(
     if total.is_some_and(|t| t > MAX_DOWNLOAD) {
         return Err("the download is unexpectedly large".into());
     }
-    let mut reader = response.body_mut().with_config().limit(MAX_DOWNLOAD).reader();
+    let mut reader = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_DOWNLOAD)
+        .reader();
     let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut buffer = vec![0u8; 1 << 16];
     let (mut done, mut shown) = (0u64, 0u64);
     loop {
-        let n = reader.read(&mut buffer).map_err(|e| format!("download: {e}"))?;
+        let n = reader
+            .read(&mut buffer)
+            .map_err(|e| format!("download: {e}"))?;
         if n == 0 {
             break;
         }
@@ -294,14 +311,20 @@ mod layout_tests {
 
     #[test]
     fn switching_rolling_back_and_pruning() {
-        let engine = std::env::temp_dir().join(format!("feline-test-roblox-versions-{}", std::process::id()));
+        let engine = std::env::temp_dir().join(format!(
+            "feline-test-roblox-versions-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&engine);
         version(&engine, "2.742.1059", true);
         version(&engine, "2.740.1", true);
         version(&engine, "2.746.1266", false);
         switch_to(&engine, "2.746.1266").unwrap();
         assert_eq!(current_in(&engine).as_deref(), Some("2.746.1266"));
-        assert_eq!(std::fs::read_to_string(engine.join("libroblox.so")).unwrap(), "2.746.1266");
+        assert_eq!(
+            std::fs::read_to_string(engine.join("libroblox.so")).unwrap(),
+            "2.746.1266"
+        );
         // Keeps the current one and the newest that worked.
         prune(&engine);
         assert!(!versions_dir(&engine).join("2.740.1").exists());
@@ -313,7 +336,10 @@ mod layout_tests {
         std::fs::write(versions_dir(&engine).join("2.746.1266/starts"), "xx").unwrap();
         assert!(roll_back_in(&engine).is_some());
         assert_eq!(current_in(&engine).as_deref(), Some("2.742.1059"));
-        assert_eq!(std::fs::read_to_string(engine.join("base.apk")).unwrap(), "2.742.1059");
+        assert_eq!(
+            std::fs::read_to_string(engine.join("base.apk")).unwrap(),
+            "2.742.1059"
+        );
         assert!(versions_dir(&engine).join("2.746.1266/bad").exists());
         let _ = std::fs::remove_dir_all(&engine);
     }
@@ -325,16 +351,30 @@ mod tests {
     #[test]
     #[ignore]
     fn installed_apk_is_signed() {
-        let path = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("feline-engine/base.apk");
+        let path =
+            std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("feline-engine/base.apk");
         let apk = std::fs::read(path).unwrap();
         let signer = super::apksig::verify(&apk).unwrap();
         println!("certificate sha256: {}", signer.certificate_sha256);
         // The engine inside it is the installed one (compared by hash:
         // never print these buffers, they're over 100 MB).
-        let (_, library) = super::unpack(&apk, false).map_err(|e| e.to_string()).unwrap();
-        let installed = std::fs::read(std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("feline-engine/libroblox.so")).unwrap();
-        let hash = |b: &[u8]| ring::digest::digest(&ring::digest::SHA256, b).as_ref().to_vec();
-        assert!(hash(&library) == hash(&installed), "extracted engine differs");
+        let (_, library) = super::unpack(&apk, false)
+            .map_err(|e| e.to_string())
+            .unwrap();
+        let installed = std::fs::read(
+            std::path::PathBuf::from(std::env::var("HOME").unwrap())
+                .join("feline-engine/libroblox.so"),
+        )
+        .unwrap();
+        let hash = |b: &[u8]| {
+            ring::digest::digest(&ring::digest::SHA256, b)
+                .as_ref()
+                .to_vec()
+        };
+        assert!(
+            hash(&library) == hash(&installed),
+            "extracted engine differs"
+        );
         let mut tampered = apk;
         tampered[1000] ^= 1;
         assert!(super::apksig::verify(&tampered).is_err());

@@ -9,7 +9,8 @@
 //! (field 9). Downloads are only trusted after the signature check
 //! (`apksig`), never because of where they came from.
 
-const URL: &str = "https://api.pureapk.com/m/v3/cms/app_version?hl=en-US&package_name=com.roblox.client";
+const URL: &str =
+    "https://api.pureapk.com/m/v3/cms/app_version?hl=en-US&package_name=com.roblox.client";
 const DOWNLOAD_HOSTS: [&str; 3] = ["pureapk.com", "apkpure.com", "winudf.com"];
 
 /// One downloadable version.
@@ -91,7 +92,9 @@ pub fn parse(data: &[u8]) -> Vec<Release> {
                 && let Some(text) = data.get(i + 2..i + 2 + len)
                 && let Ok(text) = std::str::from_utf8(text)
                 && text.split('.').count() >= 3
-                && text.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                && text
+                    .split('.')
+                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
             {
                 names.push((i, text.to_owned()));
                 i += 2 + len;

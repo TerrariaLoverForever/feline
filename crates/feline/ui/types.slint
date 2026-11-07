@@ -24,6 +24,8 @@ export enum LaunchState {
 export struct RuntimeRow {
     // Stable identifier, saved in the settings when chosen.
     key: string,
+    // The runtime project, e.g. "sober" (its settings tabs share this id).
+    id: string,
     name: string,
     version: string,
     // How it's installed, e.g. "Flatpak (system)".
@@ -77,6 +79,11 @@ export struct SettingRow {
     // Locked because a Feline setting overrides it.
     managed: bool,
     managed-reason: string,
+    // Which of the runtime's tabs it's on, and its section's title (shown
+    // above the first row of each section).
+    tab: int,
+    section: string,
+    section-start: bool,
 }
 
 // One runtime's tab on the Settings page.
@@ -91,5 +98,7 @@ export struct RuntimeTab {
     status-level: Level,
     // False when the settings can be looked at but not changed right now.
     editable: bool,
+    // Tab names, like the runtime's own launcher ("Settings" if just one).
+    tabs: [string],
     rows: [SettingRow],
 }

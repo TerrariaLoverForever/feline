@@ -1,41 +1,57 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Feline's design tokens. Every color and size used by the UI comes from here,
-// so the look can be adjusted in one place (and themes added later).
+// Feline's design tokens. Every color, size and timing used by the UI comes
+// from here, so the look can be adjusted in one place.
+//
+// The palette is a calm, neutral slate with a soft violet accent: low
+// contrast between surfaces (easy on the eyes in a dark room), clear contrast
+// for text, and color only where it means something.
 
 import { Level } from "types.slint";
 
 export global Theme {
     // Backgrounds, darkest first
-    out property <color> bg: #0b0910;
-    out property <color> sidebar: #0f0b17;
-    out property <color> surface: #151020;
-    out property <color> surface-raised: #1c1529;
-    out property <color> surface-hover: #221a33;
-    out property <color> border: #2a2140;
+    out property <color> bg: #111218;
+    out property <color> sidebar: #0d0e13;
+    out property <color> surface: #171820;
+    out property <color> surface-raised: #1d1f29;
+    out property <color> surface-hover: #242633;
+    out property <color> border: #252735;
+    out property <color> border-strong: #343749;
 
     // Text
-    out property <color> text: #efe9fa;
-    out property <color> text-muted: #a69cbf;
-    out property <color> text-faint: #6f6688;
+    out property <color> text: #ebebf3;
+    out property <color> text-muted: #a5a7ba;
+    out property <color> text-faint: #6d7086;
 
-    // Brand: purple and lavender, taken from the Feline icon
-    out property <color> accent: #a974f0;
-    out property <color> accent-strong: #8a55e6;
-    out property <color> lavender: #dcc6ff;
-    out property <color> on-accent: #150b26;
+    // Brand: a calm violet, from the Feline icon
+    out property <color> accent: #8f7ef7;
+    out property <color> accent-strong: #7a67f2;
+    out property <color> accent-soft: #8f7ef71f;
+    out property <color> lavender: #cdc5ff;
+    out property <color> on-accent: #ffffff;
 
     // Status
-    out property <color> success: #74d6a6;
-    out property <color> warning: #f0c674;
-    out property <color> danger: #f27d8e;
+    out property <color> success: #5fcf98;
+    out property <color> warning: #e9b860;
+    out property <color> danger: #ef6f80;
+    out property <color> info: #67b4f0;
 
-    // Shape and motion
+    // Shape
     out property <length> radius: 14px;
-    out property <length> radius-small: 9px;
-    out property <duration> fast: 120ms;
-    // Pages and cards settling in.
-    out property <duration> normal: 260ms;
-    out property <duration> slow: 380ms;
+    out property <length> radius-small: 10px;
+    out property <length> radius-large: 20px;
+
+    // Type scale
+    out property <length> text-small: 12px;
+    out property <length> text-body: 13.5px;
+    out property <length> text-title: 16px;
+    out property <length> text-page: 28px;
+
+    // Motion: everything animates only in response to something (no idle
+    // animations, so the launcher costs nothing while you play).
+    out property <duration> fast: 130ms;
+    out property <duration> normal: 240ms;
+    out property <duration> slow: 360ms;
 
     // The color for a status level (used by dots, pills and values).
     public pure function level-color(level: Level) -> color {

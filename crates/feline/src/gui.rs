@@ -83,6 +83,32 @@ pub fn run() -> Result<(), slint::PlatformError> {
         Ok("settings") => ui.set_page(Page::Settings),
         _ => {}
     }
+    if let Some(tab) = std::env::var("FELINE_START_TAB").ok().and_then(|t| t.parse().ok()) {
+        ui.set_settings_tab(tab);
+    }
+    if let Ok(id) = std::env::var("FELINE_START_RUNTIME") {
+        ui.set_page(Page::Runtimes);
+        ui.set_runtime_open(id.into());
+    }
+    // Developer aid: FELINE_SCREENSHOT=file.ppm saves the window after
+    // 2.5 s (for checking the design) and quits.
+    if let Some(path) = std::env::var_os("FELINE_SCREENSHOT") {
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(2500), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match ui.window().take_snapshot() {
+                Ok(image) => {
+                    let mut ppm = format!("P6\n{} {}\n255\n", image.width(), image.height()).into_bytes();
+                    for px in image.as_slice() {
+                        ppm.extend_from_slice(&[px.r, px.g, px.b]);
+                    }
+                    let _ = std::fs::write(&path, ppm);
+                }
+                Err(e) => eprintln!("feline: screenshot failed: {e}"),
+            }
+            let _ = slint::quit_event_loop();
+        });
+    }
     let log_folder = paths::log_dir()
         .map(|p| tilde(&p))
         .unwrap_or_else(|| "~/.local/state/feline/logs".to_owned());
@@ -139,6 +165,33 @@ pub fn run() -> Result<(), slint::PlatformError> {
         move || {
             if let Some(ui) = weak.upgrade() {
                 settings_page::refresh(&ui, &shared);
+            }
+        }
+    });
+    ui.on_set_roblox_updates({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |on| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_roblox_updates(&ui, &shared, on);
+            }
+        }
+    });
+    ui.on_set_log_days({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |index| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_log_days(&ui, &shared, index);
+            }
+        }
+    });
+    ui.on_housekeeping({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |action| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::housekeeping(&ui, &shared, action.as_str());
             }
         }
     });
@@ -276,6 +329,14 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
     start_detection(&ui, &shared);
     start_roblox_update(&ui, &shared);
+    // "Delete logs automatically", and the sizes on the Settings page.
+    let log_days = lock(&shared).settings.log_days;
+    if log_days > 0 {
+        let _ = thread::Builder::new()
+            .name("feline-old-logs".into())
+            .spawn(move || feline_core::housekeeping::delete_old_logs(log_days));
+    }
+    settings_page::refresh_sizes(&ui);
     start_system_scan(&ui, &shared);
     ui.run()
 }
@@ -579,14 +640,29 @@ fn run_diagnostic(
 /// when that's the chosen runtime (others bring their own Roblox; no need
 /// to download 240 MB for them). The status shows on the Home page.
 fn start_roblox_update(ui: &AppWindow, shared: &Shared) {
-    let feline_chosen = lock(shared)
-        .settings
-        .runtime
-        .as_deref()
-        .is_some_and(|k| k.starts_with("feline:"));
-    if !feline_chosen {
+    let (feline_chosen, wanted) = {
+        let state = lock(shared);
+        (
+            state.settings.runtime.as_deref().is_some_and(|k| k.starts_with("feline:")),
+            state.settings.roblox_updates,
+        )
+    };
+    if !feline_chosen || !wanted {
         return;
     }
+    run_roblox_update(ui);
+}
+
+/// Settings → Updates → "Check for updates": checks now, whatever runtime
+/// is chosen.
+pub fn check_roblox_update(ui: &AppWindow, _shared: &Shared) {
+    ui.set_roblox_status("Checking for a Roblox update…".into());
+    run_roblox_update(ui);
+}
+
+/// Installs the newest Roblox version in the background, with the status on
+/// the Home page and Settings → Updates.
+fn run_roblox_update(ui: &AppWindow) {
     let weak = ui.as_weak();
     let show = move |weak: &slint::Weak<AppWindow>, text: String| {
         let _ = weak.upgrade_in_event_loop(move |ui| ui.set_roblox_status(text.into()));
@@ -678,6 +754,7 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
         .partition(|f| f.installation.backend.origin() == Origin::Feline);
     let row = |f: &&Found| RuntimeRow {
             key: f.installation.key().into(),
+            id: f.installation.backend.id().into(),
             name: f.installation.backend.name().into(),
             version: f.version.clone().unwrap_or_default().into(),
             kind: format!(

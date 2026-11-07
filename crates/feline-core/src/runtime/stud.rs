@@ -138,6 +138,29 @@ static SETTINGS: &[SettingDef] = &[
     },
 ];
 
+/// Grouped as in Stud's settings window.
+static TABS: &[super::SettingTab] = &[super::SettingTab {
+    name: "Settings",
+    sections: &[
+        super::SettingSection {
+            title: "Graphics",
+            keys: &["graphicsMode", "upscaling", "hidpi"],
+        },
+        super::SettingSection {
+            title: "Performance",
+            keys: &["backgroundFps", "gamemode", "mangohud"],
+        },
+        super::SettingSection {
+            title: "Game",
+            keys: &["closeOnLeave", "serverRegionNotification", "systemTray"],
+        },
+        super::SettingSection {
+            title: "Discord",
+            keys: &["discordRichPresence", "discordJoinButton"],
+        },
+    ],
+}];
+
 impl RuntimeBackend for Stud {
     fn id(&self) -> &'static str {
         "stud"
@@ -202,6 +225,10 @@ impl RuntimeBackend for Stud {
 
     fn settings(&self) -> &'static [SettingDef] {
         SETTINGS
+    }
+
+    fn setting_tabs(&self) -> &'static [super::SettingTab] {
+        TABS
     }
 
     fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {

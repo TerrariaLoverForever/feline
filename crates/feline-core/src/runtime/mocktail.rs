@@ -225,7 +225,10 @@ mod tests {
         assert_eq!(found_mocktail.len(), 1);
         assert_eq!(found_mocktail[0].kind, InstallKind::AppImage(mocktail));
         assert_eq!(found_nightcap.len(), 1);
-        assert_eq!(found_nightcap[0].kind, InstallKind::AppImage(nightcap.clone()));
+        assert_eq!(
+            found_nightcap[0].kind,
+            InstallKind::AppImage(nightcap.clone())
+        );
         let game = LaunchTarget::Game(crate::link::GameLink::Experience { place_id: 7 });
         let plan = found_nightcap[0].plan_launch(&game).unwrap();
         assert_eq!(plan.command.get_program(), nightcap.as_os_str());

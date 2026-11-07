@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod engine;
+pub mod housekeeping;
 pub mod launch;
 pub mod link;
 pub mod monitor;
