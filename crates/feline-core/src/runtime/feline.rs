@@ -69,30 +69,6 @@ fn program(ctx: &DetectContext) -> Option<PathBuf> {
 /// runtime on its first start; see feline-runtime's prefs.rs).
 static SETTINGS: &[SettingDef] = &[
     SettingDef {
-        key: "maxFps",
-        label: "Max FPS",
-        help: "Roblox's frame rate limit. 0 = no limit.",
-        kind: Kind::Number { min: 0, max: 1000 },
-        default: Val::Int(60),
-        link: None,
-    },
-    SettingDef {
-        key: "mouseSensitivity",
-        label: "Mouse sensitivity (%)",
-        help: "How fast the camera turns with the mouse. 100 = normal; also adjustable in Roblox's own settings.",
-        kind: Kind::Number { min: 10, max: 500 },
-        default: Val::Int(100),
-        link: None,
-    },
-    SettingDef {
-        key: "graphicsQuality",
-        label: "Graphics quality",
-        help: "1 (fastest) to 21 (best). 0 = Roblox decides.",
-        kind: Kind::Number { min: 0, max: 21 },
-        default: Val::Int(0),
-        link: None,
-    },
-    SettingDef {
         key: "theme",
         label: "App theme",
         help: "",
@@ -232,13 +208,10 @@ mod tests {
     #[test]
     fn the_runtimes_settings_file_is_readable() {
         // As feline-runtime writes it (prefs.rs), with non-default values.
-        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"maxFps\": 144,\n  \"mouseSensitivity\": 250,\n  \"graphicsQuality\": 7,\n  \"theme\": \"light\",\n  \"startFullscreen\": true\n}\n";
+        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"startFullscreen\": true\n}\n";
         let file = super::super::config::ConfigFile::parse(std::path::Path::new("/x"), text)
             .expect("parses");
         let expected = [
-            serde_json::json!(144),
-            serde_json::json!(250),
-            serde_json::json!(7),
             serde_json::json!("light"),
             serde_json::json!(true),
         ];

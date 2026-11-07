@@ -25,6 +25,8 @@ struct Session {
     text: String,
     /// Ctrl+A: the whole text is selected (typing replaces it).
     all_selected: bool,
+    /// Where and how the box is shown (from its first, sized report).
+    info: BoxInfo,
 }
 
 static FOCUSED: Mutex<Option<Session>> = Mutex::new(None);
@@ -101,45 +103,87 @@ fn cursor(text: &str) -> i32 {
     i32::try_from(text.encode_utf16().count()).unwrap_or(i32::MAX)
 }
 
-/// The engine focused `text_box`, whose text is `initial`.
-pub fn focus(text_box: i64, initial: String) {
-    // A box with no size can't be seen or typed into. Roblox focuses one
-    // right after a chat message is sent; taking keys for it swallowed
-    // movement keys and the next `/` (chat needed two presses). Keys stay
-    // with the game; a visible box that was being edited is finished.
-    let invisible = INFO
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .is_some_and(|info| info.width <= 0.0 || info.height <= 0.0);
-    if invisible {
-        let same = FOCUSED
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-            .is_some_and(|s| s.text_box == text_box);
-        if !same {
-            blur();
-        }
-        return;
-    }
+/// The engine focused `text_box`, whose text is `initial` (showKeyboard;
+/// `native` is its `showNativeInput` argument).
+///
+/// Roblox reports one focus twice: the box with its position, then a
+/// "refresh" with another handle and no size, which is the handle that
+/// takes the text (mocktail's text bridge, Apache-2.0, describes the same:
+/// "a non-native refresh changes the engine handle but retains the shared
+/// keyboard view"). A size-less show while a box is being edited switches
+/// to the new handle and keeps the text and the position. Treating it as a
+/// new invisible box made chat lose its text or its focus: `/` needed two
+/// presses.
+pub fn focus(text_box: i64, initial: String, native: bool) {
+    let latest = (*INFO.lock().unwrap_or_else(|p| p.into_inner())).unwrap_or_default();
+    let usable = latest.width > 0.0 && latest.height > 0.0;
     let mut focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
-    if focused.is_none() {
+    if let Some(session) = focused.as_mut() {
+        if session.text_box == text_box {
+            // The second report of the same focus (two Java classes).
+            if usable {
+                session.info = latest;
+            }
+            return;
+        }
+        if !usable {
+            eprintln!(
+                "feline-runtime: text box {:#x} continues as {text_box:#x} (native {native})",
+                session.text_box
+            );
+            session.text_box = text_box;
+            return;
+        }
+    } else {
         OPENED_BY.store(
             LAST_GAME_KEY.load(std::sync::atomic::Ordering::Relaxed),
             std::sync::atomic::Ordering::Relaxed,
         );
-    }
-    // showKeyboard comes twice per focus (two Java classes); keep the text
-    // already typed if it's the same box.
-    if focused.as_ref().is_some_and(|s| s.text_box == text_box) {
-        return;
     }
     eprintln!("feline-runtime: text box {text_box:#x} focused");
     *focused = Some(Session {
         text_box,
         text: initial,
         all_selected: false,
+        info: latest,
     });
+}
+
+/// Roblox said the focused box's properties changed: its info is asked for
+/// again from the main loop (see `init::refresh_text_box_info`).
+static INFO_REFRESH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn request_info_refresh() {
+    if FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+        INFO_REFRESH.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+pub fn take_info_refresh() -> bool {
+    INFO_REFRESH.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The focused box takes the latest info's position, if it has a size.
+pub fn update_position() {
+    let latest = (*INFO.lock().unwrap_or_else(|p| p.into_inner())).unwrap_or_default();
+    if latest.width > 0.0
+        && latest.height > 0.0
+        && let Some(session) = FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+    {
+        session.info = latest;
+    }
+}
+
+/// The engine changed the focused box's text itself
+/// (`onLuaTextBoxChangedCallback`, e.g. chat clearing after a message):
+/// Feline's copy follows it.
+pub fn replace_text(text: String) {
+    if let Some(session) = FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+        && session.text != text
+    {
+        session.text = text;
+        session.all_selected = false;
+    }
 }
 
 /// The focused box's text and where to show it, for the overlay (the
@@ -148,8 +192,7 @@ pub fn focus(text_box: i64, initial: String) {
 pub fn shown() -> Option<(BoxInfo, String, bool)> {
     let focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
     let session = focused.as_ref()?;
-    let info = (*INFO.lock().unwrap_or_else(|p| p.into_inner()))?;
-    Some((info, session.text.clone(), session.all_selected))
+    Some((session.info, session.text.clone(), session.all_selected))
 }
 
 /// Whether the focused box is a password box (Roblox's
@@ -159,9 +202,11 @@ pub fn is_password(input_type: i32) -> bool {
 }
 
 fn focused_is_password() -> bool {
-    INFO.lock()
+    FOCUSED
+        .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .is_some_and(|info| is_password(info.input_type))
+        .as_ref()
+        .is_some_and(|s| is_password(s.info.input_type))
 }
 
 /// The desktop clipboard (kept open: on Linux, copied text is served by the
@@ -375,7 +420,7 @@ mod tests {
             meta: META_CTRL_ON,
             ..press(KEY_A, 0)
         };
-        focus(9, "old".into());
+        focus(9, "old".into(), true);
         assert!(matches!(key(ctrl_a), Some(Edit::Unchanged)));
         assert!(
             matches!(key(press(0, 'n' as i32)), Some(Edit::Changed { ref text, .. }) if text == "n")
@@ -388,10 +433,41 @@ mod tests {
     }
 
     #[test]
+    fn a_sizeless_refresh_keeps_the_text_and_takes_the_new_handle() {
+        let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+        blur();
+        let _ = take_left();
+        let sized = BoxInfo {
+            x: 38.0,
+            y: 293.0,
+            width: 387.0,
+            height: 18.0,
+            ..BoxInfo::default()
+        };
+        *INFO.lock().unwrap() = Some(sized);
+        focus(1, String::new(), true);
+        assert!(matches!(key(press(29, 'h' as i32)), Some(Edit::Changed { .. })));
+        // Roblox's second report: another handle, no size.
+        *INFO.lock().unwrap() = Some(BoxInfo::default());
+        focus(2, String::new(), false);
+        assert!(take_left().is_none(), "the first box isn't finished");
+        assert!(
+            matches!(key(press(30, 'i' as i32)), Some(Edit::Changed { text_box: 2, ref text, .. }) if text == "hi")
+        );
+        let (info, text, _) = shown().expect("still shown");
+        assert_eq!((info.x, info.width, text.as_str()), (38.0, 387.0, "hi"));
+        // The engine clears the box itself.
+        replace_text(String::new());
+        assert!(matches!(key(press(31, 'x' as i32)), Some(Edit::Changed { ref text, .. }) if text == "x"));
+        blur();
+        let _ = take_left();
+    }
+
+    #[test]
     fn typing_backspace_and_enter() {
         let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
         blur();
-        focus(7, "ab".into());
+        focus(7, "ab".into(), true);
         assert!(
             matches!(key(press(29, 'c' as i32)), Some(Edit::Changed { ref text, cursor: 3, .. }) if text == "abc")
         );

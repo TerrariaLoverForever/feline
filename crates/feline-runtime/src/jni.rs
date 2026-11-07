@@ -1087,7 +1087,8 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
     match name.as_str() {
         "showKeyboard" | "gameActivity_showKeyboard" => {
             let text_box = read();
-            let _multiline = read();
+            // showNativeInput (not "multiline", as Feline first assumed).
+            let native = read() & 0xff != 0;
             let array = read() as usize as Handle;
             let initial = bytes(array)
                 .map(|(address, len)| {
@@ -1096,9 +1097,18 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
                     String::from_utf8_lossy(raw).into_owned()
                 })
                 .unwrap_or_default();
-            crate::text::focus(text_box, initial);
+            crate::text::focus(text_box, initial, native);
         }
         "hideKeyboard" | "gameActivity_hideKeyboard" => crate::text::blur(),
+        "onLuaTextBoxPropertyChangedCallback" | "gameActivity_onLuaTextBoxPropertyChanged" => {
+            crate::text::request_info_refresh();
+        }
+        // The engine set the focused box's text itself.
+        "onLuaTextBoxChangedCallback" | "gameActivity_onLuaTextBoxChanged" => {
+            if let Some(text) = string_value(read() as usize as Handle) {
+                crate::text::replace_text(text);
+            }
+        }
         // The app's current screen ("Landing", "Login", …): the login
         // window opens on its Sign In and Create Account screens.
         "gameActivity_onAppReady" => {

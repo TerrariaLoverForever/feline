@@ -496,6 +496,7 @@ struct InputNatives {
     pass_text: Option<usize>,
     return_pressed: Option<usize>,
     release_focus: Option<usize>,
+    text_box_info: Option<usize>,
 }
 
 static INPUT_NATIVES: std::sync::OnceLock<InputNatives> = std::sync::OnceLock::new();
@@ -523,6 +524,7 @@ pub fn prepare_input_natives(elf: &Elf, image: &Image) -> Result<(), String> {
         pass_text: find(GL, "nativePassText"),
         return_pressed: find(GL, "nativeReturnPressedFromOnScreenKeyboard"),
         release_focus: find(GL, "nativeReleaseFocus"),
+        text_box_info: find(GL, "nativeGetTextBoxInfo"),
     };
     let _ = INPUT_NATIVES.set(natives);
     Ok(())
@@ -561,10 +563,7 @@ fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
                 return false;
             };
             let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-            // The movement, scaled by the mouse sensitivity setting (what
-            // turns the camera; the position stays the real one).
-            let scale = crate::prefs::get().mouse_sensitivity as f32 / 100.0;
-            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| ((x - lx) * scale, (y - ly) * scale));
+            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| (x - lx, y - ly));
             *last = Some((x, y));
             // SAFETY: nativePassMouseMove (FFFF)V: position, then movement.
             let moved: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32, f32) =
@@ -679,6 +678,27 @@ fn roblox_text(env: *mut c_void, key: crate::window::Key) -> bool {
 
 /// Passes the text of a box the engine just left as finished (see
 /// `text::blur`).
+/// When Roblox reported that the focused box changed (position, size),
+/// asks it for the box's current info (`nativeGetTextBoxInfo`, which builds
+/// a NativeTextBoxInfo that `text::set_info` reads), outside the engine's
+/// own callback, so typed text is drawn where the box now is.
+fn refresh_text_box_info(env: *mut c_void) {
+    if !crate::text::take_info_refresh() {
+        return;
+    }
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return;
+    };
+    let Some(address) = natives.text_box_info else {
+        return;
+    };
+    // SAFETY: nativeGetTextBoxInfo ()Lcom/roblox/engine/jni/model/NativeTextBoxInfo;
+    let get: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+        unsafe { std::mem::transmute(address) };
+    get(env, natives.gl_class as *mut c_void);
+    crate::text::update_position();
+}
+
 fn finish_left_text_box(env: *mut c_void) {
     let Some((text_box, text, cursor)) = crate::text::take_left() else {
         return;
@@ -1056,6 +1076,7 @@ pub fn run_window_loop(
     while std::time::Instant::now() < end {
         if let Some(env) = crate::jni::current_env() {
             finish_left_text_box(env);
+            refresh_text_box_info(env);
         }
         let mut changes = window.pump(std::time::Duration::from_millis(1));
         while let Some((at, _)) = script.peek()

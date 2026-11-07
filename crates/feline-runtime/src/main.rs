@@ -438,7 +438,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                     Some(policy) => feline_runtime::desktop::add_to_settings(&settings, &policy),
                     None => settings,
                 };
-                // The user's settings (max FPS, graphics quality).
+                // Roblox's PC in-game settings (Maximum Frame Rate).
                 let settings = feline_runtime::prefs::add_flags(
                     &settings,
                     &feline_runtime::prefs::get().flags(),
