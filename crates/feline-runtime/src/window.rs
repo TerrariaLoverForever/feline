@@ -223,6 +223,13 @@ impl ApplicationHandler for App {
         let attributes = Window::default_attributes()
             .with_title("Feline")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
+        // The launcher's app ID: the desktop shows Feline's icon (from its
+        // menu entry) instead of a generic one.
+        const APP_ID: &str = "io.github.TerrariaLoverForever.Feline";
+        let attributes =
+            winit::platform::wayland::WindowAttributesExtWayland::with_name(attributes, APP_ID, "feline");
+        let attributes =
+            winit::platform::x11::WindowAttributesExtX11::with_name(attributes, APP_ID, "feline");
         let window = match event_loop.create_window(attributes) {
             Ok(w) => w,
             Err(e) => {
