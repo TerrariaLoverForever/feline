@@ -9,7 +9,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/feline-core", "crates/feline", "crates/feline-runtime"]
+members = ["crates/feline-core", "crates/feline", "crates/feline-runtime", "crates/feline-login"]
 
 # Shared metadata. Each crate opts in with `field.workspace = true`.
 [workspace.package]

@@ -16,6 +16,7 @@ Usage: feline-runtime --check <libroblox.so>
        feline-runtime --imports <libroblox.so>
        feline-runtime --init <libroblox.so>
        feline-runtime --natives <base.apk>
+       feline-runtime --login
        feline-runtime --save-cookie   (reads the cookie from standard input)
        feline-runtime --logout
 
@@ -31,6 +32,9 @@ Usage: feline-runtime --check <libroblox.so>
          doesn't provide yet, and names it. Run it without network access,
          e.g. `unshare -rn feline-runtime --init …`.
 
+--login  opens Feline's login window (Roblox's website, feline-login) and
+         saves the session, so the app starts logged in. --init opens it by
+         itself when there's no saved session (FELINE_NO_LOGIN=1 skips that).
 --save-cookie  saves a Roblox session cookie (.ROBLOSECURITY) so the app
          starts logged in; readable only by you. --logout forgets it.
 
@@ -96,10 +100,31 @@ fn main() -> ExitCode {
             if let Err(e) = feline_runtime::assets::set_apk(&apk) {
                 eprintln!("feline-runtime: no assets: {e}");
             }
+            // Not logged in yet: the login window first (signing in inside
+            // the app doesn't work). Closing it starts the app logged out.
+            if std::env::var_os("FELINE_NO_LOGIN").is_none()
+                && let Ok(data) = runtime_data()
+                && feline_runtime::login::saved_cookie(&data).is_none()
+            {
+                match login_window(&data) {
+                    Ok(_) => eprintln!("feline-runtime: logged in"),
+                    Err(e) => eprintln!("feline-runtime: starting logged out: {e}"),
+                }
+            }
             // The image and imports must stay alive while the engine's code
             // may run, so this never returns normally.
             run_init(&data)
         }
+        [flag] if flag == "--login" => match runtime_data().and_then(|d| login_window(&d)) {
+            Ok(path) => {
+                println!("Logged in: the session is saved in {}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("feline-runtime: {e}");
+                ExitCode::FAILURE
+            }
+        },
         [flag] if flag == "--save-cookie" => {
             let mut text = String::new();
             if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
@@ -577,6 +602,35 @@ fn client_settings(runtime: &std::path::Path) -> String {
 
 /// Feline's runtime data folder: `$XDG_DATA_HOME/feline/runtime` (or
 /// `~/.local/share/feline/runtime`).
+/// Runs the login window (`feline-login`, next to this program or on the
+/// `PATH`) and saves the session cookie it hands over through a pipe.
+fn login_window(runtime_data: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    use std::io::Read;
+    let beside = std::env::current_exe()
+        .ok()
+        .map(|exe| exe.with_file_name("feline-login"))
+        .filter(|p| p.is_file());
+    let program = beside.unwrap_or_else(|| "feline-login".into());
+    let mut child = std::process::Command::new(&program)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("couldn't open the login window ({}): {e}", program.display()))?;
+    let mut text = String::new();
+    let read = child
+        .stdout
+        .take()
+        .ok_or("no pipe from the login window")?
+        .read_to_string(&mut text);
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if read.is_err() || !status.success() {
+        return Err("the login window was closed without logging in".into());
+    }
+    let saved = feline_runtime::login::save_cookie(runtime_data, &text);
+    text.clear();
+    saved
+}
+
 fn runtime_data() -> Result<std::path::PathBuf, String> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)

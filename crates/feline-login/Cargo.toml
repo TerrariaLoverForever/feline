@@ -1,0 +1,19 @@
+[package]
+name = "feline-login"
+description = "Feline's login window: log in on Roblox's website, keep only the session cookie"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Roblox's login page in a real browser engine (its security checks need
+# one). WebKitGTK 6.0 through gtk-rs; `pacman -S webkitgtk-6.0`. MIT.
+webkit6 = "0.6"
+# Only to turn on GTK 4.14 APIs, which webkit6 needs but doesn't ask for
+# itself (Arch ships GTK 4.24). Same crate webkit6 uses. MIT.
+gtk4 = { version = "0.11", features = ["v4_14"] }
