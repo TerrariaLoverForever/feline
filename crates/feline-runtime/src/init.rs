@@ -572,6 +572,26 @@ fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
     true
 }
 
+/// Sends a right (1) or middle (2) button press through Roblox's function.
+fn roblox_mouse_button(env: *mut c_void, x: f32, y: f32, button: i32, down: bool) {
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return;
+    };
+    if let Some(address) = natives.mouse_button {
+        // SAFETY: nativePassMouseButton (FFZI)V, a static JNI function.
+        let pass: extern "C" fn(*mut c_void, *mut c_void, f32, f32, u8, c_int) =
+            unsafe { std::mem::transmute(address) };
+        pass(
+            env,
+            natives.input_class as *mut c_void,
+            x.max(0.0),
+            y.max(0.0),
+            u8::from(down),
+            button,
+        );
+    }
+}
+
 /// Sends a mouse wheel step through Roblox's function (`dy` > 0 is up).
 fn roblox_wheel(env: *mut c_void, x: f32, y: f32, dy: f32) {
     if let Some(address) = INPUT_NATIVES.get().and_then(|n| n.mouse_wheel) {
@@ -767,6 +787,9 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
         }
         WindowChange::CloseRequested => {}
         WindowChange::Wheel { x, y, dy } => roblox_wheel(env, x, y, dy),
+        WindowChange::MouseButton { x, y, button, down } => {
+            roblox_mouse_button(env, x, y, button, down);
+        }
         WindowChange::Touch(touch) if crate::window::mouse_mode() && roblox_mouse(env, touch) => {
             static LOGGED: AtomicUsize = AtomicUsize::new(0);
             if touch.action != crate::window::TouchAction::Hover

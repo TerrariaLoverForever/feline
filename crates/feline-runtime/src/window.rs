@@ -84,6 +84,15 @@ pub enum WindowChange {
     CloseRequested,
     /// The left mouse button as one finger on a touch screen.
     Touch(Touch),
+    /// The right or middle mouse button (mouse mode only; the left one is a
+    /// `Touch`). `button` is Roblox's index: 1 right, 2 middle (as in
+    /// mocktail's MapSdlMouseButtonToRoblox, Apache-2.0).
+    MouseButton {
+        x: f32,
+        y: f32,
+        button: i32,
+        down: bool,
+    },
     /// A mouse wheel step at the cursor (`dy` > 0 is up).
     Wheel {
         x: f32,
@@ -140,6 +149,8 @@ struct App {
     error: Option<String>,
     cursor: (f32, f32),
     pressed: bool,
+    /// The right and middle buttons are held.
+    other_pressed: [bool; 2],
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -232,6 +243,26 @@ impl ApplicationHandler for App {
                     self.touch(TouchAction::Hover);
                 }
             }
+            // Right (turning the camera) and middle: Roblox's buttons 1, 2.
+            WindowEvent::MouseInput {
+                state,
+                button:
+                    button @ (winit::event::MouseButton::Right | winit::event::MouseButton::Middle),
+                ..
+            } if mouse_mode() => {
+                let index = usize::from(button == winit::event::MouseButton::Middle);
+                let down = state == winit::event::ElementState::Pressed;
+                if down != self.other_pressed[index] {
+                    self.other_pressed[index] = down;
+                    let (x, y) = self.cursor;
+                    self.changes.push(WindowChange::MouseButton {
+                        x,
+                        y,
+                        button: index as i32 + 1,
+                        down,
+                    });
+                }
+            }
             WindowEvent::MouseInput {
                 state,
                 button: winit::event::MouseButton::Left,
@@ -255,6 +286,17 @@ impl ApplicationHandler for App {
                 if self.pressed {
                     self.pressed = false;
                     self.touch(TouchAction::Up);
+                }
+                for (index, pressed) in self.other_pressed.iter_mut().enumerate() {
+                    if std::mem::take(pressed) {
+                        let (x, y) = self.cursor;
+                        self.changes.push(WindowChange::MouseButton {
+                            x,
+                            y,
+                            button: index as i32 + 1,
+                            down: false,
+                        });
+                    }
                 }
             }
             WindowEvent::Focused(true) => self.changes.push(WindowChange::Focus(true)),
@@ -297,6 +339,7 @@ impl DesktopWindow {
                 error: None,
                 cursor: (0.0, 0.0),
                 pressed: false,
+                other_pressed: [false; 2],
                 modifiers: Default::default(),
             },
         };

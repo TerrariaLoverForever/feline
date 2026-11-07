@@ -1045,6 +1045,37 @@ pub fn string_value(object: Handle) -> Option<String> {
     }
 }
 
+/// FMOD's Java audio output, `org.fmod.AudioDevice` (see `audio.rs`): the
+/// answer for `init`, and `write`/`close` passed on. None for other methods.
+fn audio_call(method: Handle, read: &mut dyn FnMut() -> i64) -> Option<f64> {
+    let (class, name, _) = member_of(method)?;
+    if class != "org/fmod/AudioDevice" {
+        return None;
+    }
+    match name.as_str() {
+        "init" => {
+            let (channels, rate, size, frames) =
+                (read() as i32, read() as i32, read() as i32, read() as i32);
+            Some(f64::from(u8::from(crate::audio::init(channels, rate, size, frames))))
+        }
+        "write" => {
+            let array = read() as usize as Handle;
+            let length = usize::try_from(read() as i32).unwrap_or(0);
+            if let Some((address, len)) = bytes(array) {
+                // SAFETY: a Feline byte[] of `len` bytes, alive during the call.
+                let data = unsafe { std::slice::from_raw_parts(address as *const u8, len) };
+                crate::audio::write(&data[..length.min(len)]);
+            }
+            Some(0.0)
+        }
+        "close" => {
+            crate::audio::close();
+            Some(0.0)
+        }
+        _ => None,
+    }
+}
+
 /// Java calls Feline acts on: the engine's on-screen keyboard requests, for
 /// typing into text boxes (see `text.rs`): `showKeyboard(long textBox,
 /// boolean, byte[] text, …)` and `hideKeyboard()`, on NativeGLJavaInterface
@@ -1137,6 +1168,9 @@ macro_rules! calls {
         trace(concat!("Call…", $label, "Method"));
         keyboard_call($method, $read);
         if let Some(value) = event_answer($obj, $method, $read) {
+            return FromAnswer::from_answer(value);
+        }
+        if let Some(value) = audio_call($method, $read) {
             return FromAnswer::from_answer(value);
         }
         if let Some(value) = known_number($method) {

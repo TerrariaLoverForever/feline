@@ -18,6 +18,7 @@
 // `bionic` and `dl` (Feline's implementations calling glibc) and `jni`
 // (the fake Java world the engine calls into). Each use says why it's sound.
 
+pub mod audio;
 pub mod alloc;
 pub mod assets;
 pub mod bionic;
