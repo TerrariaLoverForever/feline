@@ -268,6 +268,11 @@ pub unsafe extern "C" fn eglCreateWindowSurface(
     } else {
         let (w, h) = ours.size();
         log(format!("window surface {surface:p} ({w}x{h})"));
+        // A new surface starts with an interval of 1, even at the address
+        // of one destroyed before it (common: resizing and joining a game
+        // reused it, so vsync stayed on and games capped at the monitor's
+        // 240 Hz). Its first swap sets 0 again.
+        NO_VSYNC_SURFACE.store(0, Ordering::Relaxed);
     }
     surface
 }
