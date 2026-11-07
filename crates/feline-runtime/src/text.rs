@@ -23,6 +23,8 @@ use std::sync::Mutex;
 struct Session {
     text_box: i64,
     text: String,
+    /// Ctrl+A: the whole text is selected (typing replaces it).
+    all_selected: bool,
 }
 
 static FOCUSED: Mutex<Option<Session>> = Mutex::new(None);
@@ -111,19 +113,49 @@ pub fn focus(text_box: i64, initial: String) {
     *focused = Some(Session {
         text_box,
         text: initial,
+        all_selected: false,
     });
 }
 
 /// The focused box's text and where to show it, for the overlay (the
 /// engine doesn't draw a box's text while the keyboard edits it).
-pub fn shown() -> Option<(BoxInfo, String)> {
+/// The bool: the whole text is selected.
+pub fn shown() -> Option<(BoxInfo, String, bool)> {
     let focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
-    let text = focused.as_ref()?.text.clone();
+    let session = focused.as_ref()?;
     let info = (*INFO.lock().unwrap_or_else(|p| p.into_inner()))?;
-    Some((info, text))
+    Some((info, session.text.clone(), session.all_selected))
 }
 
-/// The engine hid the keyboard: no box is focused.
+/// Whether the focused box is a password box (Roblox's
+/// Enum.TextInputType.Password, 5): no copying out of it, bullets shown.
+pub fn is_password(input_type: i32) -> bool {
+    input_type == 5
+}
+
+fn focused_is_password() -> bool {
+    INFO.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_some_and(|info| is_password(info.input_type))
+}
+
+/// The desktop clipboard (kept open: on Linux, copied text is served by the
+/// process that copied it).
+fn clipboard<T>(use_it: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Option<T> {
+    static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.is_none() {
+        match arboard::Clipboard::new() {
+            Ok(c) => *guard = Some(c),
+            Err(e) => {
+                eprintln!("feline-runtime: no clipboard: {e}");
+                return None;
+            }
+        }
+    }
+    use_it(guard.as_mut()?)
+}
+
 /// The engine hid the keyboard (e.g. another box or button was clicked):
 /// the box's text still has to be passed as finished, as Android's keyboard
 /// does, or the engine drops it. That happens from the main loop
@@ -151,13 +183,24 @@ const DEL: i32 = 67;
 const ENTER: i32 = 66;
 const NUMPAD_ENTER: i32 = 160;
 const ESCAPE: i32 = 111;
+/// KEYCODE_A, C, V, X (with Ctrl: select all, copy, paste, cut) and
+/// KeyEvent.META_CTRL_ON.
+const KEY_A: i32 = 29;
+const KEY_C: i32 = 31;
+const KEY_V: i32 = 50;
+const KEY_X: i32 = 52;
+const META_CTRL_ON: i32 = 0x1000;
 
 /// Applies a key to the focused box. None if no box is focused or the key
 /// isn't for it (then it goes to the engine as a key press).
 pub fn key(key: crate::window::Key) -> Option<Edit> {
+    let password = focused_is_password();
     let mut guard = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
     let session = guard.as_mut()?;
-    let editing = matches!(key.code, DEL | ENTER | NUMPAD_ENTER | ESCAPE) || key.unicode > 0;
+    let ctrl = key.meta & META_CTRL_ON != 0;
+    let shortcut = ctrl && matches!(key.code, KEY_A | KEY_C | KEY_V | KEY_X);
+    let editing =
+        shortcut || matches!(key.code, DEL | ENTER | NUMPAD_ENTER | ESCAPE) || key.unicode > 0;
     if !editing {
         return None;
     }
@@ -166,6 +209,56 @@ pub fn key(key: crate::window::Key) -> Option<Edit> {
         return Some(Edit::Unchanged);
     }
     let text_box = session.text_box;
+    let changed = |session: &Session| Edit::Changed {
+        text_box,
+        text: session.text.clone(),
+        cursor: cursor(&session.text),
+    };
+    if shortcut {
+        return Some(match key.code {
+            KEY_A => {
+                session.all_selected = !session.text.is_empty();
+                Edit::Unchanged
+            }
+            KEY_C | KEY_X if password => Edit::Unchanged,
+            KEY_C => {
+                let text = session.text.clone();
+                clipboard(|c| c.set_text(text).ok());
+                Edit::Unchanged
+            }
+            KEY_X => {
+                let text = std::mem::take(&mut session.text);
+                clipboard(|c| c.set_text(text).ok());
+                session.all_selected = false;
+                changed(session)
+            }
+            _ => {
+                // Paste: one line (these boxes are single-line).
+                let Some(pasted) = clipboard(|c| c.get_text().ok()) else {
+                    return Some(Edit::Unchanged);
+                };
+                let line: String = pasted
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .collect();
+                if std::mem::take(&mut session.all_selected) {
+                    session.text.clear();
+                }
+                session.text.push_str(&line);
+                changed(session)
+            }
+        });
+    }
+    // Typing or Backspace over a selection replaces it.
+    if std::mem::take(&mut session.all_selected) && (key.code == DEL || key.unicode > 0) {
+        session.text.clear();
+        if key.code == DEL {
+            return Some(changed(session));
+        }
+    }
     Some(match key.code {
         ENTER | NUMPAD_ENTER => {
             let text = session.text.clone();
@@ -206,6 +299,9 @@ pub fn key(key: crate::window::Key) -> Option<Edit> {
 mod tests {
     use super::*;
 
+    /// The tests share the one focused box, so they take turns.
+    static TURN: Mutex<()> = Mutex::new(());
+
     fn press(code: i32, unicode: i32) -> crate::window::Key {
         crate::window::Key {
             down: true,
@@ -218,7 +314,28 @@ mod tests {
     }
 
     #[test]
+    fn select_all_then_type_or_delete() {
+        let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+        let ctrl_a = crate::window::Key {
+            meta: META_CTRL_ON,
+            ..press(KEY_A, 0)
+        };
+        focus(9, "old".into());
+        assert!(matches!(key(ctrl_a), Some(Edit::Unchanged)));
+        assert!(
+            matches!(key(press(0, 'n' as i32)), Some(Edit::Changed { ref text, .. }) if text == "n")
+        );
+        assert!(matches!(key(ctrl_a), Some(Edit::Unchanged)));
+        assert!(
+            matches!(key(press(DEL, 0)), Some(Edit::Changed { ref text, .. }) if text.is_empty())
+        );
+        blur();
+    }
+
+    #[test]
     fn typing_backspace_and_enter() {
+        let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+        blur();
         focus(7, "ab".into());
         assert!(
             matches!(key(press(29, 'c' as i32)), Some(Edit::Changed { ref text, cursor: 3, .. }) if text == "abc")

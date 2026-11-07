@@ -203,7 +203,7 @@ fn resources(gl: &Gl) -> Option<&'static Resources> {
 
 /// The last image drawn, so text is only laid out again when it changes.
 struct Image {
-    key: (String, i32, i32, i32, i32),
+    key: (String, bool, i32, i32, i32, i32),
     width: i32,
     height: i32,
     rgba: Vec<u8>,
@@ -212,15 +212,15 @@ struct Image {
 
 static LAST: Mutex<Option<Image>> = Mutex::new(None);
 
-/// Password boxes show bullets. The type is Roblox's Enum.TextInputType:
-/// Password is 5 (PasswordShown, 6, is the eye button's "show" state;
-/// Username is 7).
-fn is_password(input_type: i32) -> bool {
-    input_type == 5
-}
-
 /// Lays out `text` over `background` in a `width`×`height` RGBA image.
-fn render(info: &BoxInfo, text: &str, width: i32, height: i32, background: [u8; 3]) -> Vec<u8> {
+fn render(
+    info: &BoxInfo,
+    text: &str,
+    selected: bool,
+    width: i32,
+    height: i32,
+    background: [u8; 3],
+) -> Vec<u8> {
     let mut rgba = Vec::with_capacity((width * height * 4) as usize);
     for _ in 0..width * height {
         rgba.extend_from_slice(&[background[0], background[1], background[2], 255]);
@@ -228,7 +228,7 @@ fn render(info: &BoxInfo, text: &str, width: i32, height: i32, background: [u8; 
     let Some(font) = font() else {
         return rgba;
     };
-    let shown: String = if is_password(info.input_type) {
+    let shown: String = if crate::text::is_password(info.input_type) {
         "•".repeat(text.chars().count())
     } else {
         text.to_owned()
@@ -249,6 +249,20 @@ fn render(info: &BoxInfo, text: &str, width: i32, height: i32, background: [u8; 
         _ => free.min(0.0),
     };
     let baseline = (height as f32 + scaled.ascent() + scaled.descent()) / 2.0;
+    // Ctrl+A: the selected text gets Android's selection highlight.
+    if selected && advance > 0.0 {
+        let (from, to) = (
+            start_x.max(0.0) as i32,
+            (start_x + advance).min(width as f32) as i32,
+        );
+        let top = ((height as f32 - info.font_size * 1.2) / 2.0).max(0.0) as i32;
+        for y in top..height - top {
+            for x in from..to {
+                let at = ((y * width + x) * 4) as usize;
+                rgba[at..at + 3].copy_from_slice(&[0x33, 0x5f, 0xb0]);
+            }
+        }
+    }
     let color = info.text_color;
     let ink = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
     let mut put = |x: i32, y: i32, coverage: f32| {
@@ -289,7 +303,7 @@ fn render(info: &BoxInfo, text: &str, width: i32, height: i32, background: [u8; 
 /// Draws the focused text box's text into the frame about to be presented
 /// (`surface_width`×`surface_height` pixels). Does nothing without one.
 pub fn draw(surface_width: i32, surface_height: i32) {
-    let Some((info, text)) = crate::text::shown() else {
+    let Some((info, text, selected)) = crate::text::shown() else {
         *LAST.lock().unwrap_or_else(|p| p.into_inner()) = None;
         return;
     };
@@ -339,11 +353,11 @@ pub fn draw(surface_width: i32, surface_height: i32) {
 
         // The box's background: the frame's color just left of the text.
         let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-        let key = (text.clone(), x, y, width, height);
+        let key = (text.clone(), selected, x, y, width, height);
         if last.as_ref().is_none_or(|l| l.key != key) {
             let background = last
                 .as_ref()
-                .filter(|l| l.key.1 == x && l.key.2 == y)
+                .filter(|l| l.key.2 == x && l.key.3 == y)
                 .map_or_else(
                     || {
                         let mut px = [0u8; 4];
@@ -361,7 +375,7 @@ pub fn draw(surface_width: i32, surface_height: i32) {
                     |l| l.background,
                 );
             *last = Some(Image {
-                rgba: render(&info, &text, width, height, background),
+                rgba: render(&info, &text, selected, width, height, background),
                 key,
                 width,
                 height,
@@ -433,18 +447,5 @@ pub fn draw(surface_width: i32, surface_height: i32) {
                 (gl.enable)(c);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn password_input_types() {
-        assert!(is_password(5)); // Password
-        assert!(!is_password(6)); // PasswordShown
-        assert!(!is_password(7)); // Username
-        assert!(!is_password(0)); // Default
     }
 }
