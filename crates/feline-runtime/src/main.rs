@@ -539,7 +539,8 @@ fn run_init(data: &[u8]) -> ExitCode {
     }
 }
 
-/// The name of a running Roblox runtime (Sober, Cordial, Stud), if any:
+/// The name of a running Roblox runtime (Sober, Cordial, Stud, Tipsy,
+/// Mocktail or Nightcap), if any:
 /// test windows aren't opened then, so they can't take focus from a game.
 fn runtime_running() -> Option<String> {
     const NAMES: &[&str] = &[
@@ -549,6 +550,9 @@ fn runtime_running() -> Option<String> {
         "stud",
         "stud-runtime-bi",
         "stud-render-hos",
+        "tipsy",
+        "tipsy-gui",
+        "mocktail",
     ];
     let entries = std::fs::read_dir("/proc").ok()?;
     entries.filter_map(Result::ok).find_map(|entry| {

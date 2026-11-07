@@ -16,6 +16,9 @@ Feline starts an **external third-party runtime** that you install yourself:
 | [Sober](https://sober.vinegarhq.org) | Flathub | play, join links, edit its settings |
 | [Cordial](https://github.com/luohoa97/cordial) | Flatpak, AppImage or package | play, join links, edit its settings (incl. FPS limit and present mode), run its self-check |
 | [Stud](https://github.com/CatPieLeaf/Stud) | Flatpak, AppImage or package | play, join links, edit its settings |
+| [Tipsy](https://github.com/32bitx64bit/Tipsy) | Flatpak, AppImage or package | play, join links |
+| [Mocktail](https://github.com/komaruworld/mocktail) | Flathub, AppImage or package | play, join links |
+| [Nightcap](https://github.com/CoderDayton/nightcap) | Flatpak, AppImage or package | play, join links |
 
 Feline never picks a runtime for you, contains none of their code, and ships
 no Roblox files.

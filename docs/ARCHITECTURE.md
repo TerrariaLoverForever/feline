@@ -60,6 +60,8 @@ All Feline code is licensed GPL-3.0-or-later.
 | `presence` | Feline's Discord status: `log` (follows the Roblox client log), `roblox` (public web API lookups), `discord` (Discord's local socket protocol), `Session` (background thread per game), `service` (`feline --presence`: a helper process started next to each game, lives until the game ends, single instance through a lock file) |
 | `runtime::sober` | Optional adapter for the external Sober runtime (Flatpak only, closed source): `sober [link]` |
 | `runtime::stud` | Optional adapter for the external Stud runtime: Flatpak / `stud` on `PATH` (verified by its metainfo) / AppImage, `stud [link]` |
+| `runtime::tipsy` | Optional adapter for the external Tipsy runtime: Flatpak / `tipsy-gui` on `PATH` / AppImage, `tipsy-gui --play [link]`, `tipsy version` |
+| `runtime::mocktail` | Optional adapters for the external Mocktail and Nightcap runtimes (one code path, two backends): Flatpak / `mocktail` on `PATH` (told apart by the metainfo next to it) / AppImage, `mocktail [link]` |
 | `runtime::cordial` | Optional adapter for the external Cordial runtime: finds Flatpak / `PATH` / AppImage installs, uses `--help`, `--doctor`, `--diagnostics` |
 
 Detection never starts processes; only `Installation::version()` (when the

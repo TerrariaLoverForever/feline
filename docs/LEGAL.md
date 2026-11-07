@@ -78,6 +78,8 @@ reviewed before the first release. Not legal advice.
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |
 | Stud (optional) | AGPL-3.0 (with a section 7 permission) | **Not a dependency.** A separate program the user installs, started through its command line. Feline never downloads or bundles it |
+| Tipsy (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its command line. Feline contains none of its code |
+| Mocktail, Nightcap (optional) | Apache-2.0 | **Not a dependency.** Separate programs the user installs, started through their command line. Feline's launcher contains none of their code |
 
 ## Runtime component policy
 

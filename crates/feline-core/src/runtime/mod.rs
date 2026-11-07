@@ -20,8 +20,10 @@
 pub mod config;
 pub mod cordial;
 pub mod feline;
+pub mod mocktail;
 pub mod sober;
 pub mod stud;
+pub mod tipsy;
 
 use std::ffi::OsString;
 use std::fmt;
@@ -433,6 +435,9 @@ static BACKENDS: &[&dyn RuntimeBackend] = &[
     &cordial::CORDIAL,
     &sober::SOBER,
     &stud::STUD,
+    &tipsy::TIPSY,
+    &mocktail::MOCKTAIL,
+    &mocktail::NIGHTCAP,
 ];
 
 pub fn backends() -> &'static [&'static dyn RuntimeBackend] {
