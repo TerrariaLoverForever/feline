@@ -51,6 +51,7 @@ struct BufferAttr {
 }
 
 const PA_STREAM_PLAYBACK: c_int = 1;
+const PA_STREAM_RECORD: c_int = 2;
 const PA_SAMPLE_S16LE: c_int = 3;
 
 type New = unsafe extern "C" fn(
@@ -65,11 +66,13 @@ type New = unsafe extern "C" fn(
     *mut c_int,
 ) -> *mut c_void;
 type Write = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_int) -> c_int;
+type Read = unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *mut c_int) -> c_int;
 type Free = unsafe extern "C" fn(*mut c_void);
 
 struct Pulse {
     new: New,
     write: Write,
+    read: Read,
     free: Free,
 }
 
@@ -95,6 +98,7 @@ fn pulse() -> Option<&'static Pulse> {
                 Some(Pulse {
                     new: std::mem::transmute::<*mut c_void, New>(find("pa_simple_new")?),
                     write: std::mem::transmute::<*mut c_void, Write>(find("pa_simple_write")?),
+                    read: std::mem::transmute::<*mut c_void, Read>(find("pa_simple_read")?),
                     free: std::mem::transmute::<*mut c_void, Free>(find("pa_simple_free")?),
                 })
             }
@@ -181,6 +185,79 @@ pub fn close() {
     {
         // SAFETY: a stream from `pa_simple_new`, freed once.
         unsafe { (pulse.free)(stream as *mut c_void) };
+    }
+}
+
+/// A 16-bit stream of its own, for voice chat: recording (the microphone)
+/// or playback (other players' voices), separate from the game's sound.
+pub struct Stream {
+    pulse: &'static Pulse,
+    handle: *mut c_void,
+}
+
+// SAFETY: a pa_simple stream may be used from another thread as long as
+// only one thread uses it at a time; `Stream` is moved, not shared.
+unsafe impl Send for Stream {}
+
+impl Stream {
+    /// Opens a stream; `fragment_bytes` is how much the server hands over
+    /// (recording) or keeps queued (playback) at a time.
+    pub fn open(record: bool, rate: u32, channels: u8, fragment_bytes: u32, name: &std::ffi::CStr) -> Option<Self> {
+        let pulse = pulse()?;
+        let spec = SampleSpec {
+            format: PA_SAMPLE_S16LE,
+            rate,
+            channels,
+        };
+        let attr = BufferAttr {
+            maxlength: u32::MAX,
+            tlength: if record { u32::MAX } else { fragment_bytes * 4 },
+            prebuf: u32::MAX,
+            minreq: u32::MAX,
+            fragsize: if record { fragment_bytes } else { u32::MAX },
+        };
+        let mut error = 0;
+        // SAFETY: valid C strings, spec and attr; NULL server/device/map
+        // mean the defaults.
+        let handle = unsafe {
+            (pulse.new)(
+                std::ptr::null(),
+                c"Roblox (Feline)".as_ptr(),
+                if record { PA_STREAM_RECORD } else { PA_STREAM_PLAYBACK },
+                std::ptr::null(),
+                name.as_ptr(),
+                &spec,
+                std::ptr::null(),
+                &attr,
+                &mut error,
+            )
+        };
+        if handle.is_null() {
+            eprintln!("feline-runtime: sound: the sound server refused {name:?} (error {error})");
+            return None;
+        }
+        Some(Self { pulse, handle })
+    }
+
+    /// Fills `buffer` from the microphone (blocks until it's full).
+    pub fn read(&mut self, buffer: &mut [u8]) -> bool {
+        let mut error = 0;
+        // SAFETY: a live stream and `buffer.len()` writable bytes.
+        unsafe { (self.pulse.read)(self.handle, buffer.as_mut_ptr().cast(), buffer.len(), &mut error) == 0 }
+    }
+
+    /// Plays `data` (blocks while the stream is full).
+    pub fn write(&mut self, data: &[u8]) -> bool {
+        let mut error = 0;
+        // SAFETY: a live stream and `data.len()` readable bytes.
+        unsafe { (self.pulse.write)(self.handle, data.as_ptr().cast(), data.len(), &mut error) == 0 }
+    }
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        // SAFETY: a stream from `pa_simple_new`, freed once.
+        unsafe { (self.pulse.free)(self.handle) };
     }
 }
 

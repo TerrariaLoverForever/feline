@@ -479,6 +479,12 @@ fn run_init(data: &[u8]) -> ExitCode {
                 session_step(&elf, image, "started")?;
                 feline_runtime::init::remember_app_surface_update(&elf, image)?;
                 feline_runtime::init::remember_refresh_natives(&elf, image)?;
+                // The app's questions to the platform (microphone permission).
+                if let Some(env) = feline_runtime::jni::current_env()
+                    && let Err(e) = feline_runtime::messagebus::start(&elf, image, env)
+                {
+                    eprintln!("feline-runtime: message bus: {e}");
+                }
                 if window.is_some() {
                     let platform =
                         new_instance("com/roblox/engine/jni/model/PlatformParams") as usize;

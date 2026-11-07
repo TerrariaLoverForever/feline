@@ -33,7 +33,7 @@ use crate::stubs::Stubs;
 
 type JInt = i32;
 type JBoolean = u8;
-type Handle = *mut c_void;
+pub type Handle = *mut c_void;
 
 pub const JNI_VERSION_1_6: JInt = 0x0001_0006;
 const JNI_OK: JInt = 0;
@@ -285,6 +285,32 @@ unsafe extern "C" fn register_natives(
     JNI_OK
 }
 
+/// The function the engine registered for `class.name` (Feline calls it as
+/// Java would). `natives` and `native_functions` are filled side by side.
+pub fn registered_native_of(class: &str, name: &str) -> Option<usize> {
+    let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    let at = world
+        .natives
+        .iter()
+        .rposition(|(c, n, _)| c == class && n == name)?;
+    world.native_functions.get(at).map(|(_, f)| *f)
+}
+
+/// A `java.nio.DirectByteBuffer` over `capacity` bytes at `address`, as
+/// `ByteBuffer.allocateDirect` makes in Java.
+pub fn new_direct_buffer(address: *mut u8, capacity: usize) -> Handle {
+    add_object(Object::Buffer {
+        address: address as usize,
+        capacity: capacity as i64,
+    })
+}
+
+/// This thread's env, attaching the thread if needed (for Feline's own
+/// threads that call the engine, e.g. voice chat's audio threads).
+pub fn attach_env() -> Option<Handle> {
+    this_thread_env(true)
+}
+
 extern "C" fn unregister_natives(_env: Handle, _class: Handle) -> JInt {
     trace("UnregisterNatives");
     JNI_OK
@@ -451,6 +477,16 @@ fn construct(class: Handle, constructor: Handle, next: &mut dyn FnMut(u8) -> Arg
             .map(&mut *next)
             .collect();
         crate::text::set_info(&args);
+    }
+    // WebRTC's audio classes (voice chat), made with their native peer.
+    if crate::voice::is_voice_class(&name) && signature == "(J)V" {
+        let native = match next(b'J') {
+            Arg::Int(v) => v,
+            Arg::Float(_) => 0,
+        };
+        let object = new_instance(&name);
+        crate::voice::constructed(&name, object, native);
+        return object;
     }
     new_instance(&name)
 }
@@ -841,7 +877,7 @@ fn known_string(class: &str, member: &str) -> Option<String> {
 }
 
 /// (class, member) of a method or field ID.
-fn member_of(id: Handle) -> Option<(String, String, String)> {
+pub(crate) fn member_of(id: Handle) -> Option<(String, String, String)> {
     let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     index(id)
         .and_then(|i| world.members.get(i))
@@ -1219,6 +1255,17 @@ macro_rules! calls {
     }};
     (@body value, $obj:expr, $method:ident, $label:literal, $zero:expr, $read:expr) => {{
         trace(concat!("Call…", $label, "Method"));
+        if let Some((class, name, signature)) = member_of($method) {
+            // Roblox's message bus calling one of Feline's handlers.
+            if crate::messagebus::call($obj, &name, &signature, $read) {
+                #[allow(clippy::unused_unit)]
+                return $zero;
+            }
+            // WebRTC's audio classes (voice chat).
+            if let Some(value) = crate::voice::call(&class, $obj, &name, $read) {
+                return FromAnswer::from_answer(value);
+            }
+        }
         keyboard_call($method, $read);
         if let Some(value) = event_answer($obj, $method, $read) {
             return FromAnswer::from_answer(value);

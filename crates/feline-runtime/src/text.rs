@@ -459,6 +459,14 @@ mod tests {
             meta: META_CTRL_ON,
             ..press(KEY_A, 0)
         };
+        blur();
+        let _ = take_left();
+        // A visible box (another test may have left a size-less one).
+        *INFO.lock().unwrap() = Some(BoxInfo {
+            width: 100.0,
+            height: 20.0,
+            ..BoxInfo::default()
+        });
         focus(9, "old".into(), true);
         assert!(matches!(key(ctrl_a), Some(Edit::Unchanged)));
         assert!(
