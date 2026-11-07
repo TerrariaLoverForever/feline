@@ -217,8 +217,7 @@ fn run_init(data: &[u8]) -> ExitCode {
         // The engine's cache folder (Android's Context.getCacheDir()), set
         // right after loading the engine, before the activity starts. With
         // Roblox's real client settings the engine requires it ("Path does
-        // not exist"). Known issue: with it, the engine's HttpClient thread
-        // crashes in about half the runs (docs/runtime/M3-RESULT.md).
+        // not exist").
         if std::env::var_os("FELINE_APP").is_some() {
             let cache = runtime_data()?.join("cache");
             std::fs::create_dir_all(&cache)
@@ -230,6 +229,20 @@ fn run_init(data: &[u8]) -> ExitCode {
                 "nativeSetCacheDirectory",
                 true,
                 &[feline_runtime::jni::new_string(&cache.to_string_lossy()) as usize],
+            )?;
+            // The device's details (Android's Java code passes a
+            // DeviceParams here at startup). Without it the Lua app sees no
+            // OS version and shows "Roblox no longer supports Android 6 and 7".
+            feline_runtime::init::call_java_native(
+                &elf,
+                image,
+                "com/roblox/engine/jni/NativeSettingsInterface",
+                "nativeSetDeviceInfo",
+                true,
+                &[
+                    feline_runtime::jni::new_instance("com/roblox/engine/jni/model/DeviceParams")
+                        as usize,
+                ],
             )?;
             // FELINE_STORAGE_INIT=1 (experiment): LocalStorageManager's
             // initStorageManagerNativeV3(AssetManager, String, String), here
@@ -543,7 +556,12 @@ fn describe_device() {
         &user_agent,
     );
     for (field, value) in [
-        ("osVersion", "13"),
+        // The API level, not the version name: the engine reads it as a
+        // number (strtol) and compares it with API levels, e.g.
+        // DFStringAndroidDeprecationMinUpgrade = 26 and
+        // FIntGraphicsVulkanMinAndroidVersion = 25. "13" read as API 13
+        // gave "Roblox no longer supports Android 6 and 7" and no Vulkan.
+        ("osVersion", "33"),
         ("manufacturer", "Feline"),
         ("deviceName", "Linux"),
         ("deviceSku", "feline"),
@@ -551,8 +569,22 @@ fn describe_device() {
         ("appBuildVariant", "release"),
         ("appVersion", app_version.as_str()),
     ] {
-        feline_runtime::jni::set_known_string(
+        // The same details twice: DeviceStaticParams (read when the app
+        // starts) and DeviceParams (nativeSetDeviceInfo).
+        for class in [
             "com/roblox/engine/jni/model/DeviceStaticParams",
+            "com/roblox/engine/jni/model/DeviceParams",
+        ] {
+            feline_runtime::jni::set_known_string(class, field, value);
+        }
+    }
+    for (field, value) in [
+        ("country", "US"),
+        ("displayResolution", "1920x1080"),
+        ("networkType", "WIFI"),
+    ] {
+        feline_runtime::jni::set_known_string(
+            "com/roblox/engine/jni/model/DeviceParams",
             field,
             value,
         );

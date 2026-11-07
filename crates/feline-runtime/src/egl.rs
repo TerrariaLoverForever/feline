@@ -28,7 +28,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::window::{NativeHandles, NativeWindow, native_window};
 
@@ -65,6 +65,7 @@ struct Host {
     get_proc_address: unsafe extern "C" fn(*const c_char) -> *mut c_void,
     get_error: unsafe extern "C" fn() -> EglInt,
     swap_buffers: unsafe extern "C" fn(EglDisplay, EglSurface) -> EglBoolean,
+    swap_interval: unsafe extern "C" fn(EglDisplay, EglInt) -> EglBoolean,
     wl_egl_window_create: Option<unsafe extern "C" fn(*mut c_void, i32, i32) -> *mut c_void>,
     wl_egl_window_resize: Option<unsafe extern "C" fn(*mut c_void, i32, i32, i32, i32)>,
 }
@@ -110,6 +111,7 @@ fn host() -> Option<&'static Host> {
                 get_proc_address: function(symbol(egl, "eglGetProcAddress"))?,
                 get_error: function(symbol(egl, "eglGetError"))?,
                 swap_buffers: function(symbol(egl, "eglSwapBuffers"))?,
+                swap_interval: function(symbol(egl, "eglSwapInterval"))?,
                 wl_egl_window_create: function(symbol(wayland, "wl_egl_window_create")),
                 wl_egl_window_resize: function(symbol(wayland, "wl_egl_window_resize")),
             })
@@ -305,6 +307,12 @@ pub fn frames() -> usize {
 /// Called by the engine like EGL's.
 pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface) -> EglBoolean {
     let Some(host) = host() else { return 0 };
+    // Before the first frame: no waiting for the compositor (see
+    // `eglSwapInterval`), even if the engine never sets an interval.
+    if !NO_VSYNC_SET.swap(true, Ordering::Relaxed) {
+        // SAFETY: the engine's display, with its context current here.
+        unsafe { (host.swap_interval)(display, 0) };
+    }
     // SAFETY: forwarding the engine's own handles.
     let ok = unsafe { (host.swap_buffers)(display, surface) };
     let n = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
@@ -319,6 +327,29 @@ pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface
         }
     }
     ok
+}
+
+static NO_VSYNC_SET: AtomicBool = AtomicBool::new(false);
+
+/// `EGLBoolean eglSwapInterval(dpy, interval)`: always 0 on the host. On
+/// Wayland, with an interval of 1 `eglSwapBuffers` waits for the
+/// compositor's frame callback, which KWin (and others) stop sending while
+/// the window is hidden behind others or minimized: the game slowed to a few
+/// frames per second when you switched windows. The engine limits its own
+/// frame rate, so it doesn't need the driver to.
+///
+/// # Safety
+/// Called by the engine like EGL's.
+pub unsafe extern "C" fn eglSwapInterval(display: EglDisplay, interval: EglInt) -> EglBoolean {
+    let Some(host) = host() else { return 0 };
+    static LOGGED: AtomicBool = AtomicBool::new(false);
+    if !LOGGED.swap(true, Ordering::Relaxed) {
+        log(format!(
+            "swap interval {interval} requested, using 0 (no compositor waits)"
+        ));
+    }
+    // SAFETY: the engine's display.
+    unsafe { (host.swap_interval)(display, 0) }
 }
 
 /// Called when the window is resized: the Wayland EGL window follows
@@ -352,6 +383,9 @@ pub fn implementation(name: &str) -> Option<u64> {
                     *const NativeWindow,
                     *const EglInt,
                 ) -> EglSurface as usize
+        }
+        "eglSwapInterval" => {
+            eglSwapInterval as unsafe extern "C" fn(EglDisplay, EglInt) -> EglBoolean as usize
         }
         "eglSwapBuffers" => {
             eglSwapBuffers as unsafe extern "C" fn(EglDisplay, EglSurface) -> EglBoolean as usize

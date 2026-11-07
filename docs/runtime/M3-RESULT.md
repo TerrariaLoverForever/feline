@@ -209,6 +209,19 @@ network fail to load, as expected offline.
   `malloc` (offset 0x1e15298 in 2.742.0.1059, checked against its code and
   `operator new`'s call before use). Before: 6 of 6 runs crashed on Arch;
   after: 0 of 6.
+- **Fixed: "Roblox no longer supports Android 6 and 7".** The engine reads
+  `DeviceStaticParams.osVersion` as an API level (strtol, compared with
+  `DFStringAndroidDeprecationMinUpgrade = 26` and
+  `FIntGraphicsVulkanMinAndroidVersion = 25`), so it's `"33"`, not `"13"`.
+  This also ends "Android version is too old to activate Vulkan" (the engine
+  now looks for `libvulkan.so`, which Feline doesn't provide yet). The
+  runtime also calls `NativeSettingsInterface.nativeSetDeviceInfo` with a
+  `DeviceParams` (same details), as Android's Java code does at startup.
+- Desktop behaviour: losing window focus isn't passed on to the engine, and
+  `eglSwapInterval` is always 0 (no waits for the compositor's frame
+  callbacks while the window is hidden). Neither changed the frame rate:
+  about 15 per second, with the `Main` render thread never sleeping
+  (about 65 ms of CPU per frame). Not yet explained.
 - Diagnostics added: crash reports name the crashing thread and, outside
   the engine, the host library and symbol; the call trace records the
   calling thread and shows the crashing thread's own last calls.

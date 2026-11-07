@@ -229,13 +229,17 @@ impl ApplicationHandler for App {
                     });
                 }
             }
-            WindowEvent::Focused(false) if self.pressed => {
-                // Don't leave a finger "down" when the window loses focus.
-                self.pressed = false;
-                self.touch(TouchAction::Up);
-                self.changes.push(WindowChange::Focus(false));
+            // Losing focus isn't passed on: Roblox's Android code lowers the
+            // frame rate for an unfocused window (a phone app in the
+            // background), which a desktop window shouldn't do. Only the
+            // finger is lifted, so it isn't left "down".
+            WindowEvent::Focused(false) => {
+                if self.pressed {
+                    self.pressed = false;
+                    self.touch(TouchAction::Up);
+                }
             }
-            WindowEvent::Focused(focused) => self.changes.push(WindowChange::Focus(focused)),
+            WindowEvent::Focused(true) => self.changes.push(WindowChange::Focus(true)),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = crate::keys::android_key(&event, self.modifiers) {
