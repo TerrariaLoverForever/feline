@@ -383,6 +383,11 @@ pub fn request_screenshot(path: &str) {
     *SCREENSHOT.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.to_owned());
 }
 
+/// The pending screenshot's path, taken (for Vulkan's presents).
+pub fn take_screenshot_request() -> Option<String> {
+    SCREENSHOT.lock().unwrap_or_else(|p| p.into_inner()).take()
+}
+
 /// Saves the current back buffer (before it's presented) as a binary PPM.
 fn save_screenshot(path: &str) {
     type ReadPixels = unsafe extern "C" fn(i32, i32, i32, i32, u32, u32, *mut c_void);

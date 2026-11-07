@@ -1249,6 +1249,7 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "arboard",
+ "ash",
  "gilrs",
  "libc",
  "miniz_oxide 0.9.1",

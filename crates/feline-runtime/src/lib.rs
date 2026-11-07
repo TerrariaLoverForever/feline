@@ -55,4 +55,6 @@ pub mod text;
 pub mod trace;
 pub mod versions;
 pub mod voice;
+pub mod vkoverlay;
+pub mod vulkan;
 pub mod window;

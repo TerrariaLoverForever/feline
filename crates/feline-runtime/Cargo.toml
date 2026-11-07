@@ -41,3 +41,7 @@ serde_json = "1"
 # Controllers (gamepads): the desktop's input devices with SDL's controller
 # database for button names. MIT OR Apache-2.0.
 gilrs = "0.11"
+# Vulkan types and function tables (no loader of its own: Feline passes
+# the desktop driver's entry point), for drawing typed text into Vulkan
+# frames. MIT OR Apache-2.0.
+ash = { version = "0.38", default-features = false, features = ["std"] }

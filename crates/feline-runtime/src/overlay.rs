@@ -213,7 +213,7 @@ struct Image {
 static LAST: Mutex<Option<Image>> = Mutex::new(None);
 
 /// Lays out `text` over `background` in a `width`×`height` RGBA image.
-fn render(
+pub(crate) fn render(
     info: &BoxInfo,
     text: &str,
     selected: bool,

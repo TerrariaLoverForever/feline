@@ -10,6 +10,7 @@
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
 //! | `fpsLimit` | 0: Roblox's in-game Maximum Frame Rate decides; otherwise that frame rate (e.g. 600), set as Roblox's cap at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
+//! | `renderer` | `"opengl"` (default) or `"vulkan"` (experimental, see vulkan.rs) |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
 //! in-game settings (Esc → Settings), as on PC; see [`Prefs::flags`].
@@ -25,6 +26,8 @@ pub struct Prefs {
     /// Frames per second to cap at; 0 leaves it to Roblox's own setting.
     pub fps_limit: u32,
     pub start_fullscreen: bool,
+    /// "opengl" or "vulkan".
+    pub renderer: String,
 }
 
 impl Default for Prefs {
@@ -33,6 +36,7 @@ impl Default for Prefs {
             theme: "dark".into(),
             fps_limit: 0,
             start_fullscreen: false,
+            renderer: "opengl".into(),
         }
     }
 }
@@ -69,6 +73,10 @@ impl Prefs {
                 .get("startFullscreen")
                 .and_then(Value::as_bool)
                 .unwrap_or(d.start_fullscreen),
+            renderer: match json.get("renderer").and_then(Value::as_str) {
+                Some(r @ ("opengl" | "vulkan")) => r.to_owned(),
+                _ => d.renderer,
+            },
         }
     }
 
@@ -77,6 +85,7 @@ impl Prefs {
             "theme": self.theme,
             "fpsLimit": self.fps_limit,
             "startFullscreen": self.start_fullscreen,
+            "renderer": self.renderer,
         })
     }
 

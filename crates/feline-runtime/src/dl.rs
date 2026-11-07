@@ -84,6 +84,13 @@ fn system_handle() -> *mut c_void {
     std::ptr::from_ref(&SYSTEM_HANDLE).cast_mut().cast()
 }
 
+/// The handle for `libvulkan.so`.
+static VULKAN_HANDLE: u8 = 0;
+
+fn vulkan_handle() -> *mut c_void {
+    std::ptr::from_ref(&VULKAN_HANDLE).cast_mut().cast()
+}
+
 /// # Safety
 /// `name` is NULL or a valid C string.
 pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_void {
@@ -101,6 +108,11 @@ pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_vo
         eprintln!("feline-runtime: the engine opened `{name}` (Feline's)");
         return system_handle();
     }
+    // Vulkan, on the desktop's driver (see vulkan.rs; FELINE_VULKAN=1).
+    if (base == "libvulkan.so" || base == "libvulkan.so.1") && crate::vulkan::enabled() {
+        eprintln!("feline-runtime: the engine opened `{name}` (Feline's, on the desktop's Vulkan)");
+        return vulkan_handle();
+    }
     eprintln!(
         "feline-runtime: the engine asked for the library `{name}`, which Feline doesn't provide yet"
     );
@@ -113,6 +125,11 @@ pub unsafe extern "C" fn dlopen(name: *const c_char, _flags: c_int) -> *mut c_vo
 pub unsafe extern "C" fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void {
     // SAFETY: the caller passes a valid C string.
     let symbol = unsafe { CStr::from_ptr(symbol) }.to_string_lossy();
+    if handle == vulkan_handle()
+        && let Some(address) = crate::vulkan::symbol(&symbol)
+    {
+        return address as *mut c_void;
+    }
     if handle == system_handle()
         && let Some(address) = crate::imports::resolve_function(&symbol, &crate::host::Host::open())
     {

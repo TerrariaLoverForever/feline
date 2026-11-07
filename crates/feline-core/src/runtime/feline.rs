@@ -94,6 +94,23 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
+        key: "renderer",
+        label: "Graphics",
+        help: "Vulkan is experimental: if the game doesn't start or looks wrong, switch back to OpenGL.",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "opengl",
+                label: "OpenGL",
+            },
+            Choice {
+                value: "vulkan",
+                label: "Vulkan (experimental)",
+            },
+        ]),
+        default: Val::Str("opengl"),
+        link: None,
+    },
+    SettingDef {
         key: "startFullscreen",
         label: "Start in fullscreen",
         help: "F11 switches fullscreen on and off while playing.",
@@ -223,12 +240,13 @@ mod tests {
     #[test]
     fn the_runtimes_settings_file_is_readable() {
         // As feline-runtime writes it (prefs.rs), with non-default values.
-        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"fpsLimit\": 600,\n  \"startFullscreen\": true\n}\n";
+        let text = "// Feline runtime settings. Feline's launcher edits this file.\n{\n  \"theme\": \"light\",\n  \"fpsLimit\": 600,\n  \"renderer\": \"vulkan\",\n  \"startFullscreen\": true\n}\n";
         let file = super::super::config::ConfigFile::parse(std::path::Path::new("/x"), text)
             .expect("parses");
         let expected = [
             serde_json::json!("light"),
             serde_json::json!(600),
+            serde_json::json!("vulkan"),
             serde_json::json!(true),
         ];
         for (def, value) in SETTINGS.iter().zip(expected) {
