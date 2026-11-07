@@ -88,7 +88,7 @@ static SETTINGS: &[SettingDef] = &[
     SettingDef {
         key: "unlimitedFps",
         label: "Unlimited FPS",
-        help: "Lifts Roblox's frame rate limits (also its 240 FPS ceiling). Roblox's in-game Maximum Frame Rate still applies: set it to its highest.",
+        help: "Sets Roblox's in-game Maximum Frame Rate to no limit each time it starts (past Roblox's usual 240). Turn this off to pick a limit in the game again.",
         kind: Kind::Toggle,
         default: Val::Bool(false),
         link: None,

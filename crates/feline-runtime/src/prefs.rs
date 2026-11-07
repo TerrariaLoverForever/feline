@@ -8,7 +8,7 @@
 //! | Key | What it does |
 //! |---|---|
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
-//! | `unlimitedFps` | lift Roblox's frame-rate target and its 240 FPS ceiling |
+//! | `unlimitedFps` | set Roblox's in-game Maximum Frame Rate to no limit at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
@@ -79,16 +79,50 @@ impl Prefs {
     /// "Maximum Frame Rate" setting, which Roblox turns on for PC
     /// (`FFlagGameBasicSettingsFramerateCap5` is True in the PC client's
     /// settings and absent from Android's).
-    /// With `unlimitedFps`, also no frame-rate target and no 240 ceiling
-    /// (`DFIntTaskSchedulerTargetFps`, `FFlagTaskSchedulerLimitTargetFpsTo2402`).
+    /// (`unlimitedFps` isn't a flag: Roblox stops `DFIntTaskSchedulerTargetFps`
+    /// at 240. See [`write_unlimited_framerate_cap`].)
     pub fn flags(&self) -> Vec<(&'static str, String)> {
-        let mut flags = vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())];
-        if self.unlimited_fps {
-            flags.push(("DFIntTaskSchedulerTargetFps", "9999".to_owned()));
-            flags.push(("FFlagTaskSchedulerLimitTargetFpsTo2402", "False".to_owned()));
-        }
-        flags
+        vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())]
     }
+}
+
+/// What Roblox's `FramerateCap` setting holds for "no limit", as Mocktail
+/// and Nightcap write it (<https://github.com/CoderDayton/nightcap>,
+/// Apache-2.0, docs/PERFORMANCE.md).
+const UNLIMITED_FRAMERATE_CAP: i32 = 9999;
+
+/// Sets Roblox's own in-game Maximum Frame Rate (`FramerateCap` in
+/// `GlobalBasicSettings_13.xml`) to no limit, before the engine reads it.
+/// Does nothing if Roblox hasn't written the file yet (first start).
+pub fn write_unlimited_framerate_cap(app_data: &std::path::Path) {
+    let file = app_data.join("GlobalBasicSettings_13.xml");
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return;
+    };
+    if let Some(updated) = set_framerate_cap(&text, UNLIMITED_FRAMERATE_CAP)
+        && updated != text
+    {
+        match std::fs::write(&file, updated) {
+            Ok(()) => eprintln!("feline-runtime: Roblox's frame rate cap set to unlimited"),
+            Err(e) => eprintln!("feline-runtime: couldn't write {}: {e}", file.display()),
+        }
+    }
+}
+
+/// `text` (Roblox's settings XML) with `FramerateCap` set to `fps`, added
+/// to `<Properties>` if missing. None if the file isn't as expected.
+fn set_framerate_cap(text: &str, fps: i32) -> Option<String> {
+    const OPEN: &str = "<int name=\"FramerateCap\">";
+    let mut text = text.to_owned();
+    if let Some(found) = text.find(OPEN) {
+        let start = found + OPEN.len();
+        let end = start + text[start..].find("</int>")?;
+        text.replace_range(start..end, &fps.to_string());
+    } else {
+        let at = text.find("<Properties>")? + "<Properties>".len();
+        text.insert_str(at, &format!("\n\t\t{OPEN}{fps}</int>"));
+    }
+    Some(text)
 }
 
 /// Settings earlier versions had, now Roblox's own in-game ones.
@@ -158,6 +192,15 @@ pub fn add_flags(settings: &str, flags: &[(&'static str, String)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn framerate_cap_is_replaced_or_added() {
+        let set = "<roblox><Item><Properties>\n\t\t<int name=\"FramerateCap\">-1</int>\n</Properties></Item></roblox>";
+        assert!(set_framerate_cap(set, 9999).unwrap().contains("<int name=\"FramerateCap\">9999</int>"));
+        let unset = "<roblox><Item><Properties>\n</Properties></Item></roblox>";
+        assert!(set_framerate_cap(unset, 9999).unwrap().contains("<Properties>\n\t\t<int name=\"FramerateCap\">9999</int>"));
+        assert_eq!(set_framerate_cap("garbage", 9999), None);
+    }
 
     #[test]
     fn values_and_flags() {

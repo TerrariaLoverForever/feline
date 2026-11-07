@@ -425,6 +425,19 @@ fn run_init(data: &[u8]) -> ExitCode {
                     "getTheme",
                     &feline_runtime::prefs::get().theme,
                 );
+                // The platform games are told, as the Android app's Java side
+                // answers (empty showed as "unknown" in games).
+                feline_runtime::jni::set_known_string(
+                    "com/roblox/engine/jni/user/NativeUserJavaInterface",
+                    "getPlatformName",
+                    "Android",
+                );
+                // Unlimited FPS: Roblox's own Maximum Frame Rate setting.
+                if feline_runtime::prefs::get().unlimited_fps {
+                    feline_runtime::prefs::write_unlimited_framerate_cap(
+                        &data.join("feline/runtime/files/appData"),
+                    );
+                }
                 call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;
                 let empty = || new_string("") as usize;
                 // Client settings ("FastFlags") as JSON. The engine accepts an

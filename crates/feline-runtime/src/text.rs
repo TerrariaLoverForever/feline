@@ -144,11 +144,6 @@ pub fn focus(text_box: i64, initial: String, native: bool) {
         // game (taking them blocked movement and the next `/`).
         eprintln!("feline-runtime: text box {text_box:#x} has no size; keys stay with the game");
         return;
-    } else {
-        OPENED_BY.store(
-            LAST_GAME_KEY.load(std::sync::atomic::Ordering::Relaxed),
-            std::sync::atomic::Ordering::Relaxed,
-        );
     }
     eprintln!("feline-runtime: text box {text_box:#x} focused");
     *focused = Some(Session {
@@ -238,32 +233,26 @@ fn clipboard<T>(use_it: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Op
     use_it(guard.as_mut()?)
 }
 
-/// The last key pressed down in the game (Android key code; 0 = none since
-/// it was released), and the one whose press opened the focused box.
-static LAST_GAME_KEY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-static OPENED_BY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// Keys whose press went to the game and that haven't been released yet
+/// (Android key codes).
+static GAME_DOWN: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
-/// Whether a key event for the game should really go to it. A key whose
-/// press opened a text box (`/` for chat) has its release kept from the
-/// game: on Android the on-screen keyboard owns keys once a box has focus.
-/// Sending that release made Roblox move the focus away from chat at once,
-/// so `/` needed a second press.
+fn went_down_in_game(code: i32) -> bool {
+    GAME_DOWN.lock().unwrap_or_else(|p| p.into_inner()).contains(&code)
+}
+
+/// Notes a key event that goes to the game. Every press the game got gets
+/// its release too, even if a text box took focus in between (`/` opening
+/// chat): keeping the release from it left Roblox thinking `/` was still
+/// held, so the next `/` did nothing and it needed a second press.
 pub fn game_key(key: crate::window::Key) -> bool {
-    use std::sync::atomic::Ordering::Relaxed;
+    let mut down = GAME_DOWN.lock().unwrap_or_else(|p| p.into_inner());
     if key.down {
-        if !key.repeat {
-            LAST_GAME_KEY.store(key.code, Relaxed);
+        if !down.contains(&key.code) {
+            down.push(key.code);
         }
-        return true;
-    }
-    if LAST_GAME_KEY.load(Relaxed) == key.code {
-        LAST_GAME_KEY.store(0, Relaxed);
-    }
-    let focused = FOCUSED.lock().unwrap_or_else(|p| p.into_inner()).is_some();
-    if focused && OPENED_BY.load(Relaxed) == key.code {
-        OPENED_BY.store(0, Relaxed);
-        eprintln!("feline-runtime: key {} opened the text box; its release stays with it", key.code);
-        return false;
+    } else {
+        down.retain(|&c| c != key.code);
     }
     true
 }
@@ -311,6 +300,10 @@ const META_CTRL_ON: i32 = 0x1000;
 /// Applies a key to the focused box. None if no box is focused or the key
 /// isn't for it (then it goes to the engine as a key press).
 pub fn key(key: crate::window::Key) -> Option<Edit> {
+    // The release of a key the game got the press of goes to the game.
+    if !key.down && went_down_in_game(key.code) {
+        return None;
+    }
     let password = focused_is_password();
     let mut guard = FOCUSED.lock().unwrap_or_else(|p| p.into_inner());
     let session = guard.as_mut()?;
@@ -428,6 +421,35 @@ mod tests {
             unicode,
             repeat: false,
         }
+    }
+
+    #[test]
+    fn the_release_of_a_key_that_opened_a_box_goes_to_the_game() {
+        let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+        blur();
+        let _ = take_left();
+        const SLASH: i32 = 76;
+        // `/` goes down in the game, which opens chat.
+        assert!(key(press(SLASH, '/' as i32)).is_none());
+        assert!(game_key(press(SLASH, '/' as i32)));
+        *INFO.lock().unwrap() = Some(BoxInfo {
+            width: 100.0,
+            height: 20.0,
+            ..BoxInfo::default()
+        });
+        focus(9, String::new(), true);
+        // Its release isn't typed into chat: it goes to the game.
+        let release = crate::window::Key {
+            down: false,
+            ..press(SLASH, '/' as i32)
+        };
+        assert!(key(release).is_none());
+        assert!(game_key(release));
+        // A `/` typed while chat is open belongs to chat, both halves.
+        assert!(key(press(SLASH, '/' as i32)).is_some());
+        assert!(key(release).is_some());
+        blur();
+        let _ = take_left();
     }
 
     #[test]
