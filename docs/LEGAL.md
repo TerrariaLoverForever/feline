@@ -74,6 +74,7 @@ reviewed before the first release. Not legal advice.
 | [miniz_oxide](https://github.com/Frommi/miniz_oxide) 0.9 (runtime only: unpacking deflated APK assets; + `adler2`) | MIT OR Zlib OR Apache-2.0 | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [libc](https://github.com/rust-lang/libc) 0.2 (runtime only: `dlopen`/`dlsym`) | MIT OR Apache-2.0 | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [rustix](https://github.com/bytecodealliance/rustix) 1.1 (runtime only: `mm`, `param`; + `linux-raw-sys`, `bitflags`) | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
+| [gilrs](https://gitlab.com/gilrs-project/gilrs) 0.11 (runtime only: controllers; + `gilrs-core`, `vec_map`, `inotify`/`inotify-sys` (ISC), `objc2-io-kit` (macOS only, not built on Linux)) | MIT OR Apache-2.0 (its bundled SDL controller database: zlib) | Compiled into `feline-runtime`. Compatible with GPL-3.0 |
 | [Slint](https://slint.dev) 1.18 (GUI) | `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0` | Used under **GPL-3.0-only**. Feline's *source* stays GPL-3.0-or-later; *binaries* that include Slint are effectively GPL-3.0-only |
 | Cordial (optional) | GPL-3.0-or-later | **Not a dependency.** A separate program the user installs, started through its public command line. Feline contains none of its code |
 | Sober (optional) | Proprietary (closed source) | **Not a dependency.** Only an already-installed Flatpak is started; Feline never downloads or redistributes it |

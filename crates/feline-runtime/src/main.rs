@@ -479,6 +479,9 @@ fn run_init(data: &[u8]) -> ExitCode {
                 session_step(&elf, image, "started")?;
                 feline_runtime::init::remember_app_surface_update(&elf, image)?;
                 feline_runtime::init::remember_refresh_natives(&elf, image)?;
+                if let Err(e) = feline_runtime::gamepad::remember_natives(&elf, image) {
+                    eprintln!("feline-runtime: no controllers: {e}");
+                }
                 // The app's questions to the platform (microphone permission).
                 if let Some(env) = feline_runtime::jni::current_env()
                     && let Err(e) = feline_runtime::messagebus::start(&elf, image, env)

@@ -38,3 +38,6 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 # MIT OR Apache-2.0.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 serde_json = "1"
+# Controllers (gamepads): the desktop's input devices with SDL's controller
+# database for button names. MIT OR Apache-2.0.
+gilrs = "0.11"

@@ -29,6 +29,7 @@ pub mod dl;
 pub mod egl;
 pub mod elf;
 pub mod files;
+pub mod gamepad;
 pub mod host;
 pub mod imports;
 pub mod init;

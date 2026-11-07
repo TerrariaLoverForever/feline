@@ -1078,6 +1078,7 @@ pub fn run_window_loop(
             finish_left_text_box(env);
             refresh_text_box_info(env);
             pass_refresh_rates(env);
+            crate::gamepad::poll(env);
         }
         let mut changes = window.pump(std::time::Duration::from_millis(1));
         while let Some((at, _)) = script.peek()

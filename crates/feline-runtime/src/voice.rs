@@ -259,8 +259,10 @@ fn start(record: bool, object: Handle) -> bool {
                         // Once a second: how loud the microphone was (for
                         // checking it works, not what was said).
                         loudest = block
-                            .chunks_exact(2)
-                            .map(|s| i32::from(i16::from_le_bytes([s[0], s[1]])).abs())
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|s| i32::from(i16::from_le_bytes(*s)).abs())
                             .fold(loudest, i32::max);
                         blocks += 1;
                         if blocks == 100 {
