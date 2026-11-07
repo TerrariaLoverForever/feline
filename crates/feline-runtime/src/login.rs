@@ -207,6 +207,64 @@ fn restart() {
     eprintln!("feline-runtime: couldn't restart: {error}");
 }
 
+/// Whose login the saved session is (Roblox's answer to "who am I").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Account {
+    pub id: u64,
+    pub name: String,
+    pub display_name: String,
+}
+
+/// Why [`account`] has no answer.
+#[derive(Debug)]
+pub enum AccountError {
+    /// Roblox doesn't accept the session any more (logged out elsewhere,
+    /// expired): it's no use keeping it.
+    Expired,
+    /// Couldn't ask (offline, Roblox down, unexpected answer).
+    Other(String),
+}
+
+const AUTHENTICATED_URL: &str = "https://users.roblox.com/v1/users/authenticated";
+
+/// Asks Roblox which account `cookie` (`.ROBLOSECURITY=…`) logs in to.
+pub fn account(cookie: &str) -> Result<Account, AccountError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut response = agent
+        .get(AUTHENTICATED_URL)
+        .header("Cookie", cookie)
+        .call()
+        .map_err(|e| AccountError::Other(e.to_string()))?;
+    match response.status().as_u16() {
+        200 => {}
+        401 | 403 => return Err(AccountError::Expired),
+        status => return Err(AccountError::Other(format!("Roblox answered {status}"))),
+    }
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| AccountError::Other(e.to_string()))?;
+    parse_account(&body).ok_or_else(|| AccountError::Other("unexpected answer".into()))
+}
+
+/// `{"id":1,"name":"…","displayName":"…"}`.
+fn parse_account(json: &str) -> Option<Account> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    Some(Account {
+        id: value.get("id")?.as_u64().filter(|&id| id > 0)?,
+        name: value.get("name")?.as_str()?.to_owned(),
+        display_name: value
+            .get("displayName")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+    })
+}
+
 /// Forgets the login (logging out of Feline).
 pub fn forget_cookie(runtime_data: &Path) {
     let _ = std::fs::remove_file(cookie_path(runtime_data));
@@ -215,6 +273,20 @@ pub fn forget_cookie(runtime_data: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_answers() {
+        assert_eq!(
+            parse_account(r#"{"id":123456789,"name":"Kitty","displayName":"Kit"}"#),
+            Some(Account {
+                id: 123456789,
+                name: "Kitty".into(),
+                display_name: "Kit".into()
+            })
+        );
+        assert_eq!(parse_account(r#"{"errors":[{"code":0}]}"#), None);
+        assert_eq!(parse_account(r#"{"id":0,"name":"x"}"#), None);
+    }
 
     #[test]
     fn login_screens() {

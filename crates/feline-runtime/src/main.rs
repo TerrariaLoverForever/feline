@@ -312,22 +312,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                         as usize,
                 ],
             )?;
-            // The saved login (see login.rs), as the Android app's Java code
-            // hands it over: the cookie for Roblox's website.
-            if let Some(cookie) = feline_runtime::login::saved_cookie(&runtime_data()?) {
-                feline_runtime::init::call_java_native(
-                    &elf,
-                    image,
-                    "com/roblox/engine/jni/NativeSettingsInterface",
-                    "nativeSetMultipleCookies",
-                    true,
-                    &[
-                        feline_runtime::jni::new_string("https://www.roblox.com/") as usize,
-                        feline_runtime::jni::new_string(&cookie) as usize,
-                    ],
-                )?;
-                eprintln!("feline-runtime: logged in with the saved session");
-            }
+            session_step(&elf, image, "early")?;
             // Roblox's own input functions, for the window's mouse and keys.
             feline_runtime::init::prepare_input_natives(&elf, image)?;
             // FELINE_STORAGE_INIT=1 (experiment): LocalStorageManager's
@@ -462,6 +447,7 @@ fn run_init(data: &[u8]) -> ExitCode {
                 call_gl_native(&elf, image, "nativeAppBridgeV2InitWithParams", &[init])?;
                 let start = new_instance("com/roblox/engine/jni/autovalue/StartAppParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2StartAppWithParams", &[start])?;
+                session_step(&elf, image, "started")?;
                 if window.is_some() {
                     let platform =
                         new_instance("com/roblox/engine/jni/model/PlatformParams") as usize;
@@ -626,6 +612,100 @@ fn playing() -> bool {
 /// its developer variable is set.
 fn wanted(variable: &str) -> bool {
     playing() || std::env::var_os(variable).is_some()
+}
+
+/// Gives the saved login (see login.rs) to the engine, in two steps:
+///
+/// - `"early"` (before the app starts): asks Roblox whose session it is and
+///   answers the app's account questions with it (NativeUserJavaInterface's
+///   `getUserId`, `getUsername`, `getDisplayName`; SessionReporter's last
+///   logged-in user). Without these the app shows its logged-out screen
+///   even with a valid session. An expired session is forgotten.
+/// - `"started"` (right after StartApp): the cookie, as the Android app's
+///   Java code hands it over. Earlier, the engine has no cookie store yet
+///   and silently drops it.
+///
+/// FELINE_COOKIE_CHECK=1 reports the cookie names the engine then holds.
+fn session_step(
+    elf: &feline_runtime::elf::Elf,
+    image: &feline_runtime::load::Image,
+    stage: &str,
+) -> Result<(), String> {
+    use std::sync::Mutex;
+    const SETTINGS: &str = "com/roblox/engine/jni/NativeSettingsInterface";
+    const USER: &str = "com/roblox/engine/jni/user/NativeUserJavaInterface";
+    const REPORTER: &str = "com/roblox/engine/jni/reporter/SessionReporterJavaInterface";
+    // The cookie of a session Roblox accepted, from "early" to "started".
+    static ACCEPTED: Mutex<Option<String>> = Mutex::new(None);
+    match stage {
+        "early" => {
+            let data = runtime_data()?;
+            let Some(cookie) = feline_runtime::login::saved_cookie(&data) else {
+                return Ok(());
+            };
+            match feline_runtime::login::account(&cookie) {
+                Ok(account) => {
+                    use feline_runtime::jni::{set_known_number, set_known_string};
+                    set_known_number(USER, "getUserId", account.id as f64);
+                    set_known_string(USER, "getUsername", &account.name);
+                    set_known_string(USER, "getDisplayName", &account.display_name);
+                    set_known_string(REPORTER, "getLastLoggedInUserId", &account.id.to_string());
+                    set_known_string(REPORTER, "getLastLoggedInUser", &account.name);
+                    eprintln!("feline-runtime: logged in as {}", account.name);
+                }
+                Err(feline_runtime::login::AccountError::Expired) => {
+                    feline_runtime::login::forget_cookie(&data);
+                    eprintln!(
+                        "feline-runtime: the saved login has expired; sign in again"
+                    );
+                    return Ok(());
+                }
+                // Offline or similar: the session may still be fine.
+                Err(feline_runtime::login::AccountError::Other(e)) => {
+                    eprintln!("feline-runtime: couldn't check the saved login: {e}");
+                }
+            }
+            *ACCEPTED.lock().unwrap_or_else(|p| p.into_inner()) = Some(cookie);
+        }
+        "started" => {
+            let cookie = ACCEPTED.lock().unwrap_or_else(|p| p.into_inner()).take();
+            if let Some(cookie) = cookie {
+                feline_runtime::init::call_java_native(
+                    elf,
+                    image,
+                    SETTINGS,
+                    "nativeSetMultipleCookies",
+                    true,
+                    &[
+                        feline_runtime::jni::new_string("https://www.roblox.com/") as usize,
+                        feline_runtime::jni::new_string(&cookie) as usize,
+                    ],
+                )?;
+                eprintln!("feline-runtime: gave the saved session to the app");
+            }
+            if std::env::var_os("FELINE_COOKIE_CHECK").is_some() {
+                let text = feline_runtime::init::call_java_native(
+                    elf,
+                    image,
+                    SETTINGS,
+                    "nativeGetCookiesForDomain",
+                    true,
+                    &[feline_runtime::jni::new_string("https://apis.roblox.com/") as usize],
+                )
+                .ok()
+                .and_then(|h| feline_runtime::jni::string_value(h as _))
+                .unwrap_or_default();
+                // Names only: values are never shown.
+                let names: Vec<&str> = text
+                    .lines()
+                    .filter_map(|line| line.split('\t').nth(5))
+                    .collect();
+                eprintln!("feline-runtime: the app's cookies for Roblox: {names:?}");
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn runtime_data() -> Result<std::path::PathBuf, String> {

@@ -766,6 +766,28 @@ pub fn set_known_string(class: &str, member: &str, value: &str) {
         .push((class.to_owned(), member.to_owned(), value.to_owned()));
 }
 
+/// Real numeric answers for (class, method), like [`set_known_string`].
+static KNOWN_NUMBERS: Mutex<Vec<(String, String, f64)>> = Mutex::new(Vec::new());
+
+/// A known numeric answer for a method, e.g. the logged-in user's ID.
+/// (Kept as f64, like every answer: exact for integers up to 2^53.)
+pub fn set_known_number(class: &str, method: &str, value: f64) {
+    KNOWN_NUMBERS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push((class.to_owned(), method.to_owned(), value));
+}
+
+fn known_number(method: Handle) -> Option<f64> {
+    let (class, name, _) = member_of(method)?;
+    KNOWN_NUMBERS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .find(|(c, m, _)| *c == class && *m == name)
+        .map(|(_, _, v)| *v)
+}
+
 fn known_string(class: &str, member: &str) -> Option<String> {
     KNOWN_STRINGS
         .lock()
@@ -1015,7 +1037,7 @@ fn string_get_bytes(object: Handle, method: Handle) -> Option<Handle> {
 }
 
 /// The text of one of Feline's Java strings.
-fn string_value(object: Handle) -> Option<String> {
+pub fn string_value(object: Handle) -> Option<String> {
     let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     match index(object).and_then(|i| world.objects.get(i)) {
         Some(Object::Str(s)) => Some(s.to_string_lossy().into_owned()),
@@ -1115,6 +1137,10 @@ macro_rules! calls {
         trace(concat!("Call…", $label, "Method"));
         keyboard_call($method, $read);
         if let Some(value) = event_answer($obj, $method, $read) {
+            return FromAnswer::from_answer(value);
+        }
+        if let Some(value) = known_number($method) {
+            answer($method, "call", &value.to_string());
             return FromAnswer::from_answer(value);
         }
         answer($method, "call", &format!("{:?}", $zero));
