@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Bloxstrap-style extras spread over several pages (game shortcuts, FastFlag
+// presets and JSON, classic cursors, taking over Bloxstrap's settings). A
+// global, so each page reads it directly and Rust sets it with
+// `ui.global::<More>()`.
+
+// A mod in the library.
+export struct LibraryRow {
+    name: string,
+    // "by meddsam · from Froststrap's list"
+    detail: string,
+    description: string,
+    thumb: image,
+    has-thumb: bool,
+    // Already in your mods.
+    added: bool,
+}
+
+// A Studio class and its icon.
+export struct IconRow {
+    name: string,
+    icon: image,
+    // You gave it your own picture.
+    changed: bool,
+}
+
+// A server you were on (Home).
+export struct VisitRow {
+    place: string,
+    job: string,
+    game: string,
+    // "Frankfurt am Main, Germany · yesterday"
+    detail: string,
+}
+
+export global More {
+    in property <[VisitRow]> visits;
+    // Your last sessions (Home): game, then "Tue 12 Nov, 20:14 · 45 min · Frankfurt".
+    in property <[VisitRow]> sessions;
+    // Switches.
+    in property <bool> start-with-windows;
+    in property <bool> keep-running;
+    in property <bool> no-crash-handler;
+    in property <bool> place-files;
+    // Linux: what the runtime is started through.
+    in property <string> wrapper;
+    // Studio icons (filtered), and how many classes there are.
+    in property <[IconRow]> icons;
+    in property <int> icon-count;
+    // The sky mod's preview, if there is one.
+    in property <image> sky-preview;
+    in property <bool> has-sky;
+    // Colour pieces (cursor, shift lock, emote wheel): "#RRGGBB" or "".
+    in property <[string]> pieces: ["", "", ""];
+    in property <[color]> piece-colours: [transparent, transparent, transparent];
+    // Saved cursor sets.
+    in property <[string]> cursor-sets;
+    // Servers page: "Any region", then countries.
+    in property <[string]> regions;
+    in-out property <int> region-index;
+    // Settings switches.
+    in property <bool> tray;
+    in property <bool> game-status;
+    in property <bool> auto-rejoin;
+    in property <bool> check-updates;
+    // Roblox Studio (Windows): found, its version, the switches, its flags.
+    in property <bool> studio-found;
+    in property <string> studio-version;
+    in property <bool> studio-mods;
+    in property <bool> studio-discord;
+    in property <string> studio-flags;
+    in property <string> studio-status;
+    // The mod library.
+    in property <[LibraryRow]> library;
+    in property <string> library-status;
+    in property <bool> library-loading;
+    in property <bool> library-froststrap;
+    // The library's page (from 0), how many pages, and the per-page choice
+    // (index into 6, 9, 12, 24).
+    in property <int> library-page;
+    in property <int> library-pages;
+    in property <int> library-per-page;
+    in property <bool> windows;
+    // Feline's own updates: what's going on, and 1 = a new one is there,
+    // 2 = installed (restart to use it).
+    in property <string> update-status;
+    in property <int> update-stage;
+    // A line about the last thing done (shown on the page that did it).
+    in property <string> home-status;
+    in property <string> tweaks-status;
+    in property <string> settings-status;
+    // Bootstrappers on this PC whose settings Feline can take over.
+    in property <[string]> straps;
+
+    // A desktop shortcut that starts this game: (place ID, game name).
+    callback make-shortcut(string, string);
+    // "potato", "balanced", "pretty".
+    callback flags-preset(string);
+    // Pasted FastFlag JSON.
+    callback flags-import(string);
+    callback flags-import-file();
+    callback flags-export();
+    // Classic arrow cursor: true white, false black.
+    callback classic-cursor(bool);
+    // Takes over a bootstrapper's settings (its name).
+    callback import-strap(string);
+    // Home: back into a server you were on, or copy its invite link.
+    callback rejoin-visit(string, string);
+    callback copy-invite(string, string);
+    // Servers page: a region was picked (index into `regions`).
+    callback pick-region(int);
+    // ("tray" | "game-status" | "auto-rejoin", on)
+    callback set-switch(string, bool);
+    callback check-update();
+    callback open-studio();
+    callback filter-icons(string);
+    callback replace-icon(string);
+    callback reset-icon(string);
+    // 0..3: Feline's skies.
+    callback sky-preset(int);
+    callback sky-picture();
+    callback sky-remove();
+    callback set-wrapper(string);
+    callback load-library();
+    // Downloads the mod at this index of `library` (the page shown).
+    callback get-library(int);
+    callback library-go(int);
+    callback library-set-per-page(int);
+    callback save-studio-flags(string);
+    callback install-update();
+    callback restart-feline();
+    // A piece's colour (index, "#rrggbb"; "" removes it).
+    callback set-piece(int, string);
+    callback save-cursor-set(string);
+    callback use-cursor-set(string);
+    callback delete-cursor-set(string);
+}

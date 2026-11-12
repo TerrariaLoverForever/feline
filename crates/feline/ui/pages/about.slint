@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// About page: what Feline is, its license, credits, and the honest status.
+// About page: what Feline is, its license and credits; and the just-for-fun
+// extras: your own colours and the seasonal themes, the desk cat, background
+// music, and the optional achievements.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ComboBox, LineEdit, Slider } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider } from "../components.slint";
+import { Icons, Icon } from "../icons.slint";
+import { Extras } from "../extras.slint";
+import { Looks } from "../looks.slint";
+import { More } from "../more.slint";
+import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider, TabBar, SectionTitle, SettingRow, Toggle, PawTip } from "../components.slint";
 
 component Credit inherits VerticalLayout {
     in property <string> name;
@@ -20,8 +26,39 @@ component Credit inherits VerticalLayout {
     }
 }
 
+// A round colour to pick.
+component Swatch inherits Rectangle {
+    in property <color> tone;
+    in property <bool> chosen;
+    in property <string> name;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: root.tone;
+    border-width: root.chosen ? 3px : (touch.has-hover ? 2px : 0px);
+    border-color: root.chosen ? Theme.text : Theme.text-muted;
+    // The chosen one rises a little (a dark shadow: only the main action,
+    // the logo and live status glow).
+    drop-shadow-blur: root.chosen ? Theme.nudge-blur * 2 : 0px;
+    drop-shadow-offset-y: root.chosen ? Theme.nudge-offset * 2 : 0px;
+    drop-shadow-color: Theme.lift-color;
+    animate border-width, drop-shadow-blur, drop-shadow-offset-y { duration: Theme.fast; }
+    accessible-role: button;
+    accessible-label: root.name;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component AboutPage inherits PageBase {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     in property <string> version;
+    in-out property <int> current: 0;
     callback show-notice();
 
     ScrollView {
@@ -63,38 +100,85 @@ export component AboutPage inherits PageBase {
                         }
                     }
                     BodyText {
-                        text: "A cat-shaped launcher for Roblox on Linux.";
+                        text: "A cat-shaped Roblox launcher. Always lands on its feet.";
                         font-size: 14px;
                     }
                 }
             }
 
-            HorizontalLayout {
+            TabBar {
+                tabs: ["About", "Make it yours", "Desk cat", "Music", "Achievements"];
+                current <=> root.current;
+            }
+
+            // ---------------- About
+            if root.current == 0: Card {
+                SectionTitle {
+                    text: "Updates";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: More.update-status != "" ? More.update-status : "Feline " + root.version;
+                    help: "New Feline versions come from Feline's GitHub releases. Each download is checked against the checksum published with it before it's used.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        if More.update-stage == 0: SecondaryButton {
+                            text: "Check now";
+                            clicked => {
+                                More.check-update();
+                            }
+                        }
+                        if More.update-stage == 1: SecondaryButton {
+                            text: "Update";
+                            clicked => {
+                                More.install-update();
+                            }
+                        }
+                        if More.update-stage == 2: SecondaryButton {
+                            text: "Restart Feline";
+                            clicked => {
+                                More.restart-feline();
+                            }
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Look for updates when Feline opens";
+                    Toggle {
+                        checked: More.check-updates;
+                        toggled(on) => {
+                            More.set-switch("check-updates", on);
+                        }
+                    }
+                }
+            }
+            if root.current == 0: HorizontalLayout {
                 spacing: 20px;
 
                 Card {
                     preferred-width: 100px;
                     horizontal-stretch: 1;
                     Eyebrow {
-                        text: "LICENSE";
+                        text: "License";
                     }
                     BodyText {
-                        text: "Feline is free software under the GNU General Public License, version 3 or later. You can use, study, share and change it.";
+                        text: "Feline is free software under the GNU GPL, version 3 or later: use it, study it, share it, change it.";
                     }
                     BodyText {
-                        text: "The Feline name and cat logo aren't covered by the GPL. See TRADEMARKS.md.";
+                        text: "The Feline name and cat logo aren't part of the GPL (see TRADEMARKS.md).";
                     }
                     Divider { }
                     Eyebrow {
-                        text: "NOT AFFILIATED WITH ROBLOX";
+                        text: "Not affiliated with Roblox";
                     }
                     BodyText {
-                        text: "Feline is unofficial. Roblox is a trademark of Roblox Corporation, used here only to say what Feline works with. Feline ships no Roblox files.";
+                        text: "Feline is unofficial and isn't made or endorsed by Roblox Corporation. \"Roblox\" is their trademark, used here only to say what Feline works with. Feline ships no Roblox files.";
                     }
                     HorizontalLayout {
                         alignment: start;
                         SecondaryButton {
-                            text: "Show the account notice again";
+                            text: "Read the account notice again";
                             clicked => {
                                 root.show-notice();
                             }
@@ -106,43 +190,513 @@ export component AboutPage inherits PageBase {
                     preferred-width: 100px;
                     horizontal-stretch: 1;
                     Eyebrow {
-                        text: "BUILT WITH";
+                        text: "Built with";
                     }
                     Credit {
                         name: "Slint";
-                        role: "The user interface toolkit (used under GPL-3.0).";
+                        role: "The UI toolkit (used under GPL-3.0).";
                     }
                     Credit {
                         name: "Rust";
-                        role: "The language Feline is written in.";
+                        role: "What Feline is written in.";
                     }
                     Divider { }
                     Eyebrow {
-                        text: "WORKS WITH";
+                        text: "Works with";
                     }
-                    BodyText {
-                        text: "External runtimes by their own authors. Feline starts them through their command line and contains none of their code.";
+                    if root.windows: BodyText {
+                        text: "Roblox's official client, exactly as Roblox installs it. Feline starts it, and only touches its files for mods you switch on (and puts them back when you switch them off).";
                     }
-                    Credit {
+                    if !root.windows: BodyText {
+                        text: "Runtimes made by other people. Feline starts them from their command line and contains none of their code.";
+                    }
+                    if !root.windows: Credit {
                         name: "Sober";
                         role: "By the Vinegar team (closed source, Flathub).";
                     }
-                    Credit {
+                    if !root.windows: Credit {
                         name: "Cordial";
                         role: "GPL-3.0-or-later, github.com/luohoa97/cordial.";
                     }
-                    Credit {
+                    if !root.windows: Credit {
                         name: "Stud";
                         role: "AGPL-3.0, github.com/CatPieLeaf/Stud.";
                     }
-                    Credit {
+                    if !root.windows: Credit {
                         name: "Tipsy";
                         role: "GPL-3.0-or-later, github.com/32bitx64bit/Tipsy.";
                     }
-                    Credit {
+                    if !root.windows: Credit {
                         name: "Mocktail and Nightcap";
                         role: "Apache-2.0, github.com/komaruworld/mocktail, github.com/CoderDayton/nightcap.";
                     }
+                }
+            }
+
+            // ---------------- Make it yours
+            if root.current == 1: Card {
+                SectionTitle {
+                    text: "Light or dark";
+                    icon: Icons.moon;
+                }
+                BodyText {
+                    text: root.windows
+                        ? "Feline is a night cat, but it'll keep the lights on if you ask. \"Match Windows\" follows Windows' own light or dark setting."
+                        : "Feline is a night cat, but it'll keep the lights on if you ask. \"Match system\" follows your desktop's light or dark setting.";
+                }
+                TabBar {
+                    max-width: 420px;
+                    tabs: ["Dark", "Light", root.windows ? "Match Windows" : "Match system"];
+                    current: Extras.appearance-index;
+                    changed(i) => {
+                        Extras.set("appearance", i);
+                    }
+                }
+            }
+            if root.current == 1: Card {
+                SectionTitle {
+                    text: "Accent colour";
+                    icon: Icons.palette;
+                }
+                BodyText {
+                    text: "Buttons, switches and highlights all wear it.";
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    for name[i] in Extras.accent-names: Swatch {
+                        name: name;
+                        tone: Extras.accent-swatches[i];
+                        chosen: Extras.accent-index == i;
+                        clicked => {
+                            Extras.set("accent", i);
+                        }
+                    }
+                }
+                Text {
+                    text: Extras.accent-index >= Extras.accent-names.length ? "Your own colour"
+                        : Extras.accent-index == 0 && Extras.season-on
+                        ? Extras.accent-names[0] + " (dressed for " + Extras.season-title + " for now)"
+                        : Extras.accent-names[Extras.accent-index];
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Theme.lavender;
+                }
+                Divider { }
+                SettingRow {
+                    label: "Your own colour";
+                    help: "Any #rrggbb colour, like #ff8fb1. Press Enter or Use.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 17px;
+                            background: Extras.accent-index >= Extras.accent-names.length ? Theme.accent : Theme.surface-hover;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                        }
+                        hex := LineEdit {
+                            width: 130px;
+                            placeholder-text: "#rrggbb";
+                            text: Extras.accent-hex;
+                            accepted(text) => {
+                                Extras.set-accent-hex(text);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Use";
+                            clicked => {
+                                Extras.set-accent-hex(hex.text);
+                            }
+                        }
+                    }
+                }
+                if Extras.accent-message != "": BodyText {
+                    text: Extras.accent-message;
+                    color: Theme.warning;
+                }
+            }
+            if root.current == 1: Card {
+                SectionTitle {
+                    text: "Seasonal themes";
+                    icon: Icons.sparkles;
+                }
+                SettingRow {
+                    label: "Dress up for the time of year";
+                    help: "Snow in winter, hearts in February, blossoms, sunshine, falling leaves and a spooky week around Halloween: a colour, a greeting and a few sprinkles on Home. A season only borrows the accent while it's Feline violet, so your own pick always wins.";
+                    ComboBox {
+                        width: 280px;
+                        model: Extras.season-names;
+                        current-index: Extras.season-index;
+                        selected => {
+                            Extras.set("season", self.current-index);
+                        }
+                    }
+                }
+                if Extras.season-on: PawTip {
+                    text: "Right now: " + Extras.season-title + ". " + Extras.season-greeting;
+                }
+            }
+
+            // ---------------- Desk cat
+            if root.current == 1: Card {
+                SectionTitle {
+                    text: "Feline's window";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: "Font";
+                    help: "Any font installed on this computer, by name (like Comic Sans MS, Georgia or Consolas). Empty: Feline's own.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        font-name := LineEdit {
+                            width: 180px;
+                            text: Looks.font;
+                            placeholder-text: "Feline's own";
+                            accepted(text) => {
+                                Looks.set-font(text);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Use";
+                            clicked => {
+                                Looks.set-font(font-name.text);
+                            }
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Background";
+                    help: "Behind the pages: plain, a soft gradient in your colour, or a picture of yours (dimmed so the text stays readable).";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        SecondaryButton {
+                            text: "Plain";
+                            clicked => {
+                                Looks.set-background(0);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Gradient";
+                            clicked => {
+                                Looks.set-background(1);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Picture…";
+                            icon: Icons.folder;
+                            clicked => {
+                                Looks.pick-picture();
+                            }
+                        }
+                    }
+                }
+                if Looks.windows: Divider { }
+                if Looks.windows: SettingRow {
+                    label: "Glass";
+                    help: "Windows 11's see-through window background: Mica (soft, takes your wallpaper's colour) or Acrylic (frosted). Windows 10 doesn't have it.";
+                    ComboBox {
+                        width: 160px;
+                        model: ["Off", "Mica", "Acrylic"];
+                        current-index: Looks.glass;
+                        selected => {
+                            Looks.set-glass(self.current-index);
+                        }
+                    }
+                }
+                if Looks.message != "": PawTip {
+                    text: Looks.message;
+                }
+            }
+            if root.current == 2: Card {
+                SectionTitle {
+                    text: "Desk cat";
+                    icon: Icons.cat;
+                }
+                HorizontalLayout {
+                    spacing: 22px;
+                    Rectangle {
+                        width: 112px;
+                        height: 112px;
+                        border-radius: Theme.radius;
+                        background: Theme.surface-raised;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        Image {
+                            width: 80px;
+                            height: 80px;
+                            source: Extras.cat-preview;
+                            image-rendering: pixelated;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        horizontal-stretch: 1;
+                        BodyText {
+                            text: "A little pixel cat for your desktop. It chases your pointer, sits down next to it, washes, and naps when you stop moving. It lives in its own see-through window on top of everything: clicks go straight through it, and it never goes near Roblox.";
+                        }
+                        if !Extras.cat-supported: BodyText {
+                            text: "Not on Linux yet: Wayland doesn't let apps follow the pointer or place their own windows, so for now the cat is Windows-only.";
+                            color: Theme.warning;
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Let the cat out";
+                    help: "While Feline runs, also when its window is closed to the icon by the clock. Quit Feline and the cat goes home.";
+                    Toggle {
+                        enabled: Extras.cat-supported;
+                        checked: Extras.cat-on;
+                        toggled(on) => {
+                            Extras.set("cat", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Fur";
+                    help: "Its collar matches your accent colour.";
+                    ComboBox {
+                        width: 200px;
+                        model: ["White", "Ginger", "Grey", "Black"];
+                        current-index: Extras.cat-coat-index;
+                        selected => {
+                            Extras.set("cat-coat", self.current-index);
+                        }
+                    }
+                }
+                SettingRow {
+                    label: "Size";
+                    help: "Bigger is easier to spot on a large screen.";
+                    ComboBox {
+                        width: 200px;
+                        model: ["Small (32 px)", "Medium (48 px)", "Large (64 px)"];
+                        current-index: Extras.cat-size-index;
+                        selected => {
+                            Extras.set("cat-size", self.current-index);
+                        }
+                    }
+                }
+                SettingRow {
+                    label: "When";
+                    help: "\"Only while playing\" brings it out when a game starts and sends it home when the game ends.";
+                    ComboBox {
+                        width: 200px;
+                        model: ["Whenever Feline runs", "Only while playing"];
+                        current-index: Extras.cat-when-index;
+                        selected => {
+                            Extras.set("cat-when", self.current-index);
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Music
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Music";
+                    icon: Icons.music;
+                }
+                BodyText {
+                    text: "Your own background music while Feline is open. Add songs you have, or paste a link and Feline fetches the song for you. Tracks stay on this PC, in Feline's music folder.";
+                }
+                Divider { }
+                SettingRow {
+                    label: "Play music";
+                    help: Extras.music-track-count == 0 ? "Add a song below first." : "It fades in and out instead of cutting off.";
+                    Toggle {
+                        enabled: Extras.music-track-count > 0;
+                        checked: Extras.music-on;
+                        toggled(on) => {
+                            Extras.set("music", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Track";
+                    help: "One song on repeat, or all of them in turn.";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ComboBox {
+                            width: 280px;
+                            enabled: Extras.music-track-count > 0;
+                            model: Extras.music-tracks;
+                            current-index: Extras.music-track-index;
+                            selected => {
+                                Extras.set("music-track", self.current-index);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Remove";
+                            icon: Icons.trash;
+                            danger: true;
+                            enabled: Extras.music-track-index > 0;
+                            clicked => {
+                                Extras.music-remove();
+                            }
+                        }
+                    }
+                }
+                SettingRow {
+                    label: "Volume";
+                    help: Math.round(Extras.music-volume) + "%";
+                    Slider {
+                        width: 280px;
+                        minimum: 0;
+                        maximum: 100;
+                        step: 5;
+                        value: Extras.music-volume;
+                        released(v) => {
+                            Extras.set("music-volume", Math.round(v));
+                        }
+                    }
+                }
+                SettingRow {
+                    label: "When";
+                    help: "\"Only while Feline is focused\" goes quiet when you switch to the game or another window, and comes back when you return.";
+                    ComboBox {
+                        width: 280px;
+                        model: ["Only while Feline is focused", "Whenever Feline runs"];
+                        current-index: Extras.music-when-index;
+                        selected => {
+                            Extras.set("music-when", self.current-index);
+                        }
+                    }
+                }
+            }
+            if root.current == 3: Card {
+                SectionTitle {
+                    text: "Add music";
+                    icon: Icons.download;
+                }
+                SettingRow {
+                    label: "From a link";
+                    help: "YouTube, SoundCloud, Bandcamp and most music sites, or a Spotify song (Spotify's own audio is locked, so Feline finds the same song on YouTube). Needs yt-dlp installed.";
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    link := LineEdit {
+                        horizontal-stretch: 1;
+                        enabled: !Extras.music-busy;
+                        placeholder-text: "https://www.youtube.com/watch?v=…";
+                        text <=> Extras.music-link;
+                        accepted(text) => {
+                            Extras.music-add-link(text);
+                        }
+                    }
+                    SecondaryButton {
+                        text: Extras.music-busy ? "Fetching…" : "Fetch";
+                        icon: Icons.download;
+                        primary: true;
+                        enabled: !Extras.music-busy && link.text != "";
+                        clicked => {
+                            Extras.music-add-link(link.text);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "From this PC";
+                    help: "MP3, M4A, OGG, FLAC or WAV. Feline keeps a copy.";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        SecondaryButton {
+                            text: "Add a file…";
+                            icon: Icons.music;
+                            clicked => {
+                                Extras.music-add-file();
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Open folder";
+                            icon: Icons.folder;
+                            clicked => {
+                                Extras.music-open-folder();
+                            }
+                        }
+                    }
+                }
+                if Extras.music-message != "": PawTip {
+                    text: Extras.music-message;
+                }
+                PawTip {
+                    text: "Only fetch music you're allowed to download, and keep it for yourself.";
+                }
+            }
+
+            // ---------------- Achievements
+            if root.current == 4: Card {
+                SectionTitle {
+                    text: "Achievements";
+                    icon: Icons.trophy;
+                }
+                SettingRow {
+                    label: "Collect achievements";
+                    help: "Little milestones worked out from your play history on this PC. Nothing leaves your computer and Roblox isn't touched. New ones pop up after a game.";
+                    Toggle {
+                        checked: Extras.achievements-on;
+                        toggled(on) => {
+                            Extras.set("achievements", on ? 1 : 0);
+                        }
+                    }
+                }
+                if Extras.achievements-on: Text {
+                    text: Extras.achievements-count;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Theme.lavender;
+                }
+            }
+            if root.current == 4 && Extras.achievements-on: Card {
+                for a in Extras.achievements: Rectangle {
+                    height: row-box-4.preferred-height;
+                    row-box-4 := HorizontalLayout {
+                    spacing: 14px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    Rectangle {
+                        width: 38px;
+                        height: 38px;
+                        border-radius: 19px;
+                        background: a.unlocked ? Theme.accent-soft : Theme.surface-hover;
+                        border-width: 1px;
+                        border-color: a.unlocked ? Theme.accent.with-alpha(0.5) : Theme.border;
+                        Icon {
+                            width: 20px;
+                            height: 20px;
+                            commands: a.unlocked ? Icons.trophy : Icons.lock;
+                            tone: a.unlocked ? Theme.lavender : Theme.text-faint;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: a.title;
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: a.unlocked ? Theme.text : Theme.text-muted;
+                        }
+                        BodyText {
+                            text: a.text;
+                            color: a.unlocked ? Theme.text-muted : Theme.text-faint;
+                        }
+                    }
+                    if a.unlocked: Text {
+                        text: a.when;
+                        font-size: 12px;
+                        color: Theme.text-faint;
+                        vertical-alignment: center;
+                    }
+                }
                 }
             }
         }

@@ -219,6 +219,20 @@ impl RuntimeBackend for Sober {
             .collect()
     }
 
+    fn mod_target(
+        &self,
+        _installation: &Installation,
+        ctx: &DetectContext,
+    ) -> Option<crate::mods::ModTarget> {
+        // Sober's asset overlay: files here are used instead of Roblox's own
+        // (`content/…` paths, as in Bloxstrap's mods). From Sober's
+        // documentation; not verified on a real install yet.
+        Some(crate::mods::ModTarget {
+            dir: ctx.flatpak_data_dir(FLATPAK_ID)?.join("sober/asset_overlay"),
+            overlay: true,
+        })
+    }
+
     fn version(&self, _installation: &Installation) -> Result<String, RuntimeError> {
         // The version comes from the Flatpak's metainfo during detection.
         // Sober has no version option we could ask instead.
@@ -288,6 +302,7 @@ mod tests {
             path: None,
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let found = SOBER.detect(&ctx);
         let _ = fs::remove_dir_all(&root);

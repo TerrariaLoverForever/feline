@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The mod library: mods to get in one click, a page at a time.
+
+import { ScrollView, ComboBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons, Icon } from "../icons.slint";
+import { More } from "../more.slint";
+import { PageBase, PageHeader, Card, BodyText, SettingRow, SecondaryButton, Banner, Toggle, CatEmpty } from "../components.slint";
+
+// One mod in the grid.
+component LibraryCard inherits Rectangle {
+    in property <image> thumb;
+    in property <bool> has-thumb;
+    in property <string> name;
+    in property <string> detail;
+    in property <string> description;
+    in property <bool> added;
+    callback get();
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.surface;
+    clip: true;
+    VerticalLayout {
+        Rectangle {
+            height: 104px;
+            background: Theme.accent.with-alpha(0.12);
+            if root.has-thumb: Image {
+                width: 100%;
+                height: 100%;
+                source: root.thumb;
+                image-fit: cover;
+            }
+            if !root.has-thumb: Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 26px;
+                height: 26px;
+                commands: Icons.paw;
+                tone: Theme.lavender;
+            }
+        }
+        VerticalLayout {
+            padding: 12px;
+            spacing: 3px;
+            Text {
+                text: root.name;
+                font-size: 13.5px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.detail;
+                font-size: 11.5px;
+                color: Theme.text-faint;
+                overflow: elide;
+            }
+            Text {
+                text: root.description;
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                overflow: elide;
+                height: 46px;
+            }
+            HorizontalLayout {
+                alignment: end;
+                padding-top: 4px;
+                SecondaryButton {
+                    text: root.added ? "Added" : "Get";
+                    icon: root.added ? Icons.check : Icons.download;
+                    enabled: !root.added;
+                    clicked => {
+                        root.get();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component LibraryPage inherits PageBase {
+    // Cards in a row, and the gap between them.
+    property <int> columns: 3;
+    property <length> gap: 12px;
+    property <length> card-height: 236px;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            alignment: start;
+
+            PageHeader {
+                title: "Library";
+                description: "Mods to get in one click. Each one is an ordinary mod, checked like any shared .zip: no programs, no scripts. They show up under Mods, switched on.";
+                SecondaryButton {
+                    text: More.library-loading ? "Loading…" : "Refresh";
+                    icon: Icons.refresh;
+                    enabled: !More.library-loading;
+                    clicked => {
+                        More.load-library();
+                    }
+                }
+            }
+
+            Card {
+                SettingRow {
+                    label: "Froststrap's community mods too";
+                    help: "Froststrap's public list: its skyboxes, avatar editor backgrounds and other plain mods (not its colour templates or launcher themes, which only work in Froststrap). It isn't Feline's and has no licence, so it's off unless you want it.";
+                    Toggle {
+                        checked: More.library-froststrap;
+                        toggled(on) => {
+                            More.set-switch("library-froststrap", on);
+                            More.load-library();
+                        }
+                    }
+                }
+            }
+
+            if More.library-status != "": Banner {
+                text: More.library-status;
+                tone: Theme.text-muted;
+            }
+
+            if More.library.length == 0 && !More.library-loading: Card {
+                CatEmpty {
+                    title: "Nothing here yet";
+                    text: "Press Refresh to load the library.";
+                }
+            }
+
+            // The page's mods, three to a row.
+            if More.library.length > 0: Rectangle {
+                height: ceil(More.library.length / root.columns) * (root.card-height + root.gap) - root.gap;
+                for m[i] in More.library: LibraryCard {
+                    x: mod(i, root.columns) * (parent.width + root.gap) / root.columns;
+                    y: floor(i / root.columns) * (root.card-height + root.gap);
+                    width: (parent.width - (root.columns - 1) * root.gap) / root.columns;
+                    height: root.card-height;
+                    thumb: m.thumb;
+                    has-thumb: m.has-thumb;
+                    name: m.name;
+                    detail: m.detail;
+                    description: m.description;
+                    added: m.added;
+                    get => {
+                        More.get-library(i);
+                    }
+                }
+            }
+
+            // Pages, and how many mods to a page.
+            if More.library-pages > 0: HorizontalLayout {
+                spacing: 8px;
+                SecondaryButton {
+                    text: "Previous";
+                    horizontal-stretch: 0;
+                    icon: Icons.chevron-left;
+                    enabled: More.library-page > 0;
+                    clicked => {
+                        More.library-go(More.library-page - 1);
+                    }
+                }
+                for n in More.library-pages: SecondaryButton {
+                    text: n + 1;
+                    horizontal-stretch: 0;
+                    primary: n == More.library-page;
+                    clicked => {
+                        More.library-go(n);
+                    }
+                }
+                SecondaryButton {
+                    text: "Next";
+                    horizontal-stretch: 0;
+                    enabled: More.library-page < More.library-pages - 1;
+                    clicked => {
+                        More.library-go(More.library-page + 1);
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "Per page";
+                    color: Theme.text-muted;
+                    font-size: 12.5px;
+                    vertical-alignment: center;
+                }
+                ComboBox {
+                    width: 90px;
+                    model: ["6", "9", "12", "24"];
+                    current-index: More.library-per-page;
+                    selected => {
+                        More.library-set-per-page(self.current-index);
+                    }
+                }
+            }
+        }
+    }
+}

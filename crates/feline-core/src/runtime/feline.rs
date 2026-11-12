@@ -310,6 +310,19 @@ impl RuntimeBackend for FelineRuntime {
         &[PROGRAM]
     }
 
+    fn mod_target(
+        &self,
+        _installation: &Installation,
+        ctx: &DetectContext,
+    ) -> Option<crate::mods::ModTarget> {
+        // The engine reads Roblox's assets as plain files from the folder
+        // the runtime unpacks them to (`PlatformParams.assetFolderPath`).
+        Some(crate::mods::ModTarget {
+            dir: ctx.data_dir("feline")?.join("runtime/assets"),
+            overlay: false,
+        })
+    }
+
     fn plan_launch(
         &self,
         installation: &Installation,

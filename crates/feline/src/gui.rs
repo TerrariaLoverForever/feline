@@ -24,7 +24,7 @@ use feline_core::paths;
 use feline_core::runtime::{
     DetectContext, InstallKind, Installation, LaunchTarget, Origin, detect_all,
 };
-use feline_core::settings::{ACCOUNT_NOTICE_VERSION, Settings};
+use feline_core::settings::{ACCOUNT_NOTICE_VERSION, AfterLaunch, Settings};
 use feline_core::system::{CheckLevel, FlatpakNvidia, SessionType, SystemInfo};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -36,7 +36,7 @@ use crate::settings_page::{self, Edit};
 #[derive(Clone)]
 pub(crate) struct Found {
     pub(crate) installation: Installation,
-    version: Option<String>,
+    pub(crate) version: Option<String>,
 }
 
 #[derive(Default)]
@@ -45,7 +45,7 @@ pub(crate) struct State {
     pub(crate) settings: Settings,
     detecting: bool,
     /// True from pressing Play until the runtime exits.
-    busy: bool,
+    pub(crate) busy: bool,
     last_log: Option<PathBuf>,
     /// The last system scan (None until the first one finishes).
     system: Option<SystemInfo>,
@@ -54,6 +54,10 @@ pub(crate) struct State {
     diag_busy: bool,
     /// The last failed save on the Settings page: (runtime id, message).
     pub(crate) settings_message: Option<(String, String)>,
+    /// The game whose servers the server picker shows.
+    pub(crate) server_place: Option<u64>,
+    /// When Play last asked "Roblox is already open, go ahead?".
+    pub(crate) asked_to_confirm: Option<std::time::Instant>,
 }
 
 pub(crate) type Shared = Arc<Mutex<State>>;
@@ -66,7 +70,15 @@ pub(crate) fn lock(shared: &Shared) -> MutexGuard<'_, State> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Open the window minimized (Feline started with Windows).
+pub static START_MINIMIZED: AtomicBool = AtomicBool::new(false);
+
 pub fn run() -> Result<(), slint::PlatformError> {
+    let screenshot_run = std::env::var_os("FELINE_SCREENSHOT").is_some();
+    // Feline is open already (maybe in the background): show that one.
+    if !screenshot_run && crate::background::already_running() {
+        return Ok(());
+    }
     // Creating the window also sets up Slint's platform (Wayland or X11).
     let ui = AppWindow::new()?;
     // The app ID is how Wayland/X11 desktops match the window to Feline's
@@ -74,6 +86,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // window is shown (which happens in `ui.run()`).
     slint::set_xdg_app_id(paths::APP_ID)?;
     ui.set_version(feline_core::VERSION.into());
+    ui.set_windows(cfg!(windows));
     // Developer aid (screenshots, testing a page): FELINE_START_PAGE=system
     match std::env::var("FELINE_START_PAGE").as_deref() {
         Ok("runtimes") => ui.set_page(Page::Runtimes),
@@ -81,11 +94,16 @@ pub fn run() -> Result<(), slint::PlatformError> {
         Ok("diagnostics") => ui.set_page(Page::Diagnostics),
         Ok("about") => ui.set_page(Page::About),
         Ok("settings") => ui.set_page(Page::Settings),
+        Ok("mods") => ui.set_page(Page::Mods),
+        Ok("tweaks") => ui.set_page(Page::Tweaks),
+        Ok("studio") => ui.set_page(Page::Studio),
+        Ok("library") => ui.set_page(Page::Library),
         _ => {}
     }
     if let Some(tab) = std::env::var("FELINE_START_TAB").ok().and_then(|t| t.parse().ok()) {
         ui.set_settings_tab(tab);
         ui.set_runtime_tab(tab);
+        ui.set_about_tab(tab);
     }
     if let Ok(id) = std::env::var("FELINE_START_RUNTIME") {
         ui.set_page(Page::Runtimes);
@@ -95,7 +113,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // 2.5 s (for checking the design) and quits.
     if let Some(path) = std::env::var_os("FELINE_SCREENSHOT") {
         let weak = ui.as_weak();
-        slint::Timer::single_shot(std::time::Duration::from_millis(2500), move || {
+        let delay = std::env::var("FELINE_SCREENSHOT_DELAY").ok().and_then(|d| d.parse().ok()).unwrap_or(2500);
+        slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
             let Some(ui) = weak.upgrade() else { return };
             match ui.window().take_snapshot() {
                 Ok(image) => {
@@ -127,6 +146,118 @@ pub fn run() -> Result<(), slint::PlatformError> {
     ui.set_show_notice(state.settings.needs_account_notice());
     let shared: Shared = Arc::new(Mutex::new(state));
 
+    // The fun extras: colours, season, desk cat, achievements, clear on exit.
+    crate::extras::refresh(&ui, &shared);
+    // Tweaks (FastFlags).
+    crate::tweaks::wire(&ui, &shared);
+    crate::tweaks::refresh(&ui, &shared);
+    ui.global::<Extras>().on_set({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |which, value| {
+            if let Some(ui) = weak.upgrade() {
+                crate::extras::set(&ui, &shared, which.as_str(), value);
+            }
+        }
+    });
+    // Background music (About → Music).
+    ui.global::<Extras>().on_music_add_file({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::music::add_file(&ui, &shared);
+            }
+        }
+    });
+    ui.global::<Extras>().on_music_add_link({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |link| {
+            if let Some(ui) = weak.upgrade() {
+                crate::music::add_link(&ui, &shared, link.as_str());
+            }
+        }
+    });
+    ui.global::<Extras>().on_music_remove({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::music::remove(&ui, &shared);
+            }
+        }
+    });
+    ui.global::<Extras>().on_music_open_folder(crate::music::open_folder);
+    let _music_focus = crate::music::watch_focus(&ui);
+    // Bloxstrap-style extras on several pages (More in more.slint).
+    crate::more::wire(&ui, &shared);
+    if ui.get_page() == Page::Library {
+        ui.global::<More>().invoke_load_library();
+    }
+    // The window's font, background and glass (Looks in looks.slint).
+    crate::looks::wire(&ui, &shared);
+    // Settings → General → While you play (PlayExtras in play_extras.slint).
+    {
+        let extras = ui.global::<PlayExtras>();
+        let handler = |f: fn(&AppWindow, &Shared)| {
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    f(&ui, &shared);
+                }
+            }
+        };
+        extras.on_add_program(handler(crate::play_extras::add_program));
+        extras.on_pin(handler(crate::play_extras::pin));
+        extras.on_unpin(handler(crate::play_extras::unpin));
+        let with_bool = |f: fn(&AppWindow, &Shared, bool)| {
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |on| {
+                if let Some(ui) = weak.upgrade() {
+                    f(&ui, &shared, on);
+                }
+            }
+        };
+        extras.on_set_multi(with_bool(crate::play_extras::set_multi));
+        extras.on_set_popup(with_bool(crate::play_extras::set_popup));
+        extras.on_set_confirm(with_bool(crate::play_extras::set_confirm));
+        extras.on_set_splash(with_bool(crate::play_extras::set_splash));
+        extras.on_remove_program({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |i| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::play_extras::remove_program(&ui, &shared, i);
+                }
+            }
+        });
+        extras.on_set_program_close({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |i, on| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::play_extras::set_program_close(&ui, &shared, i, on);
+                }
+            }
+        });
+        extras.on_set_program_args({
+            let shared = shared.clone();
+            move |i, text| crate::play_extras::set_program_args(&shared, i, text.as_str())
+        });
+    }
+    ui.global::<Extras>().on_set_accent_hex({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |text| {
+            if let Some(ui) = weak.upgrade() {
+                crate::extras::set_accent_hex(&ui, &shared, text.as_str());
+            }
+        }
+    });
+
     ui.on_accept_notice({
         let weak = ui.as_weak();
         let shared = shared.clone();
@@ -156,6 +287,42 @@ pub fn run() -> Result<(), slint::PlatformError> {
         move || {
             if let Some(ui) = weak.upgrade() {
                 start_system_scan(&ui, &shared);
+            }
+        }
+    });
+
+    ui.on_system_tick({
+        let weak = ui.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::checkup::tick(&ui);
+            }
+        }
+    });
+    ui.on_open_link(|url| crate::checkup::open_link(url.as_str()));
+    ui.on_investigate({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::checkup::investigate(&ui, &shared);
+            }
+        }
+    });
+    ui.on_run_network_test({
+        let weak = ui.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::checkup::network_test(&ui);
+            }
+        }
+    });
+    ui.on_save_report_zip({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                start_diagnostic(&ui, &shared, DiagAction::SaveZip);
             }
         }
     });
@@ -322,6 +489,344 @@ pub fn run() -> Result<(), slint::PlatformError> {
         }
     });
 
+    ui.on_roblox_opened({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::refresh(&ui, &shared); if ui.get_rx_health().is_empty() { crate::roblox_page::check_health(&ui); }
+            }
+        }
+    });
+    ui.on_rx_check_health({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::check_health(&ui);
+            }
+        }
+    });
+    ui.on_rx_save_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::save_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_rx_apply_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::apply_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_rx_delete_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::delete_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_rx_set_game_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |p, i| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::set_game_profile(&ui, &shared, p.as_str(), i);
+            }
+        }
+    });
+    ui.on_rx_repair({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::repair(&ui, &shared);
+            }
+        }
+    });
+    ui.on_open_servers({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |p| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::open_servers(&ui, &shared, p.as_str());
+            }
+        }
+    });
+    ui.on_reload_servers({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |i| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::load_servers(&ui, &shared, i);
+            }
+        }
+    });
+    ui.on_join_server({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |id| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::roblox_page::join_server(&ui, &shared, id.as_str());
+            }
+        }
+    });
+    // Server tools: quick joins, rejoin and server hop.
+    ui.set_can_rejoin(feline_core::roblox_tools::LastServer::load().is_some());
+    ui.on_quick_join({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |rule| {
+            if let Some(ui) = weak.upgrade() {
+                crate::roblox_page::quick_join(&ui, &shared, rule);
+            }
+        }
+    });
+    ui.on_rejoin({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::roblox_page::rejoin(&ui, &shared);
+            }
+        }
+    });
+    ui.on_server_hop({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::roblox_page::server_hop(&ui, &shared);
+            }
+        }
+    });
+    ui.on_home_opened({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::home_page::refresh(&ui, &shared);
+            }
+        }
+    });
+    ui.on_play_place({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |place| {
+            if let Some(ui) = weak.upgrade() {
+                crate::home_page::play(&ui, &shared, place.as_str());
+            }
+        }
+    });
+    ui.on_toggle_favourite({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |place| {
+            if let Some(ui) = weak.upgrade() {
+                crate::home_page::toggle_favourite(&ui, &shared, place.as_str());
+            }
+        }
+    });
+    ui.on_toggle_discord_hidden({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |place| {
+            if let Some(ui) = weak.upgrade() {
+                crate::home_page::toggle_hidden(&ui, &shared, place.as_str());
+            }
+        }
+    });
+    ui.on_set_discord_text({
+        let shared = shared.clone();
+        move |text| crate::home_page::set_discord_text(&shared, text.as_str())
+    });
+    crate::home_page::refresh(&ui, &shared);
+    crate::mods_page::refresh(&ui, &shared);
+
+    ui.on_mods_opened({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::refresh(&ui, &shared);
+            }
+        }
+    });
+    ui.on_toggle_mod({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |name, on| {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::toggle(&ui, &shared, name.as_str(), on);
+            }
+        }
+    });
+    ui.on_import_mods({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |name| {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::import(&ui, &shared, name.as_str());
+            }
+        }
+    });
+    ui.on_get_theme({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::get_theme(&ui, &shared);
+            }
+        }
+    });
+    // The mod generator and sharing mods (ModTools in mod_tools.slint).
+    {
+        let tools = ui.global::<ModTools>();
+        let handler = |f: fn(&AppWindow, &Shared)| {
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    f(&ui, &shared);
+                }
+            }
+        };
+        tools.on_changed(handler(crate::mods_page::update_preview));
+        tools.on_make(handler(crate::mods_page::make_tint));
+        tools.on_import_zip(handler(crate::mods_page::import_zip));
+        tools.set_windows(cfg!(windows));
+        tools.on_emoji({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |which| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::mods_page::emoji(&ui, &shared, which.as_str());
+                }
+            }
+        });
+        tools.on_choose_preset({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |which, i| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::mods_page::choose_preset(&ui, &shared, which, i);
+                }
+            }
+        });
+        tools.on_choose_hex({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |which, text| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::mods_page::choose_hex(&ui, &shared, which, text.as_str());
+                }
+            }
+        });
+        tools.on_share({
+            let weak = ui.as_weak();
+            move |name| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::mods_page::share(&ui, name.as_str());
+                }
+            }
+        });
+        crate::mods_page::load_generator(&ui, &shared);
+    }
+    ui.on_pick_file({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |k| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::pick(&ui, &shared, k);
+            }
+        }
+    });
+    ui.on_clear_pick({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |k| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::clear_pick(&ui, &shared, k);
+            }
+        }
+    });
+    ui.on_save_mod_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::save_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_apply_mod_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::apply_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_delete_mod_profile({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::delete_profile(&ui, &shared, n.as_str());
+            }
+        }
+    });
+    ui.on_listen_mod({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |n| {
+            if let Some(ui) = weak.upgrade() {
+                let _ = &shared;
+                crate::mods_page::listen(&ui, n.as_str());
+            }
+        }
+    });
+    ui.on_open_mods_folder({
+        let weak = ui.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::open_folder(&ui);
+            }
+        }
+    });
+    ui.on_restore_mods({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                crate::mods_page::restore(&ui, &shared);
+            }
+        }
+    });
     ui.on_open_logs({
         let weak = ui.as_weak();
         let shared = shared.clone();
@@ -347,9 +852,47 @@ pub fn run() -> Result<(), slint::PlatformError> {
             .name("feline-old-logs".into())
             .spawn(move || feline_core::housekeeping::delete_old_logs(log_days));
     }
-    settings_page::refresh_sizes(&ui);
+    // "Tidy up automatically", then the sizes on the Settings page.
+    let tidy_days = lock(&shared).settings.tidy_days;
+    if feline_core::housekeeping::tidy_due(tidy_days) {
+        let weak = ui.as_weak();
+        let _ = thread::Builder::new().name("feline-tidy".into()).spawn(move || {
+            let _ = feline_core::housekeeping::tidy();
+            let _ = weak.upgrade_in_event_loop(|ui| settings_page::refresh_sizes(&ui));
+        });
+    } else {
+        settings_page::refresh_sizes(&ui);
+    }
     start_system_scan(&ui, &shared);
-    ui.run()
+    crate::checkup::investigate(&ui, &shared);
+    if START_MINIMIZED.load(Ordering::Relaxed) {
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(10), move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.window().set_minimized(true);
+            }
+        });
+    }
+    ui.on_quit_feline(|| {
+        let _ = slint::quit_event_loop();
+    });
+    // Closing the window hides Feline to the tray (keep running), or quits.
+    ui.window().on_close_requested({
+        let shared = shared.clone();
+        move || crate::background::on_close(&shared)
+    });
+    if !screenshot_run {
+        crate::background::start(&ui);
+    }
+    ui.show()?;
+    let result = slint::run_event_loop_until_quit();
+    let _ = ui.hide();
+    crate::background::stop();
+    // Quitting: the desk cat goes home, then "clear when Feline closes"
+    // (not for a developer's screenshot run, which isn't the user closing
+    // Feline and mustn't wipe their logs and history).
+    crate::extras::on_exit(&shared, !screenshot_run);
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -401,12 +944,13 @@ fn show_system(ui: &AppWindow, info: &SystemInfo) {
 
     let mut rows = vec![
         row(
-            "Distribution",
+            if cfg!(windows) { "System" } else { "Distribution" },
             info.os.clone().unwrap_or_else(unknown),
             Level::Neutral,
         ),
         row(
-            "Kernel",
+            // On Windows, `kernel` holds the Windows build number.
+            if cfg!(windows) { "Build" } else { "Kernel" },
             info.kernel.clone().unwrap_or_else(unknown),
             Level::Neutral,
         ),
@@ -441,6 +985,11 @@ fn show_system(ui: &AppWindow, info: &SystemInfo) {
             Level::Warning
         };
         rows.push(row("Graphics", format!("{gpu}{primary}"), level));
+    }
+    if cfg!(windows) {
+        // No Flatpak, display server or init system to show.
+        finish_system(ui, info, rows);
+        return;
     }
     if let Some(version) = &info.nvidia_driver {
         rows.push(row("NVIDIA driver", version.clone(), Level::Neutral));
@@ -478,9 +1027,14 @@ fn show_system(ui: &AppWindow, info: &SystemInfo) {
         Level::Neutral,
     ));
     rows.push(row("Init system", info.init.to_string(), Level::Neutral));
+    finish_system(ui, info, rows);
+}
 
+/// Shows the rows, the plain-text report and the quick checks.
+fn finish_system(ui: &AppWindow, info: &SystemInfo, rows: Vec<InfoRow>) {
     ui.set_system_rows(ModelRc::new(VecModel::from(rows)));
     ui.set_system_report(info.report().into());
+    crate::checkup::show_pc(ui, info);
 
     let checks: Vec<CheckRow> = info
         .checks()
@@ -514,6 +1068,8 @@ enum DiagAction {
     RuntimeInfo,
     /// Feline version + system report + runtime info, in one copyable text.
     BugReport,
+    /// The same, plus the crash detective and logs, saved as a zip.
+    SaveZip,
 }
 
 /// What a Diagnostics action produced.
@@ -530,7 +1086,7 @@ fn start_diagnostic(ui: &AppWindow, shared: &Shared, action: DiagAction) {
             return;
         }
         let installation = selected(&state).map(|f| f.installation.clone());
-        if installation.is_none() && !matches!(action, DiagAction::BugReport) {
+        if installation.is_none() && !matches!(action, DiagAction::BugReport | DiagAction::SaveZip) {
             return; // the buttons are disabled in this case anyway
         }
         state.diag_busy = true;
@@ -539,13 +1095,18 @@ fn start_diagnostic(ui: &AppWindow, shared: &Shared, action: DiagAction) {
     ui.set_diag_running(true);
     ui.set_diag_title(SharedString::new());
     ui.set_diag_output(SharedString::new());
+    let log_dirs = if matches!(action, DiagAction::SaveZip) {
+        crate::home_page::log_roots(shared)
+    } else {
+        Vec::new()
+    };
 
     let weak = ui.as_weak();
     let shared_for_thread = shared.clone();
     let spawned = thread::Builder::new()
         .name("feline-diagnostics".into())
         .spawn(move || {
-            let result = run_diagnostic(action, installation.as_ref(), system);
+            let result = run_diagnostic(action, installation.as_ref(), system, &log_dirs);
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 lock(&shared_for_thread).diag_busy = false;
                 ui.set_diag_running(false);
@@ -568,7 +1129,44 @@ fn run_diagnostic(
     action: DiagAction,
     installation: Option<&Installation>,
     system: Option<SystemInfo>,
+    log_dirs: &[PathBuf],
 ) -> DiagResult {
+    if let DiagAction::SaveZip = action {
+        let report = run_diagnostic(DiagAction::BugReport, installation, system, log_dirs);
+        let mut text = report.output;
+        text.push('\n');
+        text.push_str(&crate::checkup::detective_text(log_dirs));
+        return match feline_core::bugreport::write(&text, log_dirs) {
+            Ok(path) => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                // Show the zip in the file manager, selected where possible.
+                let mut command = std::process::Command::new(if cfg!(windows) { "explorer" } else { "xdg-open" });
+                if cfg!(windows) {
+                    command.arg(format!("/select,{}", path.display()));
+                } else if let Some(dir) = path.parent() {
+                    command.arg(dir);
+                }
+                let _ = command
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                DiagResult {
+                    level: Level::Ok,
+                    title: format!("Saved {name} in your Downloads. Attach it to your bug report."),
+                    output: format!(
+                        "{}\n\nThe zip also has the newest Roblox and Feline logs. Your user name in folder paths and every line that might hold a login secret were hidden first.\n\n{text}",
+                        path.display()
+                    ),
+                }
+            }
+            Err(e) => DiagResult {
+                level: Level::Problem,
+                title: e,
+                output: text,
+            },
+        };
+    }
     match (action, installation) {
         (DiagAction::Doctor, Some(installation)) => {
             let name = installation.backend.name();
@@ -625,10 +1223,11 @@ fn run_diagnostic(
             }
             DiagResult {
                 level: Level::Ok,
-                title: "Bug report ready. Use Copy and paste it into your report.".to_owned(),
+                title: "Bug report ready. Hit Copy, then paste it wherever you're reporting the bug.".to_owned(),
                 output,
             }
         }
+        (DiagAction::SaveZip, _) => unreachable!("handled above"),
         // Doctor or RuntimeInfo without a runtime: start_diagnostic prevents this.
         (_, None) => DiagResult {
             level: Level::Warning,
@@ -744,6 +1343,9 @@ fn start_detection(ui: &AppWindow, shared: &Shared) {
                 ui.set_detecting(false);
                 refresh_runtimes(&ui, &shared_for_thread);
                 settings_page::refresh(&ui, &shared_for_thread);
+                crate::roblox_page::record_versions(&shared_for_thread);
+                crate::roblox_page::refresh(&ui, &shared_for_thread);
+                crate::mods_page::refresh(&ui, &shared_for_thread);
             });
         });
 
@@ -796,6 +1398,7 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
                     Origin::External { .. } => {
                         format!("External runtime · {}", short_kind(&f.installation.kind))
                     }
+                    Origin::Official => "Roblox's official client".to_owned(),
                 }
                 .into(),
             );
@@ -810,7 +1413,7 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
 }
 
 /// The installation the user chose, if it's still installed.
-fn selected(state: &State) -> Option<&Found> {
+pub(crate) fn selected(state: &State) -> Option<&Found> {
     let key = state.settings.runtime.as_deref()?;
     state.found.iter().find(|f| f.installation.key() == key)
 }
@@ -838,6 +1441,7 @@ fn origin_label(origin: Origin) -> &'static str {
     match origin {
         Origin::Feline => "Feline",
         Origin::External { .. } => "External",
+        Origin::Official => "Official",
     }
 }
 
@@ -846,6 +1450,7 @@ fn kind_label(kind: &InstallKind) -> String {
         InstallKind::Flatpak { .. } => kind.to_string(),
         InstallKind::AppImage(path) => format!("AppImage · {}", tilde(path)),
         InstallKind::Native(path) => format!("Installed program · {}", tilde(path)),
+        InstallKind::Official(path) => format!("Roblox's installer · {}", tilde(path)),
     }
 }
 
@@ -854,6 +1459,7 @@ fn short_kind(kind: &InstallKind) -> &'static str {
         InstallKind::Flatpak { .. } => "Flatpak",
         InstallKind::AppImage(_) => "AppImage",
         InstallKind::Native(_) => "installed program",
+        InstallKind::Official(_) => "Roblox's installer",
     }
 }
 
@@ -878,11 +1484,20 @@ fn set_launch(ui: &AppWindow, state: LaunchState, title: &str, detail: &str) {
     ui.set_launch_detail(detail.into());
 }
 
-fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
+pub(crate) fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
     let (installation, settings) = {
         let mut state = lock(shared);
         if state.busy {
-            return; // already starting or running
+            // Already starting or running. With "more than one Roblox",
+            // Play opens another Roblox window next to it.
+            let extra = state.settings.multi_roblox
+                && selected(&state).is_some_and(|f| matches!(f.installation.kind, InstallKind::Official(_)));
+            if extra && let Some(found) = selected(&state) {
+                let (installation, settings) = (found.installation.clone(), state.settings.clone());
+                drop(state);
+                start_extra(ui, installation, settings, target);
+            }
+            return;
         }
         let Some(found) = selected(&state) else {
             drop(state);
@@ -890,20 +1505,43 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
                 ui,
                 LaunchState::Failed,
                 "Choose a runtime first",
-                "Open the Runtimes page and pick the runtime Feline should use.",
+                "Open the Runtimes page and choose the one Feline should use.",
             );
             return;
         };
         let installation = found.installation.clone();
+        // Roblox is already open (started outside Feline): a new one would
+        // close it. Ask first; Play again within a minute goes ahead.
+        let asked_lately = state.asked_to_confirm.is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+        if state.settings.confirm_launch
+            && !state.settings.multi_roblox
+            && !asked_lately
+            && installation.is_running()
+        {
+            state.asked_to_confirm = Some(std::time::Instant::now());
+            drop(state);
+            set_launch(
+                ui,
+                LaunchState::Failed,
+                "Roblox is already open",
+                "Starting it again closes the one that's open. Press Play again to go ahead, or switch on \"More than one Roblox\" in Settings.",
+            );
+            return;
+        }
+        state.asked_to_confirm = None;
         state.busy = true;
+        crate::desk_cat::set_playing(true);
         (installation, state.settings.clone())
     };
 
     let name = installation.backend.name();
-    set_launch(ui, LaunchState::Starting, &format!("Starting {name}…"), "");
+    set_launch(ui, LaunchState::Starting, &format!("Waking up {name}…"), "");
     ui.set_stat_time(SharedString::new());
     ui.set_stat_cpu(SharedString::new());
     ui.set_stat_memory(SharedString::new());
+    ui.set_stat_game(SharedString::new());
+    ui.set_stat_region(SharedString::new());
+    let log_roots = crate::home_page::log_roots(shared);
 
     let weak = ui.as_weak();
     let shared_for_thread = shared.clone();
@@ -922,18 +1560,36 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
                     ui.set_stat_time(stats.time.into());
                     ui.set_stat_cpu(stats.cpu.into());
                     ui.set_stat_memory(stats.memory.into());
+                    ui.set_stat_game(stats.game.into());
+                    ui.set_stat_region(stats.region.into());
                 });
             };
             let outcome = run_game(
                 &installation,
                 &target,
                 &settings,
+                log_roots,
                 on_presence,
                 on_stats,
                 |title, detail| {
                     let (title, detail) = (title.to_owned(), detail.to_owned());
+                    let after = settings.after_launch;
+                    let keep = cfg!(windows) && settings.keep_running;
                     let _ = weak.upgrade_in_event_loop(move |ui| {
                         set_launch(&ui, LaunchState::Running, &title, &detail);
+                        match after {
+                            AfterLaunch::Stay => {}
+                            AfterLaunch::Minimize => ui.window().set_minimized(true),
+                            // The game and the Discord status helper are
+                            // separate processes; they keep running.
+                            // With "keep running", to the icon by the clock.
+                            AfterLaunch::Close if keep => {
+                                let _ = ui.hide();
+                            }
+                            AfterLaunch::Close => {
+                                let _ = slint::quit_event_loop();
+                            }
+                        }
                     });
                 },
             );
@@ -945,11 +1601,15 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
                 }
                 drop(state);
                 set_launch(&ui, outcome.state, &outcome.title, &outcome.detail);
+                // The game is in the history now.
+                crate::home_page::refresh(&ui, &shared_for_thread);
+                crate::extras::game_ended(&ui, &shared_for_thread);
             });
         });
 
     if let Err(e) = spawned {
         lock(shared).busy = false;
+        crate::desk_cat::set_playing(false);
         set_launch(
             ui,
             LaunchState::Failed,
@@ -957,6 +1617,34 @@ fn start_launch(ui: &AppWindow, shared: &Shared, target: LaunchTarget) {
             &format!("Feline couldn't start a background task: {e}"),
         );
     }
+}
+
+/// Another Roblox next to the running one (more than one Roblox): started
+/// and left to itself (the first one's session has the stats and history).
+fn start_extra(ui: &AppWindow, installation: Installation, settings: Settings, target: LaunchTarget) {
+    ui.set_launch_detail("Opening another Roblox…".into());
+    let weak = ui.as_weak();
+    let _ = thread::Builder::new().name("feline-extra-game".into()).spawn(move || {
+        let (installation, mut lines) = crate::companion::before(&installation, &settings);
+        let started = installation
+            .plan_launch(&target)
+            .map_err(|e| e.to_string())
+            .and_then(|plan| {
+                let log_dir = paths::log_dir().ok_or("your home folder couldn't be found")?;
+                launch::spawn(plan.command, &log_dir, installation.backend.id()).map_err(|e| e.to_string())
+            });
+        let text = match started {
+            Ok(game) => {
+                lines.extend(feline_core::runtime::roblox::after_start(game.pid(), &settings));
+                // Nobody waits for it here; a thread collects it when it ends.
+                thread::spawn(move || game.wait());
+                lines.insert(0, "Another Roblox is on its way.".to_owned());
+                lines.join("\n")
+            }
+            Err(e) => format!("Another Roblox couldn't start: {e}"),
+        };
+        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_launch_detail(text.into()));
+    });
 }
 
 struct Outcome {
@@ -983,12 +1671,17 @@ fn run_game(
     installation: &Installation,
     target: &LaunchTarget,
     settings: &Settings,
+    log_roots: Vec<PathBuf>,
     on_presence: impl Fn(String) + Send + 'static,
     on_stats: impl Fn(Stats) + Send + 'static,
     on_running: impl FnOnce(&str, &str),
 ) -> Outcome {
     let overrides = &settings.overrides;
     let name = installation.backend.name();
+    // The kept Roblox version (if you stay on one); room for more Robloxes.
+    let (installation, before_lines) = crate::companion::before(installation, settings);
+    let installation = &installation;
+    let hide_cursor = crate::companion::hide_cursor(installation, settings);
 
     // Write Feline's overrides into the runtime's settings first. A failure
     // isn't fatal: the game still starts, with the runtime's own settings.
@@ -997,6 +1690,39 @@ fn run_game(
         .err()
         .map(|e| format!("Feline's settings weren't applied: {e}"));
 
+    // Roblox's own client (Windows): is it really Roblox's? Which GPU?
+    let mut warnings = match feline_core::runtime::roblox::prepare(installation, settings) {
+        Ok(warnings) => warnings,
+        Err(why) => return Outcome::failed("Feline didn't start Roblox", why),
+    };
+    // Mods: put the enabled ones in (or take switched-off ones out).
+    warnings.extend(before_lines);
+    warnings.extend(feline_core::mods::apply_for_launch(
+        installation,
+        &DetectContext::host(),
+        &settings.mods,
+        hide_cursor,
+    ));
+
+    // The setting profile chosen for this game (or for every other game).
+    let place = match target {
+        LaunchTarget::Game(link) => link.place_id(),
+        LaunchTarget::Home => None,
+    };
+    // Tweaks (FastFlags): this game's profile, or the everyday ones.
+    warnings.extend(feline_core::fflags::apply_for_launch(
+        installation,
+        &DetectContext::host(),
+        settings,
+        place,
+    ));
+    warnings.extend(feline_core::roblox_tools::apply_game_profile(
+        installation,
+        &DetectContext::host(),
+        settings,
+        place,
+    ));
+
     let plan = match installation.plan_launch(target) {
         Ok(plan) => plan,
         Err(e) => return Outcome::failed(format!("{name} couldn't be prepared"), e.to_string()),
@@ -1004,15 +1730,26 @@ fn run_game(
     let Some(log_dir) = paths::log_dir() else {
         return Outcome::failed("Couldn't start", "Your home folder couldn't be found.");
     };
-    let game = match launch::spawn(plan.command, &log_dir, installation.backend.id()) {
+    // Linux: started through gamescope, distrobox… if asked.
+    let command = if cfg!(windows) { plan.command } else { launch::wrap(plan.command, &settings.runtime_wrapper) };
+    let game = match launch::spawn(command, &log_dir, installation.backend.id()) {
         Ok(game) => game,
         Err(e) => return Outcome::failed(format!("{name} couldn't be started"), e.to_string()),
     };
+    warnings.extend(feline_core::runtime::roblox::after_start(game.pid(), settings));
+    // Programs that go with Roblox, and the animated cursor.
+    warnings.extend(crate::companion::after(game.pid(), hide_cursor));
 
+    // "in Roblox" would read oddly for Roblox's own client.
+    let in_runtime = if installation.backend.origin() == Origin::Official {
+        String::new()
+    } else {
+        format!(" in {name}")
+    };
     let title = match (&plan.note, target) {
         (Some(_), _) => format!("{name} is open"),
-        (None, LaunchTarget::Home) => format!("Roblox is running in {name}"),
-        (None, LaunchTarget::Game(_)) => format!("Joining the experience in {name}"),
+        (None, LaunchTarget::Home) => format!("Roblox is up and purring{in_runtime}"),
+        (None, LaunchTarget::Game(_)) => format!("Pouncing into the game{in_runtime}"),
     };
     // The Discord status runs in its own small process (`feline --presence`),
     // so it keeps going after this window closes and ends with the game.
@@ -1028,7 +1765,8 @@ fn run_game(
         .note
         .clone()
         .unwrap_or_else(|| default_detail.to_owned());
-    if let Some(warning) = settings_warning {
+    warnings.extend(settings_warning);
+    for warning in warnings {
         detail = format!("{warning}\n{detail}");
     }
     on_running(&title, &detail);
@@ -1036,7 +1774,13 @@ fn run_game(
     if let Err(e) = presence {
         on_presence(e);
     }
-    let monitor = Monitor::start(game.pid(), on_stats, on_presence);
+    let monitor = Monitor::start(
+        game.pid(),
+        settings.clone(),
+        log_roots,
+        on_stats,
+        on_presence,
+    );
     let waited = game.wait();
     if let Some(monitor) = monitor {
         monitor.stop();
@@ -1055,6 +1799,9 @@ struct Stats {
     time: String,
     cpu: String,
     memory: String,
+    /// The game's name and the server's region, once the log tells.
+    game: String,
+    region: String,
 }
 
 /// Samples the game's CPU and memory every two seconds (background thread).
@@ -1070,6 +1817,8 @@ impl Monitor {
     /// without numbers.
     fn start(
         pid: u32,
+        settings: Settings,
+        log_roots: Vec<PathBuf>,
         on_stats: impl Fn(Stats) + Send + 'static,
         on_presence: impl Fn(String) + Send + 'static,
     ) -> Option<Self> {
@@ -1080,6 +1829,24 @@ impl Monitor {
             .name("feline-monitor".into())
             .spawn(move || {
                 let mut sampler = feline_core::monitor::Sampler::new(pid);
+                // Which game and server, from Roblox's log (like the Discord
+                // status, but for the Home page).
+                let mut follower = feline_core::presence::log::LogFollower::new(
+                    log_roots,
+                    std::time::SystemTime::now() - Duration::from_secs(60),
+                );
+                let api = feline_core::presence::roblox::Api::new();
+                let mut activity = feline_core::presence::Activity::Starting;
+                let mut names: std::collections::HashMap<u64, String> = Default::default();
+                let mut places: std::collections::HashMap<String, String> = Default::default();
+                // The next break reminder, in minutes of play (0 = off).
+                let every = u64::from(settings.break_minutes);
+                let regions = settings.discord.region || settings.server_popup;
+                // Roblox's windows already given Feline's icon/colours.
+                let mut dressed: Vec<isize> = Vec::new();
+                let mut next_break = every;
+                let mut leave = feline_core::runtime::roblox::LeaveWatch::default();
+                let mut last_job = String::new();
                 // The first sample is only the starting point for CPU.
                 sampler.sample();
                 while !stop_flag.load(Ordering::Relaxed) {
@@ -1088,6 +1855,13 @@ impl Monitor {
                     while std::time::Instant::now() < wake && !stop_flag.load(Ordering::Relaxed) {
                         thread::sleep(Duration::from_millis(100));
                     }
+                    feline_core::runtime::roblox::dress_windows(pid, &settings, &mut dressed);
+                    let played = started.elapsed().as_secs() / 60;
+                    if every > 0 && played >= next_break {
+                        let (title, text) = feline_core::launch::break_reminder(next_break);
+                        feline_core::launch::notify(&title, &text);
+                        next_break += every;
+                    }
                     // The Discord helper's status, shown on the Settings page.
                     if let Some(status) = crate::presence_helper::status() {
                         on_presence(status);
@@ -1095,7 +1869,65 @@ impl Monitor {
                     let Some(sample) = sampler.sample() else {
                         continue;
                     };
+                    for event in follower.poll() {
+                        activity = activity.apply(event);
+                    }
+                    // Remember the server for "Rejoin" and "Server hop".
+                    if let feline_core::presence::Activity::Game { place_id, job_id, .. } = &activity
+                        && !job_id.is_empty()
+                        && *job_id != last_job
+                    {
+                        last_job = job_id.clone();
+                        let _ = feline_core::roblox_tools::LastServer {
+                            place_id: *place_id,
+                            job_id: job_id.clone(),
+                            at: feline_core::history::now(),
+                        }
+                        .save();
+                    }
+                    // "Close Roblox when you leave a game": end it once it's
+                    // back at its menus or its window is gone, so it doesn't
+                    // linger in the taskbar and background. The game thread
+                    // then sees it exit as usual.
+                    if settings.close_roblox_on_leave {
+                        use feline_core::presence::Activity;
+                        let in_game = matches!(activity, Activity::Game { .. });
+                        let at_menu = matches!(activity, Activity::Menu);
+                        let window = feline_core::runtime::roblox::has_window(pid);
+                        if leave.tick(in_game, at_menu, window)
+                            && feline_core::runtime::roblox::end_game(pid)
+                            && let Some(log) = follower.current()
+                        {
+                            // So the crash detective doesn't call it a crash.
+                            feline_core::detective::remember_closed(log);
+                        }
+                    }
+                    let (game, region) = match &activity {
+                        feline_core::presence::Activity::Game {
+                            universe_id, server, ..
+                        } => {
+                            let game = universe_id
+                                .map(|u| {
+                                    names
+                                        .entry(u)
+                                        .or_insert_with(|| api.game(u).map(|g| g.name).unwrap_or_default())
+                                        .clone()
+                                })
+                                .unwrap_or_default();
+                            let region = match server {
+                                Some(ip) if regions => places
+                                    .entry(ip.clone())
+                                    .or_insert_with(|| api.server_region(ip).unwrap_or_default())
+                                    .clone(),
+                                _ => String::new(),
+                            };
+                            (game, region)
+                        }
+                        _ => (String::new(), String::new()),
+                    };
                     on_stats(Stats {
+                        game,
+                        region,
                         time: duration_label(started.elapsed()),
                         cpu: format!("{:.0}%", sample.cpu_percent),
                         memory: format!(
@@ -1120,7 +1952,7 @@ fn describe_exit(name: &str, exit: GameExit) -> Outcome {
     if exit.status.success() {
         return Outcome {
             state: LaunchState::Ended,
-            title: format!("Session ended after {}", duration_label(exit.ran_for)),
+            title: format!("Nap time! You played for {}", duration_label(exit.ran_for)),
             detail: String::new(),
             log,
         };
@@ -1156,10 +1988,11 @@ fn duration_label(d: Duration) -> String {
     }
 }
 
-/// Opens a folder in the file manager via `xdg-open`.
-fn open_folder(ui: &AppWindow, folder: PathBuf) {
+/// Opens a folder in the file manager (`xdg-open`; on Windows, Explorer).
+pub(crate) fn open_folder(ui: &AppWindow, folder: PathBuf) {
+    let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
     let result = std::fs::create_dir_all(&folder).and_then(|()| {
-        std::process::Command::new("xdg-open")
+        std::process::Command::new(opener)
             .arg(&folder)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

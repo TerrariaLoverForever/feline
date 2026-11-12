@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Settings → General → "While you play": more than one Roblox, the server
+// pop-up, programs that start with Roblox, and staying on a Roblox version.
+// A global, so the page reads it directly and Rust sets it with
+// `ui.global::<PlayExtras>()`.
+
+export struct ProgramRow {
+    name: string,
+    path: string,
+    args: string,
+    close-after: bool,
+}
+
+export global PlayExtras {
+    // Windows-only rows are hidden elsewhere.
+    in property <bool> windows;
+    in property <bool> multi;
+    in property <bool> popup;
+    in property <bool> confirm;
+    in property <bool> splash;
+    in property <[ProgramRow]> programs;
+    // Roblox's version now, e.g. "0.747.0.7471481", and whether Feline can
+    // keep it (Roblox's own Windows client is the runtime).
+    in property <string> version-now;
+    in property <bool> can-pin;
+    // The version Feline stays on ("" = always the newest).
+    in property <string> pinned;
+    // Copying a version takes a moment.
+    in property <bool> busy;
+    in property <string> message;
+
+    callback set-multi(bool);
+    callback set-popup(bool);
+    callback set-confirm(bool);
+    callback set-splash(bool);
+    callback add-program();
+    callback remove-program(int);
+    callback set-program-close(int, bool);
+    callback set-program-args(int, string);
+    callback pin();
+    callback unpin();
+}

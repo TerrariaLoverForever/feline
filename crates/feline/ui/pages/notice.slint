@@ -29,6 +29,8 @@ component Point inherits HorizontalLayout {
 }
 
 export component AccountNotice inherits Rectangle {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     callback accepted();
     callback quit();
 
@@ -38,7 +40,7 @@ export component AccountNotice inherits Rectangle {
     }
 
     // Dim everything behind the dialog (fading in).
-    background: root.shown ? #05030acc : #05030a00;
+    background: root.shown ? Theme.scrim : Theme.scrim.with-alpha(0);
     animate background { duration: Theme.normal; easing: ease-out-quad; }
 
     // Swallow clicks so nothing behind the dialog can be used.
@@ -53,8 +55,9 @@ export component AccountNotice inherits Rectangle {
         background: Theme.surface;
         border-width: 1px;
         border-color: Theme.accent.with-alpha(0.35);
-        drop-shadow-blur: 40px;
-        drop-shadow-color: #00000099;
+        drop-shadow-blur: Theme.pop-blur;
+        drop-shadow-offset-y: Theme.pop-offset;
+        drop-shadow-color: Theme.pop-color;
         opacity: root.shown ? 1 : 0;
         transform-scale: root.shown ? 1 : 0.94;
         animate opacity { duration: Theme.normal; easing: ease-out-quad; }
@@ -74,11 +77,8 @@ export component AccountNotice inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
-                    Eyebrow {
-                        text: "BEFORE YOU PLAY";
-                    }
                     Text {
-                        text: "Your Roblox account and Linux";
+                        text: "Before you pounce";
                         font-size: 21px;
                         font-weight: 800;
                         color: Theme.text;
@@ -87,19 +87,25 @@ export component AccountNotice inherits Rectangle {
             }
 
             BodyText {
-                text: "Feline is an unofficial project, not affiliated with Roblox Corporation. Please read this once:";
+                text: "Feline is unofficial and has nothing to do with Roblox Corporation. One quick read about your account, and then it's all yours:";
                 font-size: 14px;
             }
 
             VerticalLayout {
                 spacing: 10px;
-                Point {
-                    text: "Roblox doesn't support third-party clients on Linux. Using one can get you kicked from experiences or put your account at risk.";
+                if root.windows: Point {
+                    text: "Feline starts Roblox's official client, exactly as Roblox installed it. You sign in inside Roblox as usual; Feline never sees your password.";
                 }
-                Point {
-                    text: "Feline starts an external runtime you installed yourself (Sober, Cordial or Stud). It never handles your login and never modifies the Roblox client.";
+                if root.windows: Point {
+                    text: "Anything that changes how Roblox looks or runs (mods, FastFlags) stays off until you switch it on. Roblox doesn't support those, so they're at your own risk.";
                 }
-                Point {
+                if !root.windows: Point {
+                    text: "Roblox doesn't support third-party clients. Using one can get you kicked from experiences or put your account at risk.";
+                }
+                if !root.windows: Point {
+                    text: "Feline starts a runtime you installed yourself (Sober, Cordial, Stud and friends). It never modifies the Roblox client.";
+                }
+                if !root.windows: Point {
                     text: "Don't use an account you can't afford to lose.";
                 }
             }
@@ -119,6 +125,7 @@ export component AccountNotice inherits Rectangle {
                 }
                 SecondaryButton {
                     text: "I understand";
+                    primary: true;
                     icon: Icons.check;
                     clicked => {
                         root.accepted();

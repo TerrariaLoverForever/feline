@@ -1,0 +1,399 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T00:00:00Z",
+  "title": "Design System: Feline",
+  "extensions": {
+    "colorMeta": {
+      "feline-violet": {
+        "role": "primary",
+        "displayName": "Feline Violet",
+        "canonical": "#8f7ef7",
+        "tonalRamp": [
+          "#1c1638",
+          "#2e2560",
+          "#43378a",
+          "#5c4cba",
+          "#7a67f2",
+          "#9988fa",
+          "#bdb2fc",
+          "#e3defe"
+        ]
+      },
+      "lavender": {
+        "role": "primary",
+        "displayName": "Lavender",
+        "canonical": "#cdc5ff",
+        "tonalRamp": [
+          "#26223d",
+          "#3d3765",
+          "#575090",
+          "#7a72bd",
+          "#a39ae6",
+          "#cdc5ff",
+          "#e2ddff",
+          "#f4f2ff"
+        ]
+      },
+      "violet-den": {
+        "role": "primary",
+        "displayName": "Violet Den",
+        "canonical": "#231f3d"
+      },
+      "den-floor": {
+        "role": "neutral",
+        "displayName": "Den Floor",
+        "canonical": "#111218",
+        "tonalRamp": [
+          "#0d0e13",
+          "#111218",
+          "#171820",
+          "#1d1f29",
+          "#242633",
+          "#343749",
+          "#6d7086",
+          "#a5a7ba"
+        ]
+      },
+      "den-shadow": {
+        "role": "neutral",
+        "displayName": "Den Shadow",
+        "canonical": "#0d0e13"
+      },
+      "slate-surface": {
+        "role": "neutral",
+        "displayName": "Slate Surface",
+        "canonical": "#171820"
+      },
+      "slate-raised": {
+        "role": "neutral",
+        "displayName": "Slate Raised",
+        "canonical": "#1d1f29"
+      },
+      "slate-hover": {
+        "role": "neutral",
+        "displayName": "Slate Hover",
+        "canonical": "#242633"
+      },
+      "slate-border": {
+        "role": "neutral",
+        "displayName": "Slate Border",
+        "canonical": "#252735"
+      },
+      "moon-text": {
+        "role": "neutral",
+        "displayName": "Moon Text",
+        "canonical": "#ebebf3"
+      },
+      "dusk-text": {
+        "role": "neutral",
+        "displayName": "Dusk Text",
+        "canonical": "#a5a7ba"
+      },
+      "faint-text": {
+        "role": "neutral",
+        "displayName": "Faint Text",
+        "canonical": "#6d7086"
+      },
+      "purr-green": {
+        "role": "status",
+        "displayName": "Purr Green",
+        "canonical": "#5fcf98"
+      },
+      "amber-warning": {
+        "role": "status",
+        "displayName": "Amber",
+        "canonical": "#e9b860"
+      },
+      "hiss-red": {
+        "role": "status",
+        "displayName": "Hiss Red",
+        "canonical": "#ef6f80"
+      },
+      "sky-info": {
+        "role": "status",
+        "displayName": "Sky",
+        "canonical": "#67b4f0"
+      },
+      "inset-well": {
+        "role": "neutral",
+        "displayName": "Inset Well",
+        "canonical": "#0b0c10"
+      },
+      "hero-mid": {
+        "role": "neutral",
+        "displayName": "Hero Mid",
+        "canonical": "#1a1a28"
+      },
+      "hero-end": {
+        "role": "neutral",
+        "displayName": "Hero End",
+        "canonical": "#15161e"
+      },
+      "wash": {
+        "role": "neutral",
+        "displayName": "Wash",
+        "canonical": "#ffffff08"
+      },
+      "wash-hover": {
+        "role": "neutral",
+        "displayName": "Wash Hover",
+        "canonical": "#ffffff12"
+      },
+      "track": {
+        "role": "neutral",
+        "displayName": "Track",
+        "canonical": "#ffffff0c"
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "canonical": "#05030acc"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Page title",
+        "purpose": "Page titles only (PageTitle)."
+      },
+      "headline": {
+        "displayName": "Card title",
+        "purpose": "Card titles and the Play label; section titles use 15px."
+      },
+      "title": {
+        "displayName": "Label",
+        "purpose": "Setting labels, nav items, window default."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Help text and descriptions, in Dusk Text."
+      },
+      "label": {
+        "displayName": "Eyebrow",
+        "purpose": "Small spaced labels above sections, in Faint Text."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Command output and bug reports only."
+      }
+    },
+    "shadows": [
+      {
+        "name": "accent-glow-play",
+        "value": "0 4px 16px rgba(143,126,247,0.38)",
+        "purpose": "Play button at rest; 26px blur on hover."
+      },
+      {
+        "name": "logo-glow",
+        "value": "0 0 0.32em rgba(143,126,247,0.45)",
+        "purpose": "A page's own logo (Home hero, About, notice); not the sidebar logo."
+      },
+      {
+        "name": "status-glow",
+        "value": "0 0 7px currentColor",
+        "purpose": "Status dots (tone at 60%)."
+      },
+      {
+        "name": "lift",
+        "value": "0 6px 18px rgba(0,0,0,0.35)",
+        "purpose": "Theme.lift-*: cards, tiles, hero panels, list rows resting on the floor."
+      },
+      {
+        "name": "lift-hover",
+        "value": "0 8px 24px rgba(0,0,0,0.35)",
+        "purpose": "Theme.lift-hover-*: clickable rows while pointed at."
+      },
+      {
+        "name": "nudge",
+        "value": "0 2px 6px rgba(0,0,0,0.35)",
+        "purpose": "Theme.nudge-*: chosen tab highlight, toggle knob, chosen swatch."
+      },
+      {
+        "name": "pop",
+        "value": "0 10px 28px rgba(0,0,0,0.45)",
+        "purpose": "Theme.pop-*: dialogs."
+      }
+    ],
+    "motion": [
+      {
+        "name": "fast",
+        "value": "130ms",
+        "purpose": "Colour and background changes on hover/press."
+      },
+      {
+        "name": "normal",
+        "value": "240ms",
+        "purpose": "Fades, toggle knob, tab highlight."
+      },
+      {
+        "name": "slow",
+        "value": "360ms",
+        "purpose": "Settle-in scale for pages and cards, logo tilt."
+      },
+      {
+        "name": "spring",
+        "value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "purpose": "ease-out-back: Play, toggles, logo."
+      },
+      {
+        "name": "settle",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "ease-out-quint: page/card appear, tab slide, nav nudge."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "window-min",
+        "value": "960px"
+      },
+      {
+        "name": "window-default",
+        "value": "1160px"
+      }
+    ],
+    "lightDen": {
+      "floor": "#f3f3f7",
+      "sidebar": "#e9e9f0",
+      "surface": "#ffffff",
+      "surfaceRaised": "#f7f7fa",
+      "surfaceHover": "#eeeef4",
+      "border": "#e1e1ea",
+      "borderStrong": "#cbcbd8",
+      "text": "#1c1b26",
+      "textMuted": "#52526a",
+      "textFaint": "#727289",
+      "success": "#1d8a56",
+      "warning": "#9a6200",
+      "danger": "#c9354b",
+      "info": "#1f72b8",
+      "lift": "rgba(28,27,38,0.11)",
+      "pop": "rgba(28,27,38,0.2)"
+    },
+    "focus": {
+      "ring": "2px solid accent, 3px outside the control",
+      "trigger": "Tab only (not click); Space/Enter activates"
+    }
+  },
+  "components": [
+    {
+      "name": "Play Button",
+      "kind": "button",
+      "refersTo": "button-play",
+      "description": "The one big call to action on Home.",
+      "html": "<button class=\"ds-play\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\"><path d=\"M7 4.5v15l13-7.5z\" fill=\"currentColor\"/></svg>Play</button>",
+      "css": ".ds-play { display:inline-flex; align-items:center; gap:10px; height:52px; min-width:196px; justify-content:center; padding:0 30px 0 26px; border:none; border-radius:26px; color:#fff; font:700 16px system-ui, 'Segoe UI', sans-serif; background:linear-gradient(100deg,#9988fa 0%,#7a67f2 100%); box-shadow:0 4px 16px rgba(143,126,247,.38); cursor:pointer; transition:transform 240ms cubic-bezier(.34,1.56,.64,1), box-shadow 180ms, background 130ms; } .ds-play:hover { transform:scale(1.025); box-shadow:0 4px 26px rgba(143,126,247,.38); background:linear-gradient(100deg,#a596ff 0%,#8170f4 100%); } .ds-play:active { transform:scale(.96); background:#6a57d6; } .ds-play:focus-visible { outline:2px solid #cdc5ff; outline-offset:3px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet everyday action; tints with the accent on hover.",
+      "html": "<button class=\"ds-btn\">Open folder</button>",
+      "css": ".ds-btn { height:36px; padding:0 15px 0 14px; border-radius:10px; border:1px solid #252735; background:#1d1f29; color:#ebebf3; font:600 13px system-ui, 'Segoe UI', sans-serif; cursor:pointer; transition:background 130ms, border-color 130ms, transform 130ms; } .ds-btn:hover { background:rgba(143,126,247,.14); border-color:rgba(143,126,247,.45); } .ds-btn:active { transform:scale(.96); background:rgba(143,126,247,.22); } .ds-btn:focus-visible { outline:2px solid #8f7ef7; outline-offset:2px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action of a section.",
+      "html": "<button class=\"ds-btn-primary\">Save</button>",
+      "css": ".ds-btn-primary { height:36px; padding:0 15px 0 14px; border-radius:10px; border:1px solid transparent; background:#8f7ef7; color:#fff; font:600 13px system-ui, 'Segoe UI', sans-serif; cursor:pointer; transition:background 130ms, transform 130ms; } .ds-btn-primary:hover { background:#9988fa; } .ds-btn-primary:active { background:#7a67f2; transform:scale(.96); } .ds-btn-primary:focus-visible { outline:2px solid #cdc5ff; outline-offset:2px; }"
+    },
+    {
+      "name": "Toggle",
+      "kind": "input",
+      "refersTo": "toggle-on",
+      "description": "On/off switch with a springy knob.",
+      "html": "<label class=\"ds-toggle\"><input type=\"checkbox\" checked><span></span></label>",
+      "css": ".ds-toggle { position:relative; display:inline-block; width:42px; height:24px; } .ds-toggle input { opacity:0; width:0; height:0; } .ds-toggle span { position:absolute; inset:0; border-radius:12px; background:#242633; cursor:pointer; transition:background 240ms; } .ds-toggle span::after { content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:9px; background:#a5a7ba; box-shadow:0 1px 6px rgba(0,0,0,.35); transition:left 240ms cubic-bezier(.34,1.56,.64,1), background 240ms; } .ds-toggle:hover span { background:#343749; } .ds-toggle input:checked + span { background:#8f7ef7; } .ds-toggle input:checked:hover + span { background:#9988fa; } .ds-toggle input:checked + span::after { left:21px; background:#fff; } .ds-toggle input:focus-visible + span { outline:2px solid #cdc5ff; outline-offset:2px; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Slate panel holding one idea; settles in on appear.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Desk cat</div><p class=\"ds-card-body\">A little cat follows your pointer around the desktop.</p></div>",
+      "css": ".ds-card { background:#171820; border:1px solid #252735; border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:12px; max-width:420px; box-shadow:0 6px 18px rgba(0,0,0,.35); } .ds-card-title { color:#ebebf3; font:700 16px system-ui, 'Segoe UI', sans-serif; } .ds-card-body { margin:0; color:#a5a7ba; font:400 13.5px/1.45 system-ui, 'Segoe UI', sans-serif; }"
+    },
+    {
+      "name": "Sidebar Nav",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Sidebar entries; active gets the accent wash.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\" href=\"#\">Home</a><a class=\"ds-nav-item\" href=\"#\">Settings</a><a class=\"ds-nav-item\" href=\"#\">Mods</a></nav>",
+      "css": ".ds-nav { display:flex; flex-direction:column; gap:2px; width:232px; padding:12px; background:#0d0e13; } .ds-nav-item { height:40px; display:flex; align-items:center; padding:0 8px 0 12px; border-radius:10px; color:#a5a7ba; font:500 14px system-ui, 'Segoe UI', sans-serif; text-decoration:none; transition:background 130ms, padding-left 240ms cubic-bezier(.22,1,.36,1), color 130ms; } .ds-nav-item:hover { background:rgba(36,38,51,.7); color:#ebebf3; padding-left:14px; } .ds-nav-item.is-active { background:rgba(143,126,247,.12); color:#ebebf3; font-weight:600; padding-left:12px; } .ds-nav-item:focus-visible { outline:2px solid #8f7ef7; outline-offset:-2px; }"
+    },
+    {
+      "name": "Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Small status/label chip in a tone.",
+      "html": "<span class=\"ds-pill\">Set by Feline</span>",
+      "css": ".ds-pill { display:inline-flex; align-items:center; height:22px; padding:0 9px; border-radius:11px; background:rgba(143,126,247,.13); color:#8f7ef7; font:600 11px system-ui, 'Segoe UI', sans-serif; }"
+    },
+    {
+      "name": "Paw Tip",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Friendly hint marked with a paw.",
+      "html": "<div class=\"ds-pawtip\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"#cdc5ff\"><ellipse cx=\"12\" cy=\"16\" rx=\"5\" ry=\"4\"/><circle cx=\"6\" cy=\"10\" r=\"2.2\"/><circle cx=\"10\" cy=\"6.5\" r=\"2.2\"/><circle cx=\"14\" cy=\"6.5\" r=\"2.2\"/><circle cx=\"18\" cy=\"10\" r=\"2.2\"/></svg><span>Seasons only recolour Feline while the accent is violet.</span></div>",
+      "css": ".ds-pawtip { display:flex; gap:12px; align-items:flex-start; padding:12px 12px 12px 14px; border-radius:10px; background:rgba(143,126,247,.07); border:1px solid rgba(143,126,247,.25); color:#ebebf3; font:400 13.5px/1.45 system-ui, 'Segoe UI', sans-serif; max-width:440px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night-Lit Den",
+    "overview": "Feline looks like a quiet, dim room where a cat has curled up for the evening. The walls are calm, cool slate, a few shades apart, so the eye rests easily in a dark room. The only warmth is a soft violet light that falls on whatever matters right now: the Play button, the page you're on, a switch that's on. Everything else stays in shadow.\n\nThe den is still until you touch it. Things react to hover and press with a small, springy give, and pages and cards settle in as they appear. Once you stop interacting, nothing moves, glows or loops, because a running game needs the GPU more than the launcher does. Personality lives in the details instead: paw-print tips, a cat face on empty lists, a logo that tilts its head when you hover over it, seasonal sprinkles, and an accent the player can recolour.\n\nThe design must not look like Roblox's own interface (no Roblox layouts, artwork or icons). It must not look like a stock Fluent or Material settings app either: standard widgets are allowed, but they are dressed in Feline's tokens and shapes, never left looking like the default.",
+    "keyCharacteristics": [
+      "Dark slate tonal layers, separated by small steps in lightness and thin borders.",
+      "One accent colour, the player's choice (default Feline Violet), used sparingly and only where it means something.",
+      "Rounded, soft shapes: 10–20px corners, pill-shaped main actions and toggles.",
+      "Event-driven motion only: springy reactions to hover and press, a settle-in when things appear, and stillness at rest.",
+      "Cat touches (paws, the cat face, the desk cat) as quiet decoration, never as chrome that gets in the way."
+    ],
+    "rules": [
+      {
+        "name": "The One Lamp Rule",
+        "body": "Only the accent glows, and only on what matters right now: the main action, the current place, an \"on\" state. If two things on a screen compete for the violet, one of them is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The Recolourable Rule",
+        "body": "Never hard-code accent shades. Every violet in the UI comes from the Theme accent tokens, because players and seasons change them.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight-Not-Size Rule",
+        "body": "Make hierarchy with weight and colour (Moon → Dusk → Faint), not with new sizes. The scale stays at 11 / 12 / 13.5 / 14 / 16 / 28.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Shadow Deep Rule",
+        "body": "A lifted panel's contents are flat. If something inside a card seems to need its own shadow, it should be a separate card or a tonal step instead.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Still Den Rule",
+        "body": "No idle animation, ever. Motion, glow pulses and shadow changes happen only in response to input or a state change (a game starting). The only repeating animation is the \"starting\" pulse of a status dot, and it stops when the game is up.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do take every accent shade from the Theme tokens (accent, accent-strong, accent-light, accent-hover, accent-soft, lavender, accent-deep). The player and the seasons recolour them.",
+      "Do separate surfaces by tonal step plus a 1px border, and lift panels with the `lift-*` tokens (dialogs with `pop-*`). Take every colour from Theme: no hex values in page files.",
+      "Do animate only in response to input or state, with Theme durations (130 / 240 / 360ms) and ease-out-back for springy controls.",
+      "Do make hierarchy with weight and the Moon / Dusk / Faint text colours.",
+      "Do keep cat touches small and quiet: paws, the cat face, the desk cat and seasonal sprinkles.",
+      "Do check every screen in both dens. A colour that only works in one of them isn't a Theme colour yet."
+    ],
+    "donts": [
+      "Don't imitate Roblox's interface, layouts, artwork or icons.",
+      "Don't let a screen look like a stock Fluent or Material settings app. Dress standard widgets in Feline tokens.",
+      "Don't add idle or looping animation, or decoration that redraws while a game runs.",
+      "Don't use coloured shadows or glow anywhere except the accent's main action, the logo and live status.",
+      "Don't use status colours as large fills, or use the accent to mean \"warning\" or \"error\".",
+      "Don't use text glyphs (★, ✓) as icons. Draw them as paths in `icons.slint`.",
+      "Don't put a shadow inside a lifted panel.",
+      "Don't write ALL-CAPS labels or tracked-out eyebrows above headings.",
+      "Don't show buttons that can never work in the current setup (e.g. a runtime self-check for Roblox's official client). Hide them instead."
+    ]
+  }
+}

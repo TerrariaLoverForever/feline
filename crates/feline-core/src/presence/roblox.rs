@@ -71,7 +71,11 @@ impl Api {
     pub fn new() -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
-            .user_agent(format!("Feline/{} (Linux)", crate::VERSION))
+            .user_agent(format!(
+                "Feline/{} ({})",
+                crate::VERSION,
+                if cfg!(windows) { "Windows" } else { "Linux" }
+            ))
             .build();
         Self {
             agent: ureq::Agent::new_with_config(config),
@@ -98,6 +102,40 @@ impl Api {
         parse_game(&games, icon.as_ref())
     }
 
+    /// Where a game server is, e.g. "Frankfurt, Germany", from its address
+    /// (ipinfo.io's free lookup, the service Bloxstrap uses too). Only the
+    /// server's address is sent, never anything about the player.
+    pub fn server_region(&self, ip: &str) -> Result<String, ApiError> {
+        let answer = self.get_json(&format!("https://ipinfo.io/{ip}/json"))?;
+        parse_region(&answer).ok_or(ApiError::Unexpected("no location"))
+    }
+
+    /// A picture URL for a Roblox image asset (what a game names in its own
+    /// Discord status), from Roblox's thumbnail service.
+    pub fn asset_image(&self, asset_id: u64) -> Result<String, ApiError> {
+        let answer = self.get_json(&format!(
+            "https://thumbnails.roblox.com/v1/assets?assetIds={asset_id}&returnPolicy=PlaceHolder&size=512x512&format=Png"
+        ))?;
+        answer
+            .pointer("/data/0/imageUrl")
+            .and_then(Value::as_str)
+            .filter(|u| u.starts_with("https://"))
+            .map(str::to_owned)
+            .ok_or(ApiError::Unexpected("no picture"))
+    }
+
+    /// The image bytes at `url` (a game icon from Roblox's CDN), at most 4 MB.
+    pub fn download(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        Ok(self
+            .agent
+            .get(url)
+            .call()?
+            .body_mut()
+            .with_config()
+            .limit(4 * 1024 * 1024)
+            .read_to_vec()?)
+    }
+
     /// Username, display name and avatar of a player.
     pub fn user(&self, user_id: u64) -> Result<UserInfo, ApiError> {
         let user = self.get_json(&format!("https://users.roblox.com/v1/users/{user_id}"))?;
@@ -108,6 +146,44 @@ impl Api {
             ))
             .ok();
         parse_user(&user, avatar.as_ref())
+    }
+}
+
+/// "City, Country" from an ipinfo.io answer (the country as its code, e.g.
+/// "Frankfurt am Main, DE"; ipinfo's free answer has no country names).
+pub fn parse_region(answer: &Value) -> Option<String> {
+    let get = |k: &str| answer.get(k)?.as_str().filter(|s| !s.is_empty());
+    match (get("city"), get("country")) {
+        (Some(city), Some(country)) => Some(format!("{city}, {}", country_name(country))),
+        (None, Some(country)) => Some(country_name(country).to_owned()),
+        _ => None,
+    }
+}
+
+/// English names for the countries Roblox has servers in; other codes are
+/// shown as they are.
+fn country_name(code: &str) -> &str {
+    match code {
+        "US" => "United States",
+        "GB" => "United Kingdom",
+        "DE" => "Germany",
+        "NL" => "Netherlands",
+        "FR" => "France",
+        "PL" => "Poland",
+        "SG" => "Singapore",
+        "JP" => "Japan",
+        "IN" => "India",
+        "AU" => "Australia",
+        "BR" => "Brazil",
+        "HK" => "Hong Kong",
+        "KR" => "South Korea",
+        "CA" => "Canada",
+        "MX" => "Mexico",
+        "ES" => "Spain",
+        "IT" => "Italy",
+        "SE" => "Sweden",
+        "ZA" => "South Africa",
+        other => other,
     }
 }
 

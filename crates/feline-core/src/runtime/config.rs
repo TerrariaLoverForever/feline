@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Reading and changing an external runtime's **own** settings file.
+//! Reading and changing an external runtime's **own** settings file: JSON for
+//! the Linux runtimes, or on Windows Roblox's own `GlobalBasicSettings_*.xml`
+//! (the file its in-game settings menu writes; see [`ConfigFile::parse`]).
 //!
 //! Each backend lists the settings Feline may show and change as
 //! [`SettingDef`]s. Only settings whose keys, types and allowed values were
@@ -186,7 +188,8 @@ pub enum ConfigError {
     /// The runtime hasn't created its settings file yet.
     Missing(PathBuf),
     Read(PathBuf, io::Error),
-    /// The file isn't valid JSON (or not a JSON object). Feline won't touch it.
+    /// The file isn't valid JSON (or not a JSON object), or Roblox's XML file
+    /// couldn't be read. Feline won't touch it.
     Invalid(PathBuf, String),
     /// The runtime is running, so its file must not be changed now.
     Running(&'static str),
@@ -208,7 +211,7 @@ impl fmt::Display for ConfigError {
             Self::Read(path, e) => write!(f, "couldn't read {}: {e}", path.display()),
             Self::Invalid(path, e) => write!(
                 f,
-                "{} isn't valid JSON ({e}). Feline won't change it; fix or delete it first.",
+                "{} couldn't be read ({e}). Feline won't change it; fix or delete it first.",
                 path.display()
             ),
             Self::Running(name) => write!(
@@ -233,6 +236,9 @@ pub struct ConfigFile {
     /// The file's indentation unit, e.g. four spaces.
     indent: String,
     trailing_newline: bool,
+    /// For Roblox's XML settings file: the original text. `map` then holds
+    /// each simple value's text, and saving only replaces those texts.
+    xml: Option<String>,
 }
 
 impl ConfigFile {
@@ -247,7 +253,32 @@ impl ConfigFile {
     }
 
     /// Parses file contents. Separate from `load` so tests can use strings.
+    ///
+    /// A `.xml` file is read as Roblox's settings file: simple values such as
+    /// `<int name="FramerateCap">-1</int>` can be changed; everything else
+    /// (structure, other values, formatting) is written back unchanged.
     pub fn parse(path: &Path, text: &str) -> Result<Self, ConfigError> {
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xml")) {
+            let items = xml_items(text);
+            if items.is_empty() || !text.contains("<roblox") {
+                return Err(ConfigError::Invalid(
+                    path.to_owned(),
+                    "it isn't Roblox's settings file".to_owned(),
+                ));
+            }
+            let map = items
+                .iter()
+                .map(|item| (item.key.clone(), Value::String(text[item.value.clone()].to_owned())))
+                .collect();
+            return Ok(Self {
+                path: path.to_owned(),
+                header: String::new(),
+                map,
+                indent: String::new(),
+                trailing_newline: text.ends_with('\n'),
+                xml: Some(text.to_owned()),
+            });
+        }
         // Split off the `//` header: every line before the JSON starts.
         let mut header_len = 0;
         for line in text.split_inclusive('\n') {
@@ -285,6 +316,7 @@ impl ConfigFile {
             map,
             indent,
             trailing_newline: text.ends_with('\n'),
+            xml: None,
         })
     }
 
@@ -295,6 +327,14 @@ impl ConfigFile {
     /// The current value, or the runtime's default if the key is missing or
     /// holds something the runtime wouldn't accept.
     pub fn get(&self, def: &SettingDef) -> Value {
+        if self.xml.is_some() {
+            return self
+                .map
+                .get(def.key)
+                .and_then(Value::as_str)
+                .and_then(|text| xml_to_value(def, text))
+                .unwrap_or_else(|| def.default.to_json());
+        }
         match self.map.get(def.key) {
             Some(value) if def.accepts(value) => value.clone(),
             _ => def.default.to_json(),
@@ -306,6 +346,24 @@ impl ConfigFile {
     pub fn set(&mut self, def: &SettingDef, value: Value) -> Result<bool, ConfigError> {
         if !def.accepts(&value) {
             return Err(ConfigError::BadValue { key: def.key });
+        }
+        if self.xml.is_some() {
+            // Only values that are already in Roblox's file are changed;
+            // Feline never adds entries to it.
+            let Some(old) = self.map.get(def.key) else {
+                return Err(ConfigError::BadValue { key: def.key });
+            };
+            let text = match &value {
+                Value::Bool(b) => b.to_string(),
+                Value::Number(n) => n.to_string(),
+                Value::String(s) => s.clone(),
+                _ => return Err(ConfigError::BadValue { key: def.key }),
+            };
+            if old.as_str() == Some(text.as_str()) {
+                return Ok(false);
+            }
+            self.map.insert(def.key.to_owned(), Value::String(text));
+            return Ok(true);
         }
         if self.map.get(def.key) == Some(&value) {
             return Ok(false);
@@ -335,6 +393,18 @@ impl ConfigFile {
 
     /// The file contents as they'd be written.
     pub fn to_text(&self) -> String {
+        if let Some(original) = &self.xml {
+            // Replace changed values from the end, so earlier positions stay valid.
+            let mut out = original.clone();
+            for item in xml_items(original).iter().rev() {
+                if let Some(Value::String(text)) = self.map.get(&item.key)
+                    && original[item.value.clone()] != **text
+                {
+                    out.replace_range(item.value.clone(), text);
+                }
+            }
+            return out;
+        }
         // serde_json pretty-prints with two-space indentation. Re-indent each
         // line with the file's own unit. Safe line by line, because JSON
         // strings can't contain raw newlines.
@@ -386,6 +456,94 @@ impl ConfigFile {
 }
 
 // ---------------------------------------------------------------------------
+// Roblox's XML settings file
+// ---------------------------------------------------------------------------
+
+/// One simple value in Roblox's settings XML: `<type name="key">value</type>`.
+#[derive(Debug)]
+struct XmlItem {
+    key: String,
+    /// Byte range of the value text.
+    value: std::ops::Range<usize>,
+}
+
+/// The simple values in Roblox's settings XML. Values with child elements
+/// (such as `Vector2`) are skipped, as is anything Feline doesn't recognise:
+/// they're kept as they are.
+fn xml_items(text: &str) -> Vec<XmlItem> {
+    let mut items = Vec::new();
+    let mut rest = 0;
+    while let Some(found) = text[rest..].find('<') {
+        let open = rest + found;
+        rest = open + 1;
+        let tag_end = match text[open..].find('>') {
+            Some(i) => open + i,
+            None => break,
+        };
+        let tag = &text[open + 1..tag_end];
+        // `<int name="FramerateCap">`, not `</int>` or `<Item class=…>`.
+        let Some((kind, attrs)) = tag.split_once(' ') else {
+            continue;
+        };
+        if !kind.chars().all(|c| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Some(name) = attrs
+            .trim()
+            .strip_prefix("name=\"")
+            .and_then(|n| n.strip_suffix('"'))
+        else {
+            continue;
+        };
+        let value_start = tag_end + 1;
+        let Some(value_len) = text[value_start..].find('<') else {
+            break;
+        };
+        let value_end = value_start + value_len;
+        if !text[value_end..].starts_with(&format!("</{kind}>")) {
+            continue; // has child elements
+        }
+        items.push(XmlItem {
+            key: name.to_owned(),
+            value: value_start..value_end,
+        });
+        rest = value_end;
+    }
+    items
+}
+
+/// Reads a value's text from Roblox's XML as the setting's kind. A choice
+/// whose text isn't one of the listed values (Roblox stores volume as
+/// `0.300000012`) becomes the numerically nearest choice.
+fn xml_to_value(def: &SettingDef, text: &str) -> Option<Value> {
+    let text = text.trim();
+    match def.kind {
+        Kind::Toggle => match text {
+            "true" => Some(Value::Bool(true)),
+            "false" => Some(Value::Bool(false)),
+            _ => None,
+        },
+        Kind::Number { min, max } => text
+            .parse::<i64>()
+            .ok()
+            .filter(|n| (min..=max).contains(n))
+            .map(Value::from),
+        Kind::Choice(choices) => {
+            if let Some(c) = choices.iter().find(|c| c.value == text) {
+                return Some(Value::from(c.value));
+            }
+            let number: f64 = text.parse().ok()?;
+            choices
+                .iter()
+                .filter_map(|c| Some((c.value.parse::<f64>().ok()?, c.value)))
+                .min_by(|a, b| (a.0 - number).abs().total_cmp(&(b.0 - number).abs()))
+                .map(|(_, value)| Value::from(value))
+        }
+        Kind::Text { check, .. } => check.accepts(text).then(|| Value::from(text)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Is the runtime running?
 // ---------------------------------------------------------------------------
 
@@ -393,10 +551,23 @@ impl ConfigFile {
 /// other). Reads `/proc/<pid>/comm`, which the kernel cuts to 15 characters,
 /// so `names` must be given in that cut form. Works for Flatpak apps too:
 /// their processes are visible from outside the sandbox.
+///
+/// On Windows, `names` are program file names such as `RobloxPlayerBeta.exe`
+/// (compared ignoring case, like Windows does).
+#[cfg(not(windows))]
 pub fn any_process_named(names: &[&str]) -> bool {
     any_process_named_in(Path::new("/proc"), names)
 }
 
+#[cfg(windows)]
+pub fn any_process_named(names: &[&str]) -> bool {
+    !names.is_empty()
+        && feline_win::processes()
+            .iter()
+            .any(|p| names.iter().any(|n| p.exe_name.eq_ignore_ascii_case(n)))
+}
+
+#[cfg_attr(windows, allow(dead_code))]
 fn any_process_named_in(proc_dir: &Path, names: &[&str]) -> bool {
     if names.is_empty() {
         return false;
@@ -426,6 +597,82 @@ fn any_process_named_in(proc_dir: &Path, names: &[&str]) -> bool {
                 .is_some_and(|n| names.contains(&&n[..n.len().min(15)]))
         })
     })
+}
+
+#[cfg(test)]
+mod xml_tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"<roblox version="4">
+	<Item class="UserGameSettings" referent="RBX1">
+		<Properties>
+			<bool name="Fullscreen">false</bool>
+			<int name="FramerateCap">-1</int>
+			<float name="MasterVolume">0.300000012</float>
+			<token name="SavedQualityLevel">3</token>
+			<Vector2 name="StartScreenSize">
+				<X>0</X>
+				<Y>0</Y>
+			</Vector2>
+		</Properties>
+	</Item>
+</roblox>
+"#;
+
+    const VOLUME: SettingDef = SettingDef {
+        key: "MasterVolume",
+        label: "",
+        help: "",
+        kind: Kind::Choice(&[
+            Choice { value: "0", label: "" },
+            Choice { value: "0.3", label: "" },
+            Choice { value: "1", label: "" },
+        ]),
+        default: Val::Str("1"),
+        link: None,
+    };
+    const FULLSCREEN: SettingDef = SettingDef {
+        key: "Fullscreen",
+        label: "",
+        help: "",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    };
+    const MISSING: SettingDef = SettingDef {
+        key: "NotInTheFile",
+        ..FULLSCREEN
+    };
+
+    #[test]
+    fn reads_and_changes_only_the_values_it_sets() {
+        let path = Path::new("GlobalBasicSettings_13.xml");
+        let mut file = ConfigFile::parse(path, SAMPLE).unwrap();
+        assert_eq!(file.get(&FULLSCREEN), Value::Bool(false));
+        assert_eq!(file.get(&VOLUME), Value::from("0.3"), "nearest choice");
+
+        // Unchanged: written back byte for byte.
+        assert_eq!(file.to_text(), SAMPLE);
+
+        assert!(file.set(&FULLSCREEN, Value::Bool(true)).unwrap());
+        assert!(file.set(&VOLUME, Value::from("1")).unwrap());
+        let text = file.to_text();
+        assert_eq!(
+            text,
+            SAMPLE
+                .replace(">false</bool>", ">true</bool>")
+                .replace(">0.300000012</float>", ">1</float>")
+        );
+        // Values with children are untouched, and nothing is ever added.
+        assert!(text.contains("<X>0</X>"));
+        assert!(file.set(&MISSING, Value::Bool(true)).is_err());
+    }
+
+    #[test]
+    fn other_xml_is_refused() {
+        let path = Path::new("x.xml");
+        assert!(ConfigFile::parse(path, "<html><b name=\"x\">1</b></html>").is_err());
+    }
 }
 
 #[cfg(test)]

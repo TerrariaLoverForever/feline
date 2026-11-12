@@ -1,0 +1,4 @@
+{
+  "_about": "Feline's mod library (Mods page → Mod library). Each mod is a shared mod .zip, the kind Feline's Share button makes. 'sha256' is optional but recommended: Feline refuses a download that doesn't match it. Example entry: {\"id\": \"cat-sounds\", \"name\": \"Cat sounds\", \"author\": \"you\", \"description\": \"Meows instead of oofs.\", \"thumbnail\": \"https://…/cat-sounds.png\", \"download\": \"https://…/cat-sounds.zip\", \"sha256\": \"…\"}",
+  "mods": []
+}

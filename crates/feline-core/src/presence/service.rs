@@ -157,7 +157,26 @@ fn start_for(
     // a game that's already running is picked up in its current state.
     let since = SystemTime::now() - Duration::from_secs(60);
     let name = backend.name();
-    Session::start(roots, since, settings.presence, move |status| {
+    // A hidden game counts in every place of it Feline has seen.
+    let history = crate::history::History::load();
+    let mut hidden_universes: Vec<u64> = settings
+        .discord
+        .hidden
+        .iter()
+        .filter_map(|p| history.universe_of(*p))
+        .collect();
+    hidden_universes.sort_unstable();
+    hidden_universes.dedup();
+    let extra = super::Extra {
+        settings: settings.discord.clone(),
+        hidden_universes,
+        // On Windows there's only Roblox's own client; on Linux the
+        // runtime is worth showing.
+        runtime: (!cfg!(windows)).then(|| name.to_owned()),
+        game_status_allowed: settings.game_status,
+        ..Default::default()
+    };
+    Session::start(roots, since, settings.presence, extra, move |status| {
         on_status(format!("{name}: {status}"));
     })
     .ok()

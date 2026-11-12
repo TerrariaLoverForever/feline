@@ -62,6 +62,11 @@ pub enum Outcome {
 /// Installs the newest Roblox version, if it's newer than the current one
 /// and not one that already failed here.
 pub fn update(progress: &mut dyn FnMut(Progress)) -> Result<Outcome, String> {
+    // The Android engine is only for Feline's own runtime, on Linux. Don't
+    // download it anywhere else (on Windows, Roblox updates itself).
+    if !cfg!(target_os = "linux") {
+        return Err("Feline's own runtime and its Roblox updates are Linux-only".to_owned());
+    }
     let engine = engine_dir().ok_or("no home folder")?;
     progress(Progress::Checking);
     let current = current_in(&engine);
@@ -210,6 +215,14 @@ fn unpack(data: &[u8], xapk: bool) -> Result<(Vec<u8>, Vec<u8>), String> {
 
 /// Points `current` (and the runtime's `libroblox.so`/`base.apk` links
 /// through it) at `version`, atomically.
+#[cfg(not(unix))]
+fn switch_to(_engine: &Path, _version: &str) -> Result<(), String> {
+    Err("Feline's own runtime only runs on Linux".to_owned())
+}
+
+/// Points `current` (and the runtime's `libroblox.so`/`base.apk` links
+/// through it) at `version`, atomically.
+#[cfg(unix)]
 fn switch_to(engine: &Path, version: &str) -> Result<(), String> {
     use std::os::unix::fs::symlink;
     let link = engine.join(".current.new");
@@ -295,7 +308,7 @@ fn roll_back_in(engine: &Path) -> Option<String> {
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod layout_tests {
     use super::*;
 

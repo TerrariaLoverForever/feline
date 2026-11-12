@@ -9,7 +9,13 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/feline-core", "crates/feline", "crates/feline-runtime", "crates/feline-login"]
+members = [
+    "crates/feline-core",
+    "crates/feline",
+    "crates/feline-runtime",
+    "crates/feline-login",
+    "crates/feline-win",
+]
 
 # Shared metadata. Each crate opts in with `field.workspace = true`.
 [workspace.package]
@@ -34,3 +40,13 @@ all = { level = "warn", priority = -1 }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Quicker optimized builds for trying changes out (`cargo build --profile
+# fast`, into target/fast): no link-time optimization and parallel code
+# generation, so it builds in a fraction of release's time and needs less
+# memory. Releases still use `release`.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

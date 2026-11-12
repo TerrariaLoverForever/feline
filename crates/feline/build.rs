@@ -4,9 +4,10 @@
 //! in `src/gui.rs` then pulls in.
 
 fn main() {
-    // "fluent-dark" is the built-in widget style used for standard widgets
-    // such as the text field, so they match Feline's dark theme.
-    let config = slint_build::CompilerConfiguration::new().with_style("fluent-dark".into());
+    // "fluent" is the built-in style for standard widgets such as the text
+    // field. Its light/dark scheme is switched at run time to follow
+    // Feline's own (app.slint sets `Palette.color-scheme`).
+    let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
     // A panic here only fails the build, with Slint's error message.
     slint_build::compile_with_config("ui/app.slint", config)
         .expect("the Slint UI failed to compile");

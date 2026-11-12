@@ -8,7 +8,7 @@
 
 use feline_core::runtime::config::{ConfigError, Kind, SettingDef, managed_value};
 use feline_core::runtime::{ApplyOutcome, DetectContext, Installation, backends};
-use feline_core::settings::{Overrides, Renderer, Settings, Toggle};
+use feline_core::settings::{AfterLaunch, GamePriority, Overrides, Renderer, Settings, Toggle};
 use serde_json::Value;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -52,7 +52,42 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     ui.set_discord_join(p.join_button);
     ui.set_discord_game(p.game_button);
     ui.set_discord_menus(p.in_menus);
+    ui.set_discord_text(state.settings.discord.text.clone().into());
+    ui.set_discord_region(state.settings.discord.region);
+    ui.set_discord_today(state.settings.discord.today);
     ui.set_link_handler(state.settings.link_handler);
+    ui.set_after_launch_index(match state.settings.after_launch {
+        AfterLaunch::Stay => 0,
+        AfterLaunch::Minimize => 1,
+        AfterLaunch::Close => 2,
+    });
+    ui.set_priority_index(match state.settings.game_priority {
+        GamePriority::Normal => 0,
+        GamePriority::AboveNormal => 1,
+        GamePriority::High => 2,
+    });
+    ui.set_fast_gpu(state.settings.fast_gpu);
+    ui.set_verify_roblox(state.settings.verify_roblox);
+    ui.set_close_stuck(state.settings.close_stuck_roblox);
+    ui.set_close_on_leave(state.settings.close_roblox_on_leave);
+    ui.set_roblox_icon(state.settings.roblox_icon);
+    ui.set_title_bar_index(match state.settings.title_bar {
+        feline_core::settings::TitleBar::Normal => 0,
+        feline_core::settings::TitleBar::Purple => 1,
+        feline_core::settings::TitleBar::Night => 2,
+    });
+    ui.set_break_index(match state.settings.break_minutes {
+        0 => 0,
+        1..=30 => 1,
+        31..=60 => 2,
+        61..=90 => 3,
+        _ => 4,
+    });
+    ui.set_tidy_index(match state.settings.tidy_days {
+        0 => 0,
+        1..=14 => 1,
+        _ => 2,
+    });
     ui.set_roblox_updates(state.settings.roblox_updates);
     ui.set_log_days_index(match state.settings.log_days {
         0 => 0,
@@ -87,6 +122,8 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
         })
         .collect();
     ui.set_settings_tabs(ModelRc::new(VecModel::from(tabs)));
+    drop(state);
+    crate::play_extras::refresh(ui, shared);
 }
 
 fn toggle_index(t: Toggle) -> i32 {
@@ -170,6 +207,7 @@ fn kind_name(installation: &Installation) -> &'static str {
         InstallKind::Flatpak { .. } => "Flatpak",
         InstallKind::AppImage(_) => "AppImage",
         InstallKind::Native(_) => "installed program",
+        InstallKind::Official(_) => "Roblox's installer",
     }
 }
 
@@ -358,8 +396,43 @@ pub fn set_override(ui: &AppWindow, shared: &Shared, which: &str, index: i32) {
     };
     {
         let mut state = lock(shared);
+        // Feline's own options (not written into any runtime's file).
+        let own = &mut state.settings;
+        match which {
+            "after-launch" => {
+                own.after_launch = match index {
+                    1 => AfterLaunch::Minimize,
+                    2 => AfterLaunch::Close,
+                    _ => AfterLaunch::Stay,
+                };
+            }
+            "priority" => {
+                own.game_priority = match index {
+                    1 => GamePriority::AboveNormal,
+                    2 => GamePriority::High,
+                    _ => GamePriority::Normal,
+                };
+            }
+            "fast-gpu" => own.fast_gpu = index != 0,
+            "verify-roblox" => own.verify_roblox = index != 0,
+            "close-stuck" => own.close_stuck_roblox = index != 0,
+            "close-leave" => own.close_roblox_on_leave = index != 0,
+            "roblox-icon" => own.roblox_icon = index != 0,
+            "title-bar" => {
+                own.title_bar = match index {
+                    1 => feline_core::settings::TitleBar::Purple,
+                    2 => feline_core::settings::TitleBar::Night,
+                    _ => feline_core::settings::TitleBar::Normal,
+                }
+            }
+            "break" => own.break_minutes = [0, 30, 60, 90, 120][index.clamp(0, 4) as usize],
+            "tidy" => own.tidy_days = [0, 7, 30][index.clamp(0, 2) as usize],
+            _ => {}
+        }
         let o = &mut state.settings.overrides;
         match which {
+            "after-launch" | "priority" | "fast-gpu" | "verify-roblox" | "close-stuck" | "close-leave" | "break"
+            | "roblox-icon" | "title-bar" | "tidy" => {}
             "renderer" => {
                 o.renderer = match index {
                     1 => Renderer::Vulkan,
@@ -387,6 +460,8 @@ pub fn set_presence(ui: &AppWindow, shared: &Shared, which: &str, value: bool) {
             "join-button" => settings.presence.join_button = value,
             "game-button" => settings.presence.game_button = value,
             "in-menus" => settings.presence.in_menus = value,
+            "region" => settings.discord.region = value,
+            "today" => settings.discord.today = value,
             _ => return,
         }
     }
@@ -482,7 +557,7 @@ fn apply_everywhere(
 }
 
 /// Saves Feline's own settings file (for settings no runtime uses).
-fn save_own(shared: &Shared) -> Result<(), String> {
+pub(crate) fn save_own(shared: &Shared) -> Result<(), String> {
     let state = lock(shared);
     match Settings::path() {
         Some(path) => state.settings.save_to(&path).map_err(|e| e.to_string()),
@@ -536,6 +611,38 @@ pub fn housekeeping(ui: &AppWindow, shared: &Shared, action: &str) {
         } else {
             "Roblox's cache couldn't be cleared (is a game running?).".to_owned()
         }),
+        "clear-roblox" | "clear-roblox-studio" => Some(match hk::clear_roblox(action == "clear-roblox-studio") {
+            Ok(c) => {
+                let mut text = format!("Roblox is fresh: {} freed. Sign in again next time you play.", hk::human(c.freed));
+                if c.logins > 0 {
+                    text.push_str(&format!(" Studio's saved login is gone too ({} entries).", c.logins));
+                }
+                if !c.kept.is_empty() {
+                    text.push_str(&format!(" Couldn't delete: {}.", c.kept.join(", ")));
+                }
+                text
+            }
+            Err(e) => e,
+        }),
+        "clear-shaders" => Some(match hk::clear_shader_cache() {
+            Ok((0, _)) => "The shader cache was already empty.".to_owned(),
+            Ok((bytes, 0)) => format!("Shader cache cleared: {} freed.", hk::human(bytes)),
+            Ok((bytes, kept)) => format!(
+                "Shader cache cleared: {} freed. {kept} files another program is using stayed.",
+                hk::human(bytes)
+            ),
+            Err(e) => e,
+        }),
+        "tidy" => Some(match hk::tidy() {
+            Ok(0) => "Already tidy. Purr.".to_owned(),
+            Ok(bytes) => format!("Tidied up: {} freed.", hk::human(bytes)),
+            Err(e) => e,
+        }),
+        "clean-versions" => Some(match hk::delete_leftover_versions() {
+            Ok(0) => "There were no old Roblox versions to delete.".to_owned(),
+            Ok(bytes) => format!("Deleted old Roblox versions: {} freed.", hk::human(bytes)),
+            Err(e) => e,
+        }),
         "check-update" => {
             crate::gui::check_roblox_update(ui, shared);
             None
@@ -561,12 +668,52 @@ pub fn refresh_sizes(ui: &AppWindow) {
             let cache = measure(hk::roblox_cache_dir());
             let roblox_logs = measure(hk::roblox_log_dir());
             let feline_logs = measure(feline_core::paths::log_dir());
-            let versions = measure(hk::roblox_versions_dir());
+            let shaders = hk::human(hk::shader_cache_dirs().iter().map(|d| hk::size(d)).sum());
+            let total = hk::roblox_total_size();
+            let space = hk::record_space(total);
+            let most = space.iter().map(|(_, b)| *b).max().unwrap_or(1).max(1) as f32;
+            let bars: Vec<f32> = space.iter().map(|(_, b)| *b as f32 / most).collect();
+            let change = match space.first() {
+                Some(&(day, first)) if space.len() > 1 => {
+                    let days = space.last().map_or(0, |l| l.0) - day;
+                    let since = if days == 1 { "yesterday".to_owned() } else { format!("{days} days ago") };
+                    if total >= first {
+                        format!("{} more than {since}", hk::human(total - first))
+                    } else {
+                        format!("{} less than {since}", hk::human(first - total))
+                    }
+                }
+                _ => "Feline keeps a daily record from today on.".to_owned(),
+            };
+            let last_tidy = match hk::last_tidy() {
+                Some((when, freed)) => {
+                    let days = feline_core::history::now().saturating_sub(when) / 86_400;
+                    let ago = match days {
+                        0 => "today".to_owned(),
+                        1 => "yesterday".to_owned(),
+                        d => format!("{d} days ago"),
+                    };
+                    format!("Last time: {ago}, {} freed.", hk::human(freed))
+                }
+                None => String::new(),
+            };
+            let roblox_data = hk::human(hk::roblox_data(false).iter().map(|p| hk::size(p)).sum());
+            let versions = if cfg!(windows) {
+                hk::human(hk::leftover_versions().iter().map(|d| hk::size(d)).sum())
+            } else {
+                measure(hk::roblox_versions_dir())
+            };
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 ui.set_size_roblox_cache(cache.into());
                 ui.set_size_roblox_logs(roblox_logs.into());
                 ui.set_size_feline_logs(feline_logs.into());
                 ui.set_size_roblox_versions(versions.into());
+                ui.set_roblox_data_size(roblox_data.into());
+                ui.set_size_shader_cache(shaders.into());
+                ui.set_space_total(hk::human(total).into());
+                ui.set_space_change(change.into());
+                ui.set_space_history(slint::ModelRc::new(slint::VecModel::from(bars)));
+                ui.set_last_tidy(last_tidy.into());
             });
         });
 }

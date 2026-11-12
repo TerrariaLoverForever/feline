@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Host system information.
 //!
-//! Everything is read directly from `/proc`, `/sys`, `/etc` and environment
-//! variables: no external commands, no extra crates. Every field is
+//! On Linux, everything is read directly from `/proc`, `/sys`, `/etc` and
+//! environment variables: no external commands, no extra crates. On Windows,
+//! from the registry and one memory query (see [`windows_info`]). Every field is
 //! best-effort. A missing file gives `None`/`Unknown` rather than an error,
 //! because a missing value is information to show the user, not a failure.
 //!
@@ -93,6 +94,14 @@ pub struct Gpu {
 impl fmt::Display for Gpu {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.name {
+            // Windows' names already start with the vendor ("Intel(R) UHD …").
+            Some(name)
+                if name
+                    .to_ascii_lowercase()
+                    .starts_with(&self.vendor.to_string().to_ascii_lowercase()) =>
+            {
+                f.write_str(name)?
+            }
             Some(name) => write!(f, "{} {name}", self.vendor)?,
             None => write!(
                 f,
@@ -396,6 +405,9 @@ impl Probe {
 impl SystemInfo {
     /// Collects information about the real machine.
     pub fn collect() -> Self {
+        #[cfg(windows)]
+        return windows_info::collect();
+        #[cfg(not(windows))]
         Probe::host().collect()
     }
 
@@ -408,7 +420,11 @@ impl SystemInfo {
             let _ = writeln!(out, "{label:<16}{value}");
         };
         line("OS", &self.os.as_deref().unwrap_or(unknown));
-        line("Kernel", &self.kernel.as_deref().unwrap_or(unknown));
+        // On Windows, `kernel` holds the Windows build number.
+        line(
+            if cfg!(windows) { "Build" } else { "Kernel" },
+            &self.kernel.as_deref().unwrap_or(unknown),
+        );
         let cpu = match &self.cpu {
             Some(cpu) => format!("{cpu} ({} threads)", self.cpu_threads),
             None => unknown.to_owned(),
@@ -430,6 +446,10 @@ impl SystemInfo {
             };
             line("GPU", &format!("{gpu}{primary}"));
         }
+        if cfg!(windows) {
+            // No Flatpak, display server or init system to speak of.
+            return out;
+        }
         if let Some(version) = &self.nvidia_driver {
             line("NVIDIA driver", version);
         }
@@ -438,6 +458,121 @@ impl SystemInfo {
         line("Desktop", &self.desktop.as_deref().unwrap_or(unknown));
         line("Init system", &self.init);
         out
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Windows
+// ---------------------------------------------------------------------------
+
+/// Reads the same facts on Windows: the version from the registry (the
+/// same values `winver` shows), the CPU's name, total memory, and the display
+/// adapters from the registry's device class for them.
+#[cfg(windows)]
+pub mod windows_info {
+    use super::{FlatpakNvidia, Gpu, GpuVendor, InitSystem, SessionType, SystemInfo};
+    use feline_win::{machine_number, machine_string, total_memory};
+
+    const VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    const CPU_KEY: &str = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+    /// Windows' device class for display adapters.
+    const DISPLAY_CLASS: &str =
+        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+
+    pub fn collect() -> SystemInfo {
+        let build = machine_string(VERSION_KEY, "CurrentBuild");
+        let os = machine_string(VERSION_KEY, "ProductName").map(|name| {
+            let name = windows_name(&name, build.as_deref());
+            match machine_string(VERSION_KEY, "DisplayVersion") {
+                Some(release) => format!("{name} {release}"),
+                None => name,
+            }
+        });
+        let kernel = build.map(|b| match machine_number(VERSION_KEY, "UBR") {
+            Some(revision) => format!("{b}.{revision}"),
+            None => b,
+        });
+        SystemInfo {
+            os,
+            kernel,
+            cpu: machine_string(CPU_KEY, "ProcessorNameString"),
+            cpu_threads: std::thread::available_parallelism().map_or(1, |n| n.get()),
+            memory_total_kib: total_memory().map(|bytes| bytes / 1024),
+            gpus: gpus(),
+            nvidia_driver: None,
+            flatpak_nvidia: FlatpakNvidia::NotApplicable,
+            session: SessionType::Unknown,
+            desktop: None,
+            init: InitSystem::Other("Windows".to_owned()),
+        }
+    }
+
+    /// Windows 11 still calls itself "Windows 10" in `ProductName`; its build
+    /// numbers (22000 and up) tell them apart.
+    pub fn windows_name(product: &str, build: Option<&str>) -> String {
+        let is_11 = build
+            .and_then(|b| b.parse::<u32>().ok())
+            .is_some_and(|b| b >= 22000);
+        if is_11 {
+            product.replacen("Windows 10", "Windows 11", 1)
+        } else {
+            product.to_owned()
+        }
+    }
+
+    /// The display adapters Windows has drivers for (`0000`, `0001`, …).
+    fn gpus() -> Vec<Gpu> {
+        (0..16)
+            .map(|n| format!(r"{DISPLAY_CLASS}\{n:04}"))
+            .filter_map(|key| {
+                let name = machine_string(&key, "DriverDesc")?;
+                // e.g. PCI\VEN_8086&DEV_46B3&SUBSYS_13E31043
+                let ids = machine_string(&key, "MatchingDeviceId").unwrap_or_default();
+                let vendor_id = pci_id(&ids, "VEN_").unwrap_or(0);
+                Some(Gpu {
+                    vendor: GpuVendor::from_pci_id(vendor_id),
+                    vendor_id,
+                    device_id: pci_id(&ids, "DEV_").unwrap_or(0),
+                    name: Some(name),
+                    driver: machine_string(&key, "DriverVersion"),
+                    boot_vga: false,
+                })
+            })
+            .collect()
+    }
+
+    /// The four hex digits after `tag` in a device ID such as `PCI\VEN_8086&…`.
+    pub fn pci_id(ids: &str, tag: &str) -> Option<u16> {
+        let upper = ids.to_ascii_uppercase();
+        let start = upper.find(tag)? + tag.len();
+        u16::from_str_radix(upper.get(start..start + 4)?, 16).ok()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn windows_11_is_named_by_its_build() {
+            assert_eq!(windows_name("Windows 10 Home", Some("26200")), "Windows 11 Home");
+            assert_eq!(windows_name("Windows 10 Pro", Some("19045")), "Windows 10 Pro");
+            assert_eq!(windows_name("Windows 10 Pro", None), "Windows 10 Pro");
+        }
+
+        #[test]
+        fn pci_ids_from_device_ids() {
+            let ids = r"PCI\VEN_8086&DEV_46B3&SUBSYS_13E31043";
+            assert_eq!(pci_id(ids, "VEN_"), Some(0x8086));
+            assert_eq!(pci_id(ids, "DEV_"), Some(0x46b3));
+            assert_eq!(pci_id("ROOT\\BasicDisplay", "VEN_"), None);
+        }
+
+        #[test]
+        fn this_computer_is_described() {
+            let info = collect();
+            assert!(info.os.is_some_and(|os| os.starts_with("Windows")));
+            assert!(info.memory_total_kib.is_some());
+        }
     }
 }
 
@@ -592,7 +727,7 @@ pub struct Check {
 }
 
 impl Check {
-    fn new(level: CheckLevel, title: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(level: CheckLevel, title: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             level,
             title: title.into(),
@@ -607,6 +742,19 @@ impl SystemInfo {
     /// runtime's own self-check.
     pub fn checks(&self) -> Vec<Check> {
         let mut checks = Vec::new();
+
+        if cfg!(windows) {
+            checks.push(match self.gpus.first() {
+                None => Check::new(
+                    CheckLevel::Warning,
+                    "No graphics card found",
+                    "Windows lists no display adapter Feline can read. Roblox needs a \
+                     GPU with DirectX 10 or newer.",
+                ),
+                Some(gpu) => Check::new(CheckLevel::Ok, format!("GPU: {gpu}"), ""),
+            });
+            return checks;
+        }
 
         checks.push(match self.session {
             SessionType::Wayland | SessionType::X11 => Check::new(
@@ -791,6 +939,7 @@ mod tests {
         assert_eq!(session_type(&env(None, None, None)), SessionType::Unknown);
     }
 
+    #[cfg(not(windows))]
     fn bare_info() -> SystemInfo {
         SystemInfo {
             os: None,
@@ -807,10 +956,12 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     fn levels(info: &SystemInfo) -> Vec<CheckLevel> {
         info.checks().iter().map(|c| c.level).collect()
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn checks_report_session_gpu_and_flatpak_nvidia() {
         let mut info = bare_info();

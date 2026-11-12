@@ -1,51 +1,101 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Feline's design tokens. Every color, size and timing used by the UI comes
-// from here, so the look can be adjusted in one place.
+// Feline's design tokens ("The Night-Lit Den", see DESIGN.md). Every colour,
+// size and timing the UI uses comes from here.
 //
-// The palette is a calm, neutral slate with a soft violet accent: low
-// contrast between surfaces (easy on the eyes in a dark room), clear contrast
-// for text, and color only where it means something.
+// Colours are set from Rust (extras.rs, from feline-core's look.rs): one set
+// of neutrals for the dark den and one for the light one, plus the accent
+// family worked out from the player's accent colour. The values written
+// below are the dark den with Feline violet, shown until Rust sets them.
 
 import { Level } from "types.slint";
 
 export global Theme {
-    // Backgrounds, darkest first
-    out property <color> bg: #111218;
-    out property <color> sidebar: #0d0e13;
-    out property <color> surface: #171820;
-    out property <color> surface-raised: #1d1f29;
-    out property <color> surface-hover: #242633;
-    out property <color> border: #252735;
-    out property <color> border-strong: #343749;
+    // True for the dark den, false for the light one.
+    in-out property <bool> dark: true;
 
-    // Text
-    out property <color> text: #ebebf3;
-    out property <color> text-muted: #a5a7ba;
-    out property <color> text-faint: #6d7086;
+    // Surfaces, from the floor up
+    in-out property <color> bg: #111218;
+    in-out property <color> sidebar: #0d0e13;
+    in-out property <color> surface: #171820;
+    in-out property <color> surface-raised: #1d1f29;
+    in-out property <color> surface-hover: #242633;
+    in-out property <color> border: #252735;
+    in-out property <color> border-strong: #343749;
+    // Below the floor: wells for command output.
+    in-out property <color> inset: #0b0c10;
+    // Where a hero panel's accent light fades back into the den.
+    in-out property <color> hero-mid: #1a1a28;
+    in-out property <color> hero-end: #15161e;
+    // Faint washes for chips, thumbnails and bar tracks on surfaces.
+    in-out property <color> wash: #ffffff08;
+    in-out property <color> wash-hover: #ffffff12;
+    in-out property <color> track: #ffffff0c;
+    // Dims the window behind a dialog.
+    in-out property <color> scrim: #05030acc;
+    // The knob of a switch.
+    out property <color> knob: #ffffff;
 
-    // Brand: a calm violet, from the Feline icon
-    out property <color> accent: #8f7ef7;
-    out property <color> accent-strong: #7a67f2;
-    out property <color> accent-soft: #8f7ef71f;
-    out property <color> lavender: #cdc5ff;
-    out property <color> on-accent: #ffffff;
+    // Text: primary, secondary, captions.
+    in-out property <color> text: #ebebf3;
+    in-out property <color> text-muted: #a5a7ba;
+    in-out property <color> text-faint: #6d7086;
+
+    // The accent ("the lamp"): Feline violet unless the player or the
+    // season picks another. Never write an accent shade by hand.
+    in-out property <color> accent: #8f7ef7;
+    in-out property <color> accent-strong: #7a67f2;
+    in-out property <color> accent-soft: #8f7ef71f;
+    in-out property <color> accent-light: #9988fa;
+    in-out property <color> accent-hover: #a596ff;
+    // Surfaces with a hint of the accent (dark tints, or pale washes in the
+    // light den).
+    in-out property <color> accent-deep: #231f3d;
+    in-out property <color> accent-deeper: #2a2148;
+    // Accent-coloured icons and small text on surfaces: pale in the dark
+    // den, deep in the light one, so it always reads.
+    in-out property <color> lavender: #cdc5ff;
+    // Accent-coloured text that must stay readable (pills, links, labels).
+    in-out property <color> accent-ink: #8f7ef7;
+    in-out property <color> on-accent: #ffffff;
 
     // Status
-    out property <color> success: #5fcf98;
-    out property <color> warning: #e9b860;
-    out property <color> danger: #ef6f80;
-    out property <color> info: #67b4f0;
+    in-out property <color> success: #5fcf98;
+    in-out property <color> warning: #e9b860;
+    in-out property <color> danger: #ef6f80;
+    in-out property <color> info: #67b4f0;
+
+    // Elevation: surfaces cast soft, dark, offset shadows onto the floor.
+    // Shadows are never coloured; only the main action, the logo and live
+    // status dots glow.
+    // Cards, tiles and list rows.
+    out property <length> lift-blur: 10px;
+    out property <length> lift-offset: 3px;
+    in-out property <color> lift-color: #00000059;
+    // A little higher while the pointer is over something you can click.
+    out property <length> lift-hover-blur: 16px;
+    out property <length> lift-hover-offset: 5px;
+    // Small things resting on a surface (the chosen tab, a switch's knob).
+    out property <length> nudge-blur: 6px;
+    out property <length> nudge-offset: 2px;
+    // Dialogs and pop-ups, above everything.
+    out property <length> pop-blur: 28px;
+    out property <length> pop-offset: 10px;
+    in-out property <color> pop-color: #00000073;
+    // Keyboard focus: a 2px ring in the accent, outside the control.
+    out property <length> focus-width: 2px;
 
     // Shape
-    out property <length> radius: 14px;
-    out property <length> radius-small: 10px;
+    out property <length> radius: 12px;
+    out property <length> radius-small: 8px;
     out property <length> radius-large: 20px;
 
-    // Type scale
+    // Type scale: 11 / 12 / 13.5 / 14 / 16 / 28. Hierarchy comes from
+    // weight and the text colours, not from new sizes.
     out property <length> text-small: 12px;
-    out property <length> text-body: 13.5px;
-    out property <length> text-title: 16px;
-    out property <length> text-page: 28px;
+    out property <length> text-body: 13px;
+    out property <length> text-label: 13.5px;
+    out property <length> text-title: 15px;
+    out property <length> text-page: 24px;
 
     // Motion: everything animates only in response to something (no idle
     // animations, so the launcher costs nothing while you play).
@@ -53,7 +103,7 @@ export global Theme {
     out property <duration> normal: 240ms;
     out property <duration> slow: 360ms;
 
-    // The color for a status level (used by dots, pills and values).
+    // The colour for a status level (used by dots, pills and values).
     public pure function level-color(level: Level) -> color {
         if level == Level.ok {
             return self.success;

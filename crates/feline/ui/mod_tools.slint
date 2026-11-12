@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The Mods page's tools: the mod generator (Feline Tint: one colour or a
+// gradient, on the parts of Roblox's UI you pick) and sharing mods as .zip
+// files. A global, so the page reads it directly and Rust sets it with
+// `ui.global::<ModTools>()`.
+
+export global ModTools {
+    // ---- Generator
+    // The preset colours (names and swatches).
+    in property <[string]> preset-names;
+    in property <[color]> preset-colours;
+    // The chosen colours, and how they're written (#RRGGBB).
+    in property <color> colour1: #cdb8ff;
+    in property <color> colour2: #ffc2e2;
+    in property <string> hex1: "#CDB8FF";
+    in property <string> hex2: "#FFC2E2";
+    in-out property <bool> gradient;
+    // 0 left to right, 1 top to bottom, 2 diagonal.
+    in-out property <int> direction;
+    // Which parts get recoloured.
+    in-out property <bool> icons: true;
+    in-out property <bool> menus: true;
+    in-out property <bool> chat: true;
+    in-out property <bool> other: true;
+    // Roblox's own icons with the tint on (only where Roblox's files are).
+    in property <image> preview;
+    in property <bool> has-preview;
+    // The Feline Tint mod exists already.
+    in property <bool> installed;
+    // What went wrong with a typed colour.
+    in property <string> message;
+
+    // A preset swatch was clicked: (which colour 1/2, preset index).
+    callback choose-preset(int, int);
+    // A colour was typed: (which colour 1/2, text).
+    callback choose-hex(int, string);
+    // Something changed: redraw the preview.
+    callback changed();
+    // Make (or update) the Feline Tint and switch it on.
+    callback make();
+
+    // ---- Picks
+    in property <bool> windows;
+    // The picked cursor is an animated one.
+    in property <bool> cursor-animated;
+    // Getting an emoji set (Catmoji downloads).
+    in property <bool> emoji-busy;
+    // Puts in an emoji set: "windows" or "catmoji".
+    callback emoji(string);
+
+    // ---- Sharing
+    // Packs a mod into a .zip in Downloads.
+    callback share(string);
+    // Asks for a .zip and adds the mod in it.
+    callback import-zip();
+}

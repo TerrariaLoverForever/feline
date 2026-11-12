@@ -65,6 +65,18 @@ pub fn run(args: &[&str]) -> ExitCode {
                 }
             }
         }
+        // Feline starts these itself (see companion.rs).
+        ["--with-roblox", pid, rest @ ..] => match pid.parse() {
+            Ok(pid) => crate::companion::run_game_helper(pid, rest.contains(&"--cursor")),
+            Err(_) => ExitCode::from(2),
+        },
+        ["--multi-roblox"] => crate::companion::run_multi_holder(),
+        ["--studio"] => crate::companion::run_studio_command(None),
+        ["--studio", file] => crate::companion::run_studio_command(Some(file)),
+        ["--with-studio", pid] => match pid.parse() {
+            Ok(pid) => crate::companion::run_studio_helper(pid),
+            Err(_) => ExitCode::from(2),
+        },
         ["--install-desktop-entry"] => install_desktop_entry(),
         ["--uninstall-desktop-entry"] => uninstall_desktop_entry(),
         ["-V" | "--version"] => {

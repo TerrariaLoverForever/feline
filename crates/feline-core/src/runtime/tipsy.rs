@@ -92,7 +92,7 @@ impl RuntimeBackend for Tipsy {
             InstallKind::Flatpak { app_id, .. } => {
                 ctx.flatpak_data_dir(app_id).map(|d| d.join("tipsy"))
             }
-            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.data_dir("tipsy"),
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => ctx.data_dir("tipsy"),
         }
         .into_iter()
         .collect()
@@ -126,7 +126,7 @@ impl RuntimeBackend for Tipsy {
                 cmd.arg("--command=tipsy").arg(app_id).arg("version");
                 cmd
             }
-            InstallKind::AppImage(_) => {
+            InstallKind::AppImage(_) | InstallKind::Official(_) => {
                 return Err(RuntimeError::Unsupported {
                     what: "a version query",
                 });
@@ -168,7 +168,7 @@ fn parse_version(stdout: &str) -> Option<String> {
     (!line.contains(char::is_whitespace)).then(|| line.to_owned())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
@@ -208,6 +208,7 @@ mod tests {
             path: Some(root.join("bin").into_os_string()),
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let found = TIPSY.detect(&ctx);
         assert_eq!(found.len(), 1);

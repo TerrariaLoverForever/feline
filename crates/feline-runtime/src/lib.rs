@@ -18,6 +18,10 @@
 // `bionic` and `dl` (Feline's implementations calling glibc) and `jni`
 // (the fake Java world the engine calls into). Each use says why it's sound.
 
+// The runtime is built on Linux's own interfaces (ELF, glibc, Wayland/X11).
+// Elsewhere the crate is empty, so the workspace still builds there.
+#![cfg(target_os = "linux")]
+
 pub mod audio;
 pub mod alloc;
 pub mod assets;

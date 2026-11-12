@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Feline main window: sidebar navigation plus the current page.
 
+import { Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab } from "types.slint";
+import { Extras, AchievementTile } from "extras.slint";
+import { ModTools } from "mod_tools.slint";
+import { PlayExtras, ProgramRow } from "play_extras.slint";
+import { More, VisitRow, LibraryRow, IconRow } from "more.slint";
+import { Looks } from "looks.slint";
+import { TweaksState, FlagRow } from "tweaks_state.slint";
+import { TweaksPage } from "pages/tweaks.slint";
+import { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab, ModRow, FoundRow, GameCard, TopGame, VersionRow, GameProfileRow, ServerRow, DriverRow, CaseRow, ProbeRow } from "types.slint";
 import { Icons } from "icons.slint";
 import { Logo, NavItem, Eyebrow, StatusDot } from "components.slint";
 import { HomePage } from "pages/home.slint";
@@ -11,10 +19,16 @@ import { SettingsPage } from "pages/settings.slint";
 import { SystemPage } from "pages/system.slint";
 import { DiagnosticsPage } from "pages/diagnostics.slint";
 import { AboutPage } from "pages/about.slint";
+import { ModsPage } from "pages/mods.slint";
+import { LibraryPage } from "pages/library.slint";
+import { StudioPage } from "pages/studio.slint";
+import { ServersPage } from "pages/servers.slint";
+import { RobloxExtras } from "pages/roblox_extras.slint";
 import { AccountNotice } from "pages/notice.slint";
 
 // Make the shared types visible to Rust.
-export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab }
+export { Theme, Extras, AchievementTile, TweaksState, FlagRow, ModTools, PlayExtras, ProgramRow, More, VisitRow, LibraryRow, IconRow, Looks }
+export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab, ModRow, FoundRow, GameCard, TopGame, VersionRow, GameProfileRow, ServerRow, DriverRow, CaseRow, ProbeRow }
 
 export component AppWindow inherits Window {
     title: "Feline";
@@ -23,11 +37,27 @@ export component AppWindow inherits Window {
     preferred-height: 760px;
     min-width: 960px;
     min-height: 660px;
-    background: Theme.bg;
+    // With Windows 11's glass, the window itself is see-through and the
+    // glass shows behind a thin wash of Feline's background.
+    background: Looks.glass > 0 ? Theme.bg.with-alpha(0.55) : Theme.bg;
+    default-font-family: Looks.font;
     default-font-size: 14px;
+    default-font-weight: 400;
+
+    // The standard widgets (text fields, drop-downs, scroll bars) follow
+    // Feline's light or dark den.
+    property <bool> dark-den: Theme.dark;
+    init => {
+        Palette.color-scheme = root.dark-den ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark-den => {
+        Palette.color-scheme = root.dark-den ? ColorScheme.dark : ColorScheme.light;
+    }
 
     in-out property <Page> page: Page.home;
     in property <string> version;
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
 
     // Runtimes (set from Rust)
     in property <[RuntimeRow]> runtimes;
@@ -44,6 +74,8 @@ export component AppWindow inherits Window {
     in-out property <int> settings-tab;
     // The open tab of a runtime's page.
     in-out property <int> runtime-tab;
+    // The open tab of the About page.
+    in-out property <int> about-tab;
 
     // Launching (set from Rust)
     in property <LaunchState> launch-state: LaunchState.idle;
@@ -53,6 +85,59 @@ export component AppWindow inherits Window {
     in property <string> stat-time;
     in property <string> stat-cpu;
     in property <string> stat-memory;
+    in property <string> stat-game;
+    in property <string> stat-region;
+    // Home: greeting, playtime, games (set from Rust)
+    in property <string> greeting: "Ready to pounce?";
+    in property <string> play-today;
+    in property <string> play-week;
+    in property <string> play-total;
+    in property <[GameCard]> recent-games;
+    in property <[GameCard]> favourite-games;
+    in property <[TopGame]> top-games;
+    in property <[GameCard]> discord-games;
+    callback home-opened();
+    // Roblox page tools (set from Rust)
+    in property <string> rx-runtime;
+    in property <string> rx-health;
+    in property <bool> rx-health-ok;
+    in property <bool> rx-health-checking;
+    in property <[string]> rx-health-problems;
+    in property <[VersionRow]> rx-versions;
+    in property <[string]> rx-profiles;
+    in property <[string]> rx-choices;
+    in property <[GameProfileRow]> rx-game-profiles;
+    in property <int> rx-everyday;
+    in property <bool> rx-has-settings;
+    in property <string> rx-message;
+    callback roblox-opened();
+    callback rx-check-health();
+    callback rx-save-profile(string);
+    callback rx-apply-profile(string);
+    callback rx-delete-profile(string);
+    callback rx-set-game-profile(string, int);
+    callback rx-repair();
+    // Server picker
+    in property <string> servers-game;
+    in property <[ServerRow]> servers;
+    in property <bool> servers-loading;
+    in property <string> servers-error;
+    in-out property <int> servers-sort;
+    callback open-servers(string);
+    callback reload-servers(int);
+    callback join-server(string);
+    callback quick-join(int);
+    in property <bool> can-rejoin;
+    callback rejoin();
+    callback server-hop();
+    callback play-place(string);
+    callback toggle-favourite(string);
+    callback toggle-discord-hidden(string);
+    // Discord extras
+    in property <string> discord-text;
+    in property <bool> discord-region;
+    in property <bool> discord-today;
+    callback set-discord-text(string);
     in property <string> roblox-status;
 
     callback play();
@@ -70,6 +155,20 @@ export component AppWindow inherits Window {
     in property <string> system-report;
     in property <bool> system-loading: true;
     callback refresh-system();
+    in property <Level> verdict-level;
+    in property <string> verdict-title;
+    in property <string> verdict-detail;
+    in property <[CheckRow]> pc-checks;
+    in property <[DriverRow]> drivers;
+    in property <[float]> cpu-history;
+    in property <[float]> roblox-cpu-history;
+    in property <[float]> memory-history;
+    in property <[float]> roblox-memory-history;
+    in property <string> cpu-now;
+    in property <string> memory-now;
+    in property <string> roblox-now;
+    callback system-tick();
+    callback open-link(string);
 
     // Diagnostics page (set from Rust)
     in property <[CheckRow]> checks;
@@ -81,11 +180,58 @@ export component AppWindow inherits Window {
     callback run-doctor();
     callback run-runtime-info();
     callback build-report();
+    in property <[CheckRow]> clues;
+    in property <[CaseRow]> cases;
+    in property <bool> investigating;
+    callback investigate();
+    in property <[ProbeRow]> probes;
+    in property <Level> net-level;
+    in property <string> net-title;
+    in property <string> net-detail;
+    in property <bool> net-running;
+    callback run-network-test();
+    callback save-report-zip();
 
     // Feline's settings (set from Rust)
     in property <int> renderer-index;
     in property <int> gamemode-index;
     in property <int> close-index;
+    // Feline's own options (set-override keys "after-launch", "priority",
+    // "fast-gpu", "verify-roblox"; on/off ones use 0/1).
+    in property <int> after-launch-index;
+    in property <int> priority-index;
+    in property <bool> fast-gpu;
+    in property <bool> verify-roblox;
+    in property <bool> close-stuck;
+    in property <bool> close-on-leave;
+    in property <bool> roblox-icon;
+    in property <int> title-bar-index;
+    in property <string> roblox-data-size;
+    in property <int> break-index;
+
+    // Mods page (set from Rust)
+    in property <[ModRow]> mod-rows;
+    in property <[FoundRow]> mods-found;
+    in property <bool> mods-supported;
+    in property <string> mods-support;
+    in property <string> mods-status;
+    in property <string> mods-folder;
+    in property <bool> mods-theme-installed;
+    callback get-theme();
+    in property <[bool]> mods-picks: [false, false, false, false, false];
+    in property <[string]> mods-profiles;
+    in property <[string]> mods-conflicts;
+    callback pick-file(int);
+    callback clear-pick(int);
+    callback save-mod-profile(string);
+    callback apply-mod-profile(string);
+    callback delete-mod-profile(string);
+    callback listen-mod(string);
+    callback mods-opened();
+    callback toggle-mod(string, bool);
+    callback import-mods(string);
+    callback open-mods-folder();
+    callback restore-mods();
     in property <string> apply-status;
     in property <Level> apply-level;
     in property <[RuntimeTab]> settings-tabs;
@@ -102,6 +248,12 @@ export component AppWindow inherits Window {
     in property <int> log-days-index;
     in property <bool> has-saved-login;
     in property <string> size-roblox-cache;
+    in property <string> size-shader-cache;
+    in property <string> space-total;
+    in property <string> space-change;
+    in property <[float]> space-history;
+    in property <int> tidy-index;
+    in property <string> last-tidy;
     in property <string> size-roblox-logs;
     in property <string> size-feline-logs;
     in property <string> size-roblox-versions;
@@ -117,25 +269,43 @@ export component AppWindow inherits Window {
     callback set-roblox-updates(bool);
     callback set-log-days(int);
     callback housekeeping(string);
+    callback tweaks-opened();
+    // Ends Feline (even with "keep running" on).
+    callback quit-feline();
+
+    // Behind everything: a gradient, or your picture under a wash of the
+    // background so text stays readable.
+    if Looks.background == 1: Rectangle {
+        background: @linear-gradient(135deg, Theme.accent.with-alpha(0.32) 0%, Theme.bg.with-alpha(0) 55%, Theme.accent.with-alpha(0.14) 100%);
+    }
+    if Looks.background == 2: Image {
+        width: parent.width;
+        height: parent.height;
+        source: Looks.picture;
+        image-fit: cover;
+    }
+    if Looks.background == 2: Rectangle {
+        background: Theme.bg.with-alpha(0.8);
+    }
 
     HorizontalLayout {
         // Sidebar
         Rectangle {
-            width: 232px;
+            width: 210px;
             background: Theme.sidebar;
             VerticalLayout {
-                padding: 14px;
-                padding-top: 18px;
-                spacing: 3px;
+                padding: 12px;
+                padding-top: 16px;
+                spacing: 2px;
 
                 HorizontalLayout {
                     padding-left: 8px;
-                    padding-bottom: 22px;
+                    padding-bottom: 14px;
                     spacing: 12px;
                     alignment: start;
+                    // No glow here: the page's own main action is the lamp.
                     Logo {
                         size: 38px;
-                        glow: true;
                         playful: true;
                     }
                     VerticalLayout {
@@ -148,7 +318,7 @@ export component AppWindow inherits Window {
                             color: Theme.text;
                         }
                         Text {
-                            text: "Roblox on Linux";
+                            text: "Roblox, the cat way";
                             font-size: 11.5px;
                             color: Theme.text-faint;
                         }
@@ -161,10 +331,11 @@ export component AppWindow inherits Window {
                     active: root.page == Page.home;
                     clicked => {
                         root.page = Page.home;
+                        root.home-opened();
                     }
                 }
                 NavItem {
-                    label: "Runtimes";
+                    label: root.windows ? "Roblox" : "Runtimes";
                     icon: Icons.runtimes;
                     active: root.page == Page.runtimes;
                     clicked => {
@@ -173,6 +344,44 @@ export component AppWindow inherits Window {
                         }
                         root.page = Page.runtimes;
                         root.settings-opened();
+                        root.roblox-opened();
+                    }
+                }
+                NavItem {
+                    label: "Studio";
+                    icon: Icons.sparkles;
+                    active: root.page == Page.studio;
+                    clicked => {
+                        root.page = Page.studio;
+                    }
+                }
+                NavItem {
+                    label: "Mods";
+                    icon: Icons.paw;
+                    active: root.page == Page.mods;
+                    clicked => {
+                        root.page = Page.mods;
+                        root.mods-opened();
+                    }
+                }
+                NavItem {
+                    label: "Library";
+                    icon: Icons.archive;
+                    active: root.page == Page.library;
+                    clicked => {
+                        root.page = Page.library;
+                        if More.library.length == 0 {
+                            More.load-library();
+                        }
+                    }
+                }
+                NavItem {
+                    label: "Tweaks";
+                    icon: Icons.sliders;
+                    active: root.page == Page.tweaks;
+                    clicked => {
+                        root.page = Page.tweaks;
+                        root.tweaks-opened();
                     }
                 }
                 NavItem {
@@ -186,7 +395,7 @@ export component AppWindow inherits Window {
                 }
 
                 Eyebrow {
-                    text: "HELP";
+                    text: "Help";
                     height: 34px;
                     vertical-alignment: bottom;
                     horizontal-alignment: left;
@@ -224,6 +433,16 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                 }
 
+                // With "keep running", closing the window doesn't end
+                // Feline; this does.
+                if More.keep-running: NavItem {
+                    label: "Quit Feline";
+                    icon: Icons.logout;
+                    clicked => {
+                        root.quit-feline();
+                    }
+                }
+
                 // The chosen runtime, and whether a game is running.
                 Rectangle {
                     border-radius: Theme.radius;
@@ -238,7 +457,7 @@ export component AppWindow inherits Window {
                             StatusDot {
                                 tone: root.launch-state == LaunchState.running ? Theme.success
                                     : root.launch-state == LaunchState.starting ? Theme.warning
-                                    : root.selected-name != "" ? Theme.accent : Theme.text-faint;
+                                    : root.selected-name != "" ? Theme.success : Theme.text-faint;
                                 pulse: root.launch-state == LaunchState.starting;
                             }
                         }
@@ -247,12 +466,12 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                             Text {
                                 text: root.launch-state == LaunchState.running ? "Playing"
-                                    : root.launch-state == LaunchState.starting ? "Starting…" : "Runtime";
+                                    : root.launch-state == LaunchState.starting ? "Starting…" : (root.windows ? "Roblox" : "Runtime");
                                 font-size: 11px;
                                 color: Theme.text-faint;
                             }
                             Text {
-                                text: root.selected-name != "" ? root.selected-name : "None chosen";
+                                text: root.selected-name != "" ? root.selected-name : "Nothing chosen";
                                 font-size: 13px;
                                 font-weight: 600;
                                 color: Theme.text;
@@ -287,6 +506,7 @@ export component AppWindow inherits Window {
 
         // Current page
         if root.page == Page.home: HomePage {
+            windows: root.windows;
             horizontal-stretch: 1;
             selected-name: root.selected-name;
             selected-detail: root.selected-detail;
@@ -297,10 +517,35 @@ export component AppWindow inherits Window {
             stat-time: root.stat-time;
             stat-cpu: root.stat-cpu;
             stat-memory: root.stat-memory;
+            stat-game: root.stat-game;
+            stat-region: root.stat-region;
             roblox-status: root.roblox-status;
             discord-on: root.discord-on;
+            greeting: root.greeting;
+            play-today: root.play-today;
+            play-week: root.play-week;
+            play-total: root.play-total;
+            recent: root.recent-games;
+            favourites: root.favourite-games;
+            top: root.top-games;
             play => {
                 root.play();
+            }
+            play-place(p) => {
+                root.play-place(p);
+            }
+            can-rejoin: root.can-rejoin;
+            rejoin => {
+                root.rejoin();
+            }
+            server-hop => {
+                root.server-hop();
+            }
+            toggle-favourite(p) => {
+                root.toggle-favourite(p);
+            }
+            open-servers(p) => {
+                root.open-servers(p);
             }
             choose-runtime => {
                 root.page = Page.runtimes;
@@ -311,6 +556,7 @@ export component AppWindow inherits Window {
             }
         }
         if root.page == Page.runtimes: RuntimesPage {
+            windows: root.windows;
             horizontal-stretch: 1;
             runtimes: root.runtimes;
             feline-runtimes: root.feline-runtimes;
@@ -342,8 +588,119 @@ export component AppWindow inherits Window {
             set-text(tab, key, value) => {
                 root.set-runtime-text(tab, key, value);
             }
+            RobloxExtras {
+                show: root.runtime-open == "";
+                windows: root.windows;
+                runtime: root.rx-runtime;
+                health: root.rx-health;
+                health-ok: root.rx-health-ok;
+                health-checking: root.rx-health-checking;
+                health-problems: root.rx-health-problems;
+                versions: root.rx-versions;
+                profiles: root.rx-profiles;
+                choices: root.rx-choices;
+                game-profiles: root.rx-game-profiles;
+                everyday-profile: root.rx-everyday;
+                has-settings: root.rx-has-settings;
+                message: root.rx-message;
+                check-health => {
+                    root.rx-check-health();
+                }
+                save-profile(n) => {
+                    root.rx-save-profile(n);
+                }
+                apply-profile(n) => {
+                    root.rx-apply-profile(n);
+                }
+                delete-profile(n) => {
+                    root.rx-delete-profile(n);
+                }
+                set-game-profile(p, i) => {
+                    root.rx-set-game-profile(p, i);
+                }
+                repair => {
+                    root.rx-repair();
+                }
+            }
+        }
+        if root.page == Page.servers: ServersPage {
+            game: root.servers-game;
+            servers: root.servers;
+            loading: root.servers-loading;
+            error: root.servers-error;
+            sort <=> root.servers-sort;
+            back => {
+                root.page = Page.home;
+            }
+            reload(i) => {
+                root.reload-servers(i);
+            }
+            join(id) => {
+                root.join-server(id);
+            }
+            join-any => {
+                root.join-server("");
+            }
+            quick-join(i) => {
+                root.quick-join(i);
+            }
+        }
+        if root.page == Page.tweaks: TweaksPage {
+            windows: root.windows;
+        }
+        if root.page == Page.library: LibraryPage { }
+        if root.page == Page.studio: StudioPage { }
+        if root.page == Page.mods: ModsPage {
+            windows: root.windows;
+            mods: root.mod-rows;
+            found: root.mods-found;
+            supported: root.mods-supported;
+            support: root.mods-support;
+            status: root.mods-status;
+            folder: root.mods-folder;
+            theme-installed: root.mods-theme-installed;
+            picks: root.mods-picks;
+            mod-profiles: root.mods-profiles;
+            conflicts: root.mods-conflicts;
+            pick(k) => {
+                root.pick-file(k);
+            }
+            clear-pick(k) => {
+                root.clear-pick(k);
+            }
+            save-mod-profile(n) => {
+                root.save-mod-profile(n);
+            }
+            apply-mod-profile(n) => {
+                root.apply-mod-profile(n);
+            }
+            delete-mod-profile(n) => {
+                root.delete-mod-profile(n);
+            }
+            listen(n) => {
+                root.listen-mod(n);
+            }
+            get-theme => {
+                root.get-theme();
+            }
+            toggle(name, on) => {
+                root.toggle-mod(name, on);
+            }
+            import(name) => {
+                root.import-mods(name);
+            }
+            open-folder => {
+                root.open-mods-folder();
+            }
+            rescan => {
+                root.mods-opened();
+            }
+            restore => {
+                root.restore-mods();
+            }
         }
         if root.page == Page.settings: SettingsPage {
+            windows: root.windows;
             horizontal-stretch: 1;
             current <=> root.settings-tab;
             renderer-index: root.renderer-index;
@@ -351,6 +708,26 @@ export component AppWindow inherits Window {
             close-index: root.close-index;
             apply-status: root.apply-status;
             apply-level: root.apply-level;
+            after-launch-index: root.after-launch-index;
+            priority-index: root.priority-index;
+            fast-gpu: root.fast-gpu;
+            verify-roblox: root.verify-roblox;
+            close-stuck: root.close-stuck;
+            close-on-leave: root.close-on-leave;
+            roblox-icon: root.roblox-icon;
+            title-bar-index: root.title-bar-index;
+            roblox-data-size: root.roblox-data-size;
+            discord-text: root.discord-text;
+            discord-region: root.discord-region;
+            discord-today: root.discord-today;
+            discord-games: root.discord-games;
+            set-discord-text(t) => {
+                root.set-discord-text(t);
+            }
+            toggle-discord-hidden(p) => {
+                root.toggle-discord-hidden(p);
+            }
+            break-index: root.break-index;
             discord-on: root.discord-on;
             discord-user: root.discord-user;
             discord-join: root.discord-join;
@@ -364,6 +741,12 @@ export component AppWindow inherits Window {
             log-days-index: root.log-days-index;
             has-saved-login: root.has-saved-login;
             size-roblox-cache: root.size-roblox-cache;
+            size-shader-cache: root.size-shader-cache;
+            space-total: root.space-total;
+            space-change: root.space-change;
+            space-history: root.space-history;
+            tidy-index: root.tidy-index;
+            last-tidy: root.last-tidy;
             size-roblox-logs: root.size-roblox-logs;
             size-feline-logs: root.size-feline-logs;
             size-roblox-versions: root.size-roblox-versions;
@@ -394,15 +777,35 @@ export component AppWindow inherits Window {
             }
         }
         if root.page == Page.system: SystemPage {
+            windows: root.windows;
             horizontal-stretch: 1;
             rows: root.system-rows;
             report: root.system-report;
             loading: root.system-loading;
+            verdict-level: root.verdict-level;
+            verdict-title: root.verdict-title;
+            verdict-detail: root.verdict-detail;
+            pc-checks: root.pc-checks;
+            drivers: root.drivers;
+            cpu-history: root.cpu-history;
+            roblox-cpu-history: root.roblox-cpu-history;
+            memory-history: root.memory-history;
+            roblox-memory-history: root.roblox-memory-history;
+            cpu-now: root.cpu-now;
+            memory-now: root.memory-now;
+            roblox-now: root.roblox-now;
             refresh => {
                 root.refresh-system();
             }
+            tick => {
+                root.system-tick();
+            }
+            open-link(url) => {
+                root.open-link(url);
+            }
         }
         if root.page == Page.diagnostics: DiagnosticsPage {
+            windows: root.windows;
             horizontal-stretch: 1;
             checks: root.checks;
             checks-loading: root.system-loading;
@@ -414,6 +817,23 @@ export component AppWindow inherits Window {
             result-level: root.diag-level;
             output: root.diag-output;
             log-folder: root.log-folder;
+            clues: root.clues;
+            cases: root.cases;
+            investigating: root.investigating;
+            probes: root.probes;
+            net-level: root.net-level;
+            net-title: root.net-title;
+            net-detail: root.net-detail;
+            net-running: root.net-running;
+            investigate => {
+                root.investigate();
+            }
+            run-network-test => {
+                root.run-network-test();
+            }
+            save-report-zip => {
+                root.save-report-zip();
+            }
             run-doctor => {
                 root.run-doctor();
             }
@@ -432,8 +852,10 @@ export component AppWindow inherits Window {
             }
         }
         if root.page == Page.about: AboutPage {
+            windows: root.windows;
             horizontal-stretch: 1;
             version: root.version;
+            current <=> root.about-tab;
             show-notice => {
                 root.show-notice = true;
             }
@@ -442,6 +864,7 @@ export component AppWindow inherits Window {
 
     // Drawn last, so it covers everything else.
     if root.show-notice: AccountNotice {
+            windows: root.windows;
         width: parent.width;
         height: parent.height;
         accepted => {

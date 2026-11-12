@@ -14,7 +14,8 @@ authors.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+# Linux only: on other systems the program only says so (see src/main.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
 # Safe(r) wrappers for the memory system calls the loader needs (mmap,
 # mprotect, munmap, page size). Apache-2.0 WITH LLVM-exception OR Apache-2.0
 # OR MIT. Default features off: no `std` I/O wrappers we don't use.

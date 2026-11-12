@@ -1,6 +1,6 @@
 [package]
 name = "feline"
-description = "Feline: a launcher for playing Roblox on Linux"
+description = "Feline: a launcher for playing Roblox on Linux and Windows"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,6 +18,9 @@ feline-core = { path = "../feline-core" }
 # renderer with the software renderer as fallback, and accessibility support.
 slint = { version = "1.18.1", default-features = false, features = [
     "std",
+    # Asking winit whether Feline's window has the focus (background music
+    # "only while Feline is focused"). Pins Slint's winit to 0.30.
+    "unstable-winit-030",
     "compat-1-2",
     "backend-winit",
     "renderer-femtovg",
@@ -27,6 +30,23 @@ slint = { version = "1.18.1", default-features = false, features = [
 
 # Values for the runtimes' JSON settings files (see feline-core's runtime::config).
 serde_json = "1"
+# Background music (About → Music): plays MP3, M4A/AAC, OGG Vorbis, FLAC
+# and WAV through the system's audio output (cpal: WASAPI on Windows, ALSA
+# on Linux, which needs alsa-lib's headers to build). No recording. MIT OR
+# Apache-2.0; the Symphonia decoders are MPL-2.0 (GPL-compatible).
+rodio = { version = "0.23", default-features = false, features = [
+    "playback",
+    "mp3",
+    "mp4",
+    "vorbis",
+    "flac",
+    "wav",
+] }
+
+[target.'cfg(windows)'.dependencies]
+# Printing text commands' output in the terminal they were typed in (Feline
+# is a windowed program on Windows).
+feline-win = { path = "../feline-win" }
 
 [build-dependencies]
 # Compiles the .slint UI files into Rust code at build time.

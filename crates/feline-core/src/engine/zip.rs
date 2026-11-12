@@ -14,6 +14,13 @@ pub struct Entry {
     local_header: usize,
 }
 
+impl Entry {
+    /// Its size once unpacked (as the zip says).
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
 fn u16_at(d: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(d.get(at..at + 2)?.try_into().ok()?))
 }

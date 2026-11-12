@@ -67,6 +67,24 @@ cargo build --release
 ./target/release/feline --install-desktop-entry  # add Feline to your app menu
 ```
 
+## Updating
+
+Feline updates itself from this repository's GitHub releases: About →
+Updates → Check now (or let it look when it opens). Each release carries
+`feline` (Linux) and `feline.exe` (Windows) with their SHA-256 checksums;
+Feline only installs a download that matches. Releases are built by GitHub
+Actions when a version tag is pushed:
+
+```sh
+# bump `version` in Cargo.toml to 0.2.0 first, commit, then:
+git tag v0.2.0
+git push origin master v0.2.0
+```
+
+Building it yourself instead: `git pull`, then `cargo build --release` again
+(close Feline first, including from its tray icon: closing the window keeps
+it running in the background).
+
 Text commands, handy for bug reports:
 
 ```sh

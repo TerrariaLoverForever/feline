@@ -6,14 +6,14 @@
 //!   it's cut off from the terminal Feline may have been started from: Ctrl+C,
 //!   the terminal closing (SIGHUP) or job control never reach the game, and
 //!   closing or crashing Feline never ends a game session. See [`detached`].
-//! - All runtime output goes to a log file in `~/.local/state/feline/logs/`,
+//!   On Windows: its own process group, with no console.
+//! - All runtime output goes to a log file in Feline's log folder,
 //!   never to a pipe Feline must keep reading. A pipe would stall the game if
 //!   Feline stopped reading it (for example after Feline exits).
 //! - Old logs are pruned so the folder doesn't grow forever.
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -79,7 +79,10 @@ impl std::error::Error for LaunchError {}
 /// Falls back to just a new process group (still safe from Ctrl+C) if
 /// `setsid` isn't installed, or if the program itself can't be found: then
 /// starting it directly gives the clear "not found" error.
+#[cfg(unix)]
 pub fn detached(command: Command) -> Command {
+    use std::os::unix::process::CommandExt;
+
     let program_exists = {
         let program = Path::new(command.get_program());
         if program.components().count() > 1 {
@@ -108,7 +111,22 @@ pub fn detached(command: Command) -> Command {
     wrapped
 }
 
+/// Makes `command` run in its own process group, without a console window,
+/// so Ctrl+C or closing the terminal Feline was started from never reaches
+/// it, and closing Feline doesn't end it (Windows doesn't end child
+/// processes with their parent).
+#[cfg(windows)]
+pub fn detached(mut command: Command) -> Command {
+    use std::os::windows::process::CommandExt;
+    // From the Windows API's process creation flags.
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    command
+}
+
 /// The first executable called `name` on `PATH`.
+#[cfg(unix)]
 fn which(name: &str) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     std::env::split_paths(&std::env::var_os("PATH")?)
@@ -172,6 +190,181 @@ impl RunningGame {
     }
 }
 
+/// Shows a small notification on the desktop (best effort; never blocks).
+/// Windows: a message box on top of other windows. Linux: `notify-send`.
+pub fn notify(title: &str, text: &str) {
+    #[cfg(windows)]
+    feline_win::game::notify(title, text);
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("notify-send")
+            .args(["--app-name=Feline", title, text])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+}
+
+/// A quiet notification that doesn't take the focus (for while a game
+/// runs). Windows: Feline's own little card in the corner of the game's
+/// screen (Windows holds its own notifications back during full-screen
+/// games). Linux: `notify-send`, which is quiet anyway.
+pub fn notify_quiet(title: &str, text: &str) {
+    #[cfg(windows)]
+    feline_win::overlay::card(title, text, 5);
+    #[cfg(not(windows))]
+    notify(title, text);
+}
+
+/// `command` started through `wrapper` (e.g. `gamescope -f --` or
+/// `distrobox enter games --`): the wrapper's words, then the command.
+/// Words are split on spaces, with double quotes keeping words together.
+/// An empty wrapper leaves the command as it is.
+pub fn wrap(command: Command, wrapper: &str) -> Command {
+    let words = crate::settings::Program { path: String::new(), args: wrapper.to_owned(), close_after: false }.arg_list();
+    let Some((program, args)) = words.split_first() else { return command };
+    let mut wrapped = Command::new(program);
+    wrapped.args(args).arg(command.get_program()).args(command.get_args());
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => wrapped.env(key, value),
+            None => wrapped.env_remove(key),
+        };
+    }
+    if let Some(dir) = command.get_current_dir() {
+        wrapped.current_dir(dir);
+    }
+    wrapped
+}
+
+/// Puts `text` on the clipboard. Windows: directly. Linux: `wl-copy`
+/// (Wayland) or `xclip` (X11), whichever is there. False if neither worked.
+pub fn copy_text(text: &str) -> bool {
+    #[cfg(windows)]
+    {
+        feline_win::tray::copy_text(text)
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::Write as _;
+        let tries: [&[&str]; 2] = [&["wl-copy"], &["xclip", "-selection", "clipboard"]];
+        tries.iter().any(|args| {
+            let Ok(mut child) = Command::new(args[0])
+                .args(&args[1..])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                return false;
+            };
+            let wrote = child.stdin.take().is_some_and(|mut i| i.write_all(text.as_bytes()).is_ok());
+            wrote && child.wait().is_ok_and(|s| s.success())
+        })
+    }
+}
+
+/// A program Feline started next to Roblox.
+pub struct Companion {
+    pub name: String,
+    child: Child,
+    close_after: bool,
+}
+
+/// Starts the programs that go with Roblox. Returns them, and a line for
+/// each one that couldn't start.
+pub fn start_programs(programs: &[crate::settings::Program]) -> (Vec<Companion>, Vec<String>) {
+    let mut started = Vec::new();
+    let mut problems = Vec::new();
+    for program in programs {
+        let path = Path::new(&program.path);
+        let mut command = Command::new(path);
+        command.args(program.arg_list());
+        if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+            command.current_dir(dir);
+        }
+        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // Its own process group, so it's independent of Feline.
+            command.creation_flags(0x0000_0200);
+        }
+        match command.spawn() {
+            Ok(child) => started.push(Companion { name: program.name(), child, close_after: program.close_after }),
+            Err(e) => problems.push(format!("{} didn't start: {e}", program.name())),
+        }
+    }
+    (started, problems)
+}
+
+/// Closes the programs that were set to close with Roblox: first asks
+/// them nicely (their windows' close button, or SIGTERM), and only ends
+/// them if they're still there a few seconds later.
+pub fn close_programs(companions: Vec<Companion>) {
+    let mut closing: Vec<Companion> = companions.into_iter().filter(|c| c.close_after).collect();
+    for c in &mut closing {
+        if matches!(c.child.try_wait(), Ok(Some(_))) {
+            continue;
+        }
+        #[cfg(windows)]
+        for window in feline_win::window::windows_of(c.child.id()) {
+            feline_win::window::ask_to_close(window);
+        }
+        #[cfg(not(windows))]
+        let _ = Command::new("kill")
+            .args(["-TERM", &c.child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && closing.iter_mut().any(|c| matches!(c.child.try_wait(), Ok(None))) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    for mut c in closing {
+        if matches!(c.child.try_wait(), Ok(None)) {
+            let _ = c.child.kill();
+        }
+        let _ = c.child.wait();
+    }
+}
+
+/// Whether the process `pid` is still running.
+pub fn alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        feline_win::game::alive(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        // A finished child of another process can linger as a "zombie"
+        // until it's collected; that's not running.
+        fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| s.rsplit_once(')').map(|(_, rest)| rest.trim_start().to_owned()))
+            .is_some_and(|rest| !rest.starts_with('Z') && !rest.starts_with('X'))
+    }
+}
+
+/// The text of the break reminder after `minutes` of play.
+pub fn break_reminder(minutes: u64) -> (String, String) {
+    let played = match minutes {
+        m if m < 60 => format!("{m} minutes"),
+        60 => "an hour".to_owned(),
+        m if m % 60 == 0 => format!("{} hours", m / 60),
+        m => format!("{} h {} min", m / 60, m % 60),
+    };
+    (
+        "Time for a cat nap?".to_owned(),
+        format!(
+            "You've been playing for {played}. Stretch your paws, drink some water, \
+             rest your eyes. Your game is still there when you're back."
+        ),
+    )
+}
+
 /// The last `max_lines` lines of a log file (reads at most the last 64 KiB).
 pub fn log_tail(path: &Path, max_lines: usize) -> String {
     const WINDOW: u64 = 64 * 1024;
@@ -226,6 +419,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     #[test]
     fn output_goes_to_log_and_exit_status_is_reported() {
         let dir = temp_dir("launch-log");
@@ -242,6 +436,7 @@ mod tests {
         assert_eq!(tail, "oops");
     }
 
+    #[cfg(unix)]
     #[test]
     fn runtime_gets_its_own_session_with_the_same_pid() {
         let dir = temp_dir("launch-pgid");
@@ -293,6 +488,43 @@ mod tests {
             matches!(err, LaunchError::Start(RunError::NotFound { .. })),
             "{err}"
         );
+    }
+
+    #[test]
+    fn wrappers_go_in_front() {
+        let mut game = Command::new("flatpak");
+        game.args(["run", "org.vinegarhq.Sober"]).env("A", "1");
+        let wrapped = wrap(game, r#"gamescope -W 1920 -H 1080 -f --"#);
+        assert_eq!(wrapped.get_program(), "gamescope");
+        let args: Vec<_> = wrapped.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["-W", "1920", "-H", "1080", "-f", "--", "flatpak", "run", "org.vinegarhq.Sober"]);
+        assert_eq!(wrapped.get_envs().count(), 1);
+        assert_eq!(wrap(Command::new("x"), "  ").get_program(), "x");
+    }
+
+    #[test]
+    fn programs_start_and_close_with_the_game() {
+        use crate::settings::Program;
+        let (program, args) = if cfg!(windows) {
+            ("C:/Windows/System32/PING.EXE", "-n 30 127.0.0.1")
+        } else {
+            ("/bin/sleep", "30")
+        };
+        if !Path::new(program).is_file() {
+            return;
+        }
+        let programs = [
+            Program { path: program.into(), args: args.into(), close_after: true },
+            Program { path: "/no/such/program".into(), args: String::new(), close_after: true },
+        ];
+        let (started, problems) = start_programs(&programs);
+        assert_eq!((started.len(), problems.len()), (1, 1), "{problems:?}");
+        let pid = started[0].child.id();
+        assert!(alive(pid));
+        let begin = Instant::now();
+        close_programs(started);
+        assert!(!alive(pid));
+        assert!(begin.elapsed() < Duration::from_secs(8));
     }
 
     #[test]

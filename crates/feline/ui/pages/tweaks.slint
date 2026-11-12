@@ -1,0 +1,396 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Tweaks: Roblox's FastFlags, limited to the ones Roblox still allows.
+// Friendly choices first, then every allowed flag, then profiles.
+
+import { TextEdit, ScrollView, ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { TweaksState } from "../tweaks_state.slint";
+import { Icons } from "../icons.slint";
+import { More } from "../more.slint";
+import { PageBase, PageHeader, Card, SectionTitle, SettingRow, Toggle, Divider, BodyText, Banner, PawTip, SecondaryButton, ConfirmButton, Eyebrow, CatEmpty } from "../components.slint";
+
+export component TweaksPage inherits PageBase {
+    in property <bool> windows;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 32px;
+            spacing: 16px;
+            alignment: start;
+
+            PageHeader {
+                title: "Tweaks";
+                description: "Roblox's FastFlags, the friendly way. Only the 18 that Roblox still accepts are here: anything else would be ignored by Roblox anyway.";
+                if TweaksState.count > 0: ConfirmButton {
+                    text: "Reset all";
+                    icon: Icons.refresh;
+                    confirmed => {
+                        TweaksState.reset();
+                    }
+                }
+            }
+
+            if !TweaksState.supported: Card {
+                CatEmpty {
+                    title: "Tweaks need Roblox's official client";
+                    text: root.windows
+                        ? "Choose Roblox on the Roblox page, then come back."
+                        : "On Linux, Sober and the other runtimes keep FastFlags in their own settings. Feline will learn to write them there later.";
+                }
+            }
+
+            if TweaksState.status != "": Banner {
+                text: TweaksState.status;
+            }
+
+            // ---------------- Graphics
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Graphics";
+                    icon: Icons.sparkles;
+                }
+                SettingRow {
+                    label: "Graphics API";
+                    help: "How Roblox talks to your graphics card. Try another one if Roblox crashes, flickers or stutters.";
+                    ComboBox {
+                        width: 210px;
+                        model: ["Roblox decides", "Direct3D 11", "Vulkan", "OpenGL"];
+                        current-index: TweaksState.renderer;
+                        selected => {
+                            TweaksState.set("renderer", self.current-index);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Anti-aliasing";
+                    help: "Smooths jagged edges. Higher looks nicer and costs frames.";
+                    ComboBox {
+                        width: 210px;
+                        model: ["Roblox decides", "1× (off)", "2×", "4×", "8×"];
+                        current-index: TweaksState.msaa;
+                        selected => {
+                            TweaksState.set("msaa", self.current-index);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Texture quality";
+                    help: "Lower saves video memory on older graphics cards.";
+                    ComboBox {
+                        width: 210px;
+                        model: ["Roblox decides", "Lowest", "Low", "Medium", "High"];
+                        current-index: TweaksState.textures;
+                        selected => {
+                            TweaksState.set("textures", self.current-index);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Lock graphics quality";
+                    help: "Keeps the quality at one level instead of letting Roblox's automatic mode move it around.";
+                    ComboBox {
+                        width: 210px;
+                        model: ["Roblox decides", "Potato (1)", "Low (5)", "Medium (10)", "High (15)", "Maximum (21)"];
+                        current-index: TweaksState.quality;
+                        selected => {
+                            TweaksState.set("quality", self.current-index);
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Looks
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Looks";
+                    icon: Icons.palette;
+                }
+                SettingRow {
+                    label: "Hide grass";
+                    help: "No grass on terrain. Cleaner view, a few more frames.";
+                    Toggle {
+                        checked: TweaksState.hide-grass;
+                        toggled(on) => {
+                            TweaksState.set("hide-grass", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Still grass";
+                    help: "Grass stops swaying in the wind.";
+                    Toggle {
+                        checked: TweaksState.still-grass;
+                        toggled(on) => {
+                            TweaksState.set("still-grass", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Grey sky";
+                    help: "Swaps the skybox for plain grey. Some players find it easier on the eyes.";
+                    Toggle {
+                        checked: TweaksState.gray-sky;
+                        toggled(on) => {
+                            TweaksState.set("gray-sky", on ? 1 : 0);
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Window and performance
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Window and performance";
+                    icon: Icons.bolt;
+                }
+                SettingRow {
+                    label: "Real fullscreen with Alt+Enter";
+                    help: "Alt+Enter switches to exclusive fullscreen instead of a borderless window. Can lower input delay; switching to other windows gets slower.";
+                    Toggle {
+                        checked: TweaksState.exclusive-fullscreen;
+                        toggled(on) => {
+                            TweaksState.set("exclusive-fullscreen", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Ignore display scaling";
+                    help: "Roblox draws at your screen's real resolution even if Windows scales things up (125%, 150%). Sharper, but the menus get smaller.";
+                    Toggle {
+                        checked: TweaksState.ignore-dpi;
+                        toggled(on) => {
+                            TweaksState.set("ignore-dpi", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Freeze lighting updates";
+                    help: "Stops Roblox recalculating lighting as the world changes. Can help weak CPUs, but lighting may look wrong when things move.";
+                    Toggle {
+                        checked: TweaksState.pause-voxels;
+                        toggled(on) => {
+                            TweaksState.set("pause-voxels", on ? 1 : 0);
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Presets and JSON
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Quick presets";
+                    icon: Icons.bolt;
+                }
+                BodyText {
+                    text: "One click sets the graphics tweaks above. Your graphics API, full screen and scaling choices stay as they are.";
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    SecondaryButton {
+                        text: "Potato (most FPS)";
+                        clicked => {
+                            More.flags-preset("potato");
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Balanced";
+                        clicked => {
+                            More.flags-preset("balanced");
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Pretty";
+                        clicked => {
+                            More.flags-preset("pretty");
+                        }
+                    }
+                }
+                Divider { }
+                SectionTitle {
+                    text: "FastFlags as JSON";
+                    icon: Icons.sliders;
+                }
+                BodyText {
+                    text: "Paste FastFlags from Bloxstrap, a fork, or a friend (the {\"Name\": \"value\"} kind) and Feline adds the ones Roblox still reads. It tells you which ones it left out. Export saves yours to Downloads.";
+                }
+                json := TextEdit {
+                    height: 90px;
+                    placeholder-text: "{ \"FIntDebugForceMSAASamples\": \"4\" }";
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    SecondaryButton {
+                        text: "Add these";
+                        enabled: json.text != "";
+                        clicked => {
+                            More.flags-import(json.text);
+                            json.text = "";
+                        }
+                    }
+                    SecondaryButton {
+                        text: "From a file…";
+                        icon: Icons.folder;
+                        clicked => {
+                            More.flags-import-file();
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Export";
+                        clicked => {
+                            More.flags-export();
+                        }
+                    }
+                }
+                if More.tweaks-status != "": Banner {
+                    text: More.tweaks-status;
+                    tone: Theme.text-muted;
+                }
+            }
+
+            // ---------------- Every flag
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Every allowed flag";
+                    icon: Icons.sliders;
+                }
+                BodyText {
+                    text: "For tinkerers: the raw values. Leave one empty to let Roblox decide. Feline refuses values that don't fit a flag.";
+                }
+                for f in TweaksState.flags: Rectangle {
+                    height: flag-row.preferred-height;
+                    flag-row := HorizontalLayout {
+                        spacing: 12px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 1px;
+                            Text {
+                                text: f.name;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: f.hint;
+                                font-size: 11.5px;
+                                color: Theme.text-faint;
+                            }
+                        }
+                        field := LineEdit {
+                            width: 130px;
+                            text: f.value;
+                            placeholder-text: "Roblox decides";
+                            accepted(text) => {
+                                TweaksState.set-flag(f.name, text);
+                            }
+                            changed has-focus => {
+                                if !self.has-focus && self.text != f.value {
+                                    TweaksState.set-flag(f.name, self.text);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Profiles
+            if TweaksState.supported: Card {
+                SectionTitle {
+                    text: "Profiles";
+                    icon: Icons.archive;
+                }
+                BodyText {
+                    text: "Save the tweaks you have now under a name (\"Potato\", \"Pretty\", \"Competitive\"), then give games their own.";
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    name := LineEdit {
+                        placeholder-text: "Name for the current tweaks";
+                        accepted(text) => {
+                            TweaksState.save-profile(text);
+                            self.text = "";
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Save";
+                        icon: Icons.download;
+                        clicked => {
+                            TweaksState.save-profile(name.text);
+                            name.text = "";
+                        }
+                    }
+                }
+                for p in TweaksState.profiles: Rectangle {
+                    height: profile-row.preferred-height;
+                    profile-row := HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: p;
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                        SecondaryButton {
+                            text: "Use now";
+                            clicked => {
+                                TweaksState.use-profile(p);
+                            }
+                        }
+                        ConfirmButton {
+                            text: "Delete";
+                            icon: Icons.trash;
+                            confirmed => {
+                                TweaksState.delete-profile(p);
+                            }
+                        }
+                    }
+                }
+                if TweaksState.profiles.length > 0 && TweaksState.games.length > 0: VerticalLayout {
+                    padding-top: 6px;
+                    spacing: 4px;
+                    Eyebrow {
+                        text: "Per game";
+                    }
+                    BodyText {
+                        text: "A game with its own profile gets it when you start that game from Feline. Everything else uses your everyday tweaks.";
+                    }
+                }
+                if TweaksState.profiles.length > 0: VerticalLayout {
+                    for g in TweaksState.games: Rectangle {
+                        height: game-row.preferred-height;
+                        game-row := SettingRow {
+                            label: g.name;
+                            ComboBox {
+                                width: 200px;
+                                model: TweaksState.choices;
+                                current-index: g.index;
+                                selected => {
+                                    TweaksState.set-game(g.place, self.current-index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if TweaksState.supported: PawTip {
+                text: "Tweaks go in each time you press Play (Roblox has to be closed). Roblox may change its list of allowed flags at any time; when it does, a flag that stops working is simply ignored, nothing worse.";
+            }
+        }
+    }
+}

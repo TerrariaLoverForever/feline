@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Roblox Studio: opening it through Feline (with mods, its own FastFlags,
+// a Discord status), place files, and your own Explorer icons.
+
+import { ScrollView, LineEdit, TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { More } from "../more.slint";
+import { PageBase, PageHeader, Card, BodyText, Divider, SectionTitle, SettingRow, SecondaryButton, ConfirmButton, Banner, Toggle, CatEmpty } from "../components.slint";
+
+export component StudioPage inherits PageBase {
+    ScrollView {
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            alignment: start;
+
+            PageHeader {
+                title: "Studio";
+                description: "Roblox Studio, opened through Feline: your mods, Studio's own FastFlags, your own icons and a Discord status.";
+            }
+            if !More.studio-found: Card {
+                CatEmpty {
+                    title: "No Roblox Studio here yet";
+                    text: More.windows
+                        ? "Install Roblox Studio from roblox.com (Create → Start creating), then come back."
+                        : "On Linux, Studio runs through Vinegar (vinegarhq.org). Install it, then come back.";
+                }
+            }
+            if More.studio-found: Card {
+                SectionTitle {
+                    text: "Roblox Studio";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: "Studio " + More.studio-version;
+                    help: "Open Studio from Feline to bring your mods, Studio's own FastFlags and a Discord status along.";
+                    SecondaryButton {
+                        text: "Open Studio";
+                        icon: Icons.play;
+                        clicked => {
+                            More.open-studio();
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Open place files with Feline";
+                    help: More.windows
+                        ? "Double-clicking a .rbxl or .rbxlx file opens Studio through Feline, with your flags, icons and mods. Off: back to what opened them before. (If you once picked \"Always use this app\" for them, Windows keeps that choice.)"
+                        : "Double-clicking a .rbxl or .rbxlx file opens Studio (in Vinegar) through Feline, with your icons and mods. Off: back to what opened them before.";
+                    Toggle {
+                        checked: More.place-files;
+                        toggled(on) => {
+                            More.set-switch("place-files", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "My mods in Studio too";
+                    help: "The mods you switched on (sounds, cursors, fonts, tints) go into Studio's folder as well.";
+                    Toggle {
+                        checked: More.studio-mods;
+                        toggled(on) => {
+                            More.set-switch("studio-mods", on);
+                        }
+                    }
+                }
+                if More.windows: Divider { }
+                if More.windows: SettingRow {
+                    label: "Discord status while building";
+                    help: "\"Building Obby World · in Roblox Studio\", from the place open in Studio.";
+                    Toggle {
+                        checked: More.studio-discord;
+                        toggled(on) => {
+                            More.set-switch("studio-discord", on);
+                        }
+                    }
+                }
+                if More.windows: Divider { }
+                if More.windows: BodyText {
+                    text: "Studio's FastFlags. Roblox's allowlist is for the game only, so Studio takes any flag: paste them as JSON. Empty: none.";
+                }
+                if More.windows: VerticalLayout {
+                    spacing: 10px;
+                    studio-json := TextEdit {
+                        height: 110px;
+                        text: More.studio-flags;
+                        placeholder-text: "{ \"FFlagSomething\": \"True\" }";
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        SecondaryButton {
+                            text: "Save Studio's flags";
+                            clicked => {
+                                More.save-studio-flags(studio-json.text);
+                            }
+                        }
+                    }
+                }
+                if More.studio-status != "": Banner {
+                    text: More.studio-status;
+                    tone: Theme.text-muted;
+                }
+            }
+            if More.studio-found: Card {
+                SectionTitle {
+                    text: "Studio icons";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Give any of Studio's " + More.icon-count + " classes (Part, Model, Script…) a picture of your own in the Explorer. They go into Studio whenever Feline opens it.";
+                }
+                icon-search := LineEdit {
+                    placeholder-text: "Find a class, like Part or Script";
+                    edited(text) => {
+                        More.filter-icons(text);
+                    }
+                }
+                for row in More.icons: HorizontalLayout {
+                    spacing: 12px;
+                    Image {
+                        width: 24px;
+                        height: 24px;
+                        source: row.icon;
+                    }
+                    Text {
+                        text: row.name + (row.changed ? "  (yours)" : "");
+                        color: row.changed ? Theme.success : Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    SecondaryButton {
+                        text: "Replace…";
+                        clicked => {
+                            More.replace-icon(row.name);
+                        }
+                    }
+                    if row.changed: ConfirmButton {
+                        text: "Reset";
+                        icon: Icons.trash;
+                        confirmed => {
+                            More.reset-icon(row.name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

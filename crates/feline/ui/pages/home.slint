@@ -2,13 +2,179 @@
 // Home page: the Play button with the chosen runtime, the launch status, live
 // stats while a game runs, and a few facts at a glance.
 
+import { Extras } from "../extras.slint";
+import { More } from "../more.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { LaunchState } from "../types.slint";
+import { LaunchState, GameCard, TopGame } from "../types.slint";
 import { Icon, Icons } from "../icons.slint";
-import { PageBase, Logo, PlayButton, SecondaryButton, StatusDot, BodyText, StatTile, Banner } from "../components.slint";
+import { PageBase, Logo, PlayButton, SecondaryButton, StatusDot, BodyText, StatTile, Banner, PawTip, PawPrint, Eyebrow } from "../components.slint";
+
+// One game in a list: icon, name, playtime, a star and a Play button.
+component GameRow inherits Rectangle {
+    in property <GameCard> entry;
+    callback play();
+    callback star();
+    callback servers();
+    property <bool> shown: false;
+    height: 68px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: touch.has-hover ? Theme.border-strong : Theme.border;
+    background: touch.has-hover ? Theme.surface-raised : Theme.surface;
+    drop-shadow-blur: touch.has-hover ? Theme.lift-hover-blur : Theme.lift-blur;
+    drop-shadow-offset-y: touch.has-hover ? Theme.lift-hover-offset : Theme.lift-offset;
+    drop-shadow-color: Theme.lift-color;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+    animate background, border-color { duration: Theme.fast; }
+    animate drop-shadow-blur, drop-shadow-offset-y { duration: Theme.normal; easing: ease-out-quint; }
+    init => {
+        root.shown = true;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.play();
+        }
+    }
+    HorizontalLayout {
+        padding: 10px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 14px;
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            clip: true;
+            background: Theme.accent.with-alpha(0.15);
+            if root.entry.has-icon: Image {
+                width: 100%;
+                height: 100%;
+                source: root.entry.icon;
+                image-fit: cover;
+            }
+            if !root.entry.has-icon: Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 22px;
+                height: 22px;
+                commands: Icons.paw;
+                tone: Theme.lavender;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.entry.name;
+                font-size: 14.5px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.entry.detail;
+                font-size: 12px;
+                color: Theme.text-faint;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            shortcut-area := TouchArea {
+                width: 82px;
+                height: 30px;
+                mouse-cursor: pointer;
+                clicked => {
+                    More.make-shortcut(root.entry.place, root.entry.name);
+                }
+                Rectangle {
+                    border-radius: 15px;
+                    background: shortcut-area.has-hover ? Theme.wash-hover : Theme.wash;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text {
+                        text: "Shortcut";
+                        font-size: 12px;
+                        color: shortcut-area.has-hover ? Theme.text : Theme.text-muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            servers-area := TouchArea {
+                width: 74px;
+                height: 30px;
+                mouse-cursor: pointer;
+                clicked => {
+                    root.servers();
+                }
+                Rectangle {
+                    border-radius: 15px;
+                    background: servers-area.has-hover ? Theme.wash-hover : Theme.wash;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text {
+                        text: "Servers";
+                        font-size: 12px;
+                        color: servers-area.has-hover ? Theme.text : Theme.text-muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            star-area := TouchArea {
+                width: 34px;
+                height: 34px;
+                mouse-cursor: pointer;
+                clicked => {
+                    root.star();
+                }
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 19px;
+                    height: 19px;
+                    commands: Icons.star;
+                    tone: root.entry.favourite ? Theme.warning : (star-area.has-hover ? Theme.text : Theme.text-faint);
+                    fill: root.entry.favourite ? Theme.warning : transparent;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 38px;
+                height: 38px;
+                border-radius: 19px;
+                // One Lamp: neutral until you point at the row.
+                background: touch.has-hover ? Theme.accent : Theme.surface-hover;
+                animate background { duration: Theme.fast; }
+                Icon {
+                    x: (parent.width - self.width) / 2 + 1px;
+                    y: (parent.height - self.height) / 2;
+                    width: 16px;
+                    height: 16px;
+                    commands: Icons.play;
+                    tone: touch.has-hover ? Theme.on-accent : Theme.text-muted;
+                    fill: touch.has-hover ? Theme.on-accent : Theme.text-muted;
+                }
+            }
+        }
+    }
+}
 
 export component HomePage inherits PageBase {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     // Selected runtime (set from Rust). Empty name = nothing selected.
     in property <string> selected-name;
     in property <string> selected-detail;
@@ -25,27 +191,48 @@ export component HomePage inherits PageBase {
     // Roblox app updates for Feline's runtime ("" = nothing to show).
     in property <string> roblox-status;
     in property <bool> discord-on;
+    // Live game and server while playing ("" until known).
+    in property <string> stat-game;
+    in property <string> stat-region;
+    // Personal parts (set from Rust).
+    in property <string> greeting: "Ready to pounce?";
+    in property <string> play-today;
+    in property <string> play-week;
+    in property <string> play-total;
+    in property <[GameCard]> recent;
+    in property <[GameCard]> favourites;
+    in property <[TopGame]> top;
 
     callback play();
+    callback play-place(string);
+    callback toggle-favourite(string);
+    callback open-servers(string);
     callback choose-runtime();
     callback open-logs();
+    // Back into the server you just left, or a different one of that game.
+    in property <bool> can-rejoin;
+    callback rejoin();
+    callback server-hop();
 
     property <bool> has-runtime: root.selected-name != "";
     property <bool> busy: root.launch-state == LaunchState.starting || root.launch-state == LaunchState.running;
 
     ScrollView {
         VerticalLayout {
-            padding: 30px;
+            padding: 22px;
             spacing: 18px;
             alignment: start;
 
             // Hero
             Rectangle {
-                height: 236px;
+                height: 176px;
                 border-radius: Theme.radius-large;
                 border-width: 1px;
                 border-color: Theme.border;
-                background: @linear-gradient(125deg, #231f3d 0%, #1a1a28 45%, #15161e 100%);
+                background: @linear-gradient(125deg, Theme.accent-deep 0%, Theme.hero-mid 45%, Theme.hero-end 100%);
+                drop-shadow-blur: Theme.lift-blur;
+                drop-shadow-offset-y: Theme.lift-offset;
+                drop-shadow-color: Theme.lift-color;
                 clip: true;
 
                 // Soft light behind the logo, and a faint ring
@@ -55,7 +242,7 @@ export component HomePage inherits PageBase {
                     width: 330px;
                     height: 330px;
                     border-radius: 165px;
-                    background: @radial-gradient(circle, #8f7ef72e 0%, #8f7ef700 70%);
+                    background: @radial-gradient(circle, Theme.accent.with-alpha(0.18) 0%, Theme.accent.with-alpha(0) 70%);
                 }
                 Rectangle {
                     x: parent.width - 300px;
@@ -64,17 +251,44 @@ export component HomePage inherits PageBase {
                     height: 420px;
                     border-radius: 210px;
                     border-width: 1px;
-                    border-color: #8f7ef71a;
+                    border-color: Theme.accent.with-alpha(0.1);
                 }
 
+                // The season's sprinkles (snow, petals, leaves…): still, like
+                // everything else here.
+                for dot in [
+                    { x: 0.30, y: 0.12, s: 6px }, { x: 0.38, y: 0.62, s: 4px },
+                    { x: 0.45, y: 0.25, s: 5px }, { x: 0.52, y: 0.85, s: 6px },
+                    { x: 0.58, y: 0.08, s: 4px }, { x: 0.63, y: 0.45, s: 7px },
+                    { x: 0.70, y: 0.20, s: 5px }, { x: 0.74, y: 0.70, s: 4px },
+                    { x: 0.80, y: 0.35, s: 6px }, { x: 0.86, y: 0.10, s: 4px },
+                    { x: 0.90, y: 0.55, s: 5px }, { x: 0.95, y: 0.30, s: 7px },
+                    { x: 0.97, y: 0.80, s: 4px }, { x: 0.34, y: 0.92, s: 5px },
+                ]: Rectangle {
+                    visible: Extras.season-on;
+                    x: parent.width * dot.x;
+                    y: parent.height * dot.y;
+                    width: dot.s;
+                    height: dot.s;
+                    border-radius: dot.s / 2;
+                    background: Extras.sprinkle.with-alpha(0.55);
+                }
+
+                // A trail of paw prints across the hero, as if a cat walked by.
+                PawPrint { x: parent.width - 250px; y: parent.height - 46px; size: 20px; }
+                PawPrint { x: parent.width - 212px; y: parent.height - 78px; size: 20px; }
+                PawPrint { x: parent.width - 166px; y: parent.height - 102px; size: 22px; }
+                PawPrint { x: parent.width - 126px; y: parent.height - 138px; size: 22px; }
+                PawPrint { x: parent.width - 78px; y: parent.height - 158px; size: 22px; }
+
                 HorizontalLayout {
-                    padding-left: 34px;
-                    padding-right: 34px;
-                    spacing: 28px;
+                    padding-left: 26px;
+                    padding-right: 26px;
+                    spacing: 22px;
                     VerticalLayout {
                         alignment: center;
                         Logo {
-                            size: 120px;
+                            size: 88px;
                             glow: true;
                             playful: true;
                         }
@@ -84,13 +298,14 @@ export component HomePage inherits PageBase {
                         spacing: 6px;
                         horizontal-stretch: 1;
                         Text {
-                            text: root.launch-state == LaunchState.running ? "Have fun!" : "Ready to play?";
-                            font-size: 36px;
+                            text: root.launch-state == LaunchState.running ? "Purr-fect, you're in!" : root.greeting;
+                            font-size: 28px;
                             font-weight: 800;
                             color: Theme.text;
                         }
                         Text {
-                            text: "Roblox on Linux. Always lands on its feet.";
+                            text: Extras.season-on ? Extras.season-greeting : "Roblox, the cat way. Always lands on its feet.";
+                            wrap: word-wrap;
                             font-size: 14px;
                             color: Theme.text-muted;
                         }
@@ -101,8 +316,8 @@ export component HomePage inherits PageBase {
                             spacing: 16px;
                             alignment: start;
                             PlayButton {
-                                text: root.launch-state == LaunchState.starting ? "Starting…"
-                                    : root.launch-state == LaunchState.running ? "Running" : "Play Roblox";
+                                text: root.launch-state == LaunchState.starting ? "Stretching…"
+                                    : root.launch-state == LaunchState.running ? "Playing" : "Play Roblox";
                                 enabled: root.has-runtime && !root.busy;
                                 clicked => {
                                     root.play();
@@ -111,7 +326,7 @@ export component HomePage inherits PageBase {
                             // The chosen runtime; click to change it
                             chip := Rectangle {
                                 border-radius: Theme.radius;
-                                background: chip-touch.has-hover ? #ffffff0c : #ffffff06;
+                                background: chip-touch.has-hover ? Theme.wash-hover : Theme.wash;
                                 border-width: 1px;
                                 border-color: chip-touch.has-hover ? Theme.border-strong : Theme.border;
                                 animate background, border-color { duration: Theme.fast; }
@@ -132,8 +347,9 @@ export component HomePage inherits PageBase {
                                         alignment: center;
                                         spacing: 2px;
                                         Text {
-                                            text: root.detecting ? "Looking for runtimes…"
-                                                : root.has-runtime ? root.selected-name : "No runtime chosen";
+                                            text: root.detecting ? (root.windows ? "Sniffing out Roblox…" : "Sniffing out runtimes…")
+                                                : root.has-runtime ? root.selected-name
+                                                : root.windows ? "Roblox isn't chosen yet" : "No runtime chosen";
                                             font-size: 14px;
                                             font-weight: 600;
                                             color: Theme.text;
@@ -170,9 +386,7 @@ export component HomePage inherits PageBase {
             if root.launch-state != LaunchState.idle: Rectangle {
                 property <bool> shown: false;
                 opacity: self.shown ? 1 : 0;
-                transform-scale: self.shown ? 1 : 0.985;
                 animate opacity { duration: Theme.normal; easing: ease-out-quad; }
-                animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
                 animate background, border-color { duration: Theme.normal; }
                 init => {
                     self.shown = true;
@@ -180,6 +394,9 @@ export component HomePage inherits PageBase {
                 border-radius: Theme.radius;
                 border-width: 1px;
                 background: root.launch-state == LaunchState.failed ? Theme.danger.with-alpha(0.07) : Theme.surface;
+                drop-shadow-blur: Theme.lift-blur;
+                drop-shadow-offset-y: Theme.lift-offset;
+                drop-shadow-color: Theme.lift-color;
                 border-color: root.launch-state == LaunchState.failed ? Theme.danger.with-alpha(0.35) : Theme.border;
                 HorizontalLayout {
                     padding: 18px;
@@ -208,6 +425,25 @@ export component HomePage inherits PageBase {
                             text: root.launch-detail;
                         }
                     }
+                    if root.launch-state == LaunchState.ended && root.can-rejoin: HorizontalLayout {
+                        alignment: center;
+                        spacing: 10px;
+                        SecondaryButton {
+                            text: "Rejoin";
+                            icon: Icons.refresh;
+                            primary: true;
+                            clicked => {
+                                root.rejoin();
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Server hop";
+                            icon: Icons.chevron-right;
+                            clicked => {
+                                root.server-hop();
+                            }
+                        }
+                    }
                     if root.launch-state == LaunchState.failed || root.launch-state == LaunchState.ended: VerticalLayout {
                         alignment: center;
                         SecondaryButton {
@@ -218,6 +454,25 @@ export component HomePage inherits PageBase {
                             }
                         }
                     }
+                }
+            }
+
+            // The game and server while playing
+            if root.launch-state == LaunchState.running && (root.stat-game != "" || root.stat-region != ""): HorizontalLayout {
+                spacing: 12px;
+                if root.stat-game != "": StatTile {
+                    horizontal-stretch: 2;
+                    icon: Icons.gamepad;
+                    label: "Playing";
+                    value: root.stat-game;
+                    tone: Theme.lavender;
+                }
+                if root.stat-region != "": StatTile {
+                    horizontal-stretch: 2;
+                    icon: Icons.link;
+                    label: "Server";
+                    value: root.stat-region;
+                    tone: Theme.info;
                 }
             }
 
@@ -253,14 +508,15 @@ export component HomePage inherits PageBase {
                 StatTile {
                     horizontal-stretch: 1;
                     icon: Icons.runtimes;
-                    label: "Runtime";
-                    value: root.has-runtime ? root.selected-name : "Not chosen";
+                    label: root.windows ? "Roblox client" : "Runtime";
+                    value: root.has-runtime ? root.selected-name : "Not chosen yet";
                 }
                 StatTile {
                     horizontal-stretch: 1;
                     icon: Icons.download;
-                    label: "Roblox app";
-                    value: root.roblox-status != "" ? root.roblox-status : "Managed by the runtime";
+                    label: "Updates";
+                    value: root.roblox-status != "" ? root.roblox-status
+                        : root.windows ? "Roblox handles them" : "The runtime handles them";
                 }
                 StatTile {
                     horizontal-stretch: 1;
@@ -271,8 +527,220 @@ export component HomePage inherits PageBase {
                 }
             }
 
-            Banner {
-                text: "Roblox doesn't support third-party clients on Linux. Using one can put your account at risk.";
+            // Playtime
+            if root.play-total != "" && root.play-total != "0 s": HorizontalLayout {
+                spacing: 12px;
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.clock;
+                    label: "Played today";
+                    value: root.play-today;
+                    tone: Theme.success;
+                }
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.clock;
+                    label: "This week";
+                    value: root.play-week;
+                    tone: Theme.info;
+                }
+                StatTile {
+                    horizontal-stretch: 1;
+                    icon: Icons.paw;
+                    label: "All time";
+                    value: root.play-total;
+                    tone: Theme.lavender;
+                }
+            }
+
+            if More.home-status != "": Banner {
+                text: More.home-status;
+                tone: Theme.success;
+            }
+            // List headings get more room above than below.
+            if root.favourites.length > 0: VerticalLayout {
+                padding-top: 6px;
+                Eyebrow {
+                    text: "Favourites";
+                }
+            }
+            for row[i] in root.favourites: GameRow {
+                entry: row;
+                play => {
+                    root.play-place(row.place);
+                }
+                star => {
+                    root.toggle-favourite(row.place);
+                }
+                servers => {
+                    root.open-servers(row.place);
+                }
+            }
+
+            if More.visits.length > 0: VerticalLayout {
+                padding-top: 6px;
+                Eyebrow {
+                    text: "Servers you were on";
+                }
+            }
+            for v in More.visits: Rectangle {
+                height: 46px;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: v.game;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: v.detail;
+                            font-size: 12px;
+                            color: Theme.text-faint;
+                            overflow: elide;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        SecondaryButton {
+                            text: "Copy invite";
+                            clicked => {
+                                More.copy-invite(v.place, v.job);
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        SecondaryButton {
+                            text: "Rejoin";
+                            icon: Icons.play;
+                            clicked => {
+                                More.rejoin-visit(v.place, v.job);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if More.sessions.length > 0: VerticalLayout {
+                padding-top: 6px;
+                Eyebrow {
+                    text: "Your sessions";
+                }
+            }
+            if More.sessions.length > 0: Rectangle {
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+                    for v in More.sessions: HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: v.game;
+                            width: 220px;
+                            overflow: elide;
+                            color: Theme.text;
+                            font-size: 13px;
+                        }
+                        Text {
+                            text: v.detail;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            color: Theme.text-faint;
+                            font-size: 12.5px;
+                        }
+                    }
+                }
+            }
+
+            if root.recent.length > 0: VerticalLayout {
+                padding-top: 6px;
+                Eyebrow {
+                    text: "Recently played";
+                }
+            }
+            for row[i] in root.recent: GameRow {
+                entry: row;
+                play => {
+                    root.play-place(row.place);
+                }
+                star => {
+                    root.toggle-favourite(row.place);
+                }
+                servers => {
+                    root.open-servers(row.place);
+                }
+            }
+
+            if root.top.length > 1: Rectangle {
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface;
+                drop-shadow-blur: Theme.lift-blur;
+                drop-shadow-offset-y: Theme.lift-offset;
+                drop-shadow-color: Theme.lift-color;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+                    Eyebrow {
+                        text: "Most played";
+                    }
+                    for game in root.top: HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: game.name;
+                            width: 220px;
+                            overflow: elide;
+                            color: Theme.text;
+                            font-size: 13.5px;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 10px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 5px;
+                            background: Theme.track;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * game.share;
+                                border-radius: 5px;
+                                background: @linear-gradient(90deg, Theme.accent 0%, Theme.lavender 100%);
+                            }
+                        }
+                        Text {
+                            text: game.time;
+                            width: 90px;
+                            horizontal-alignment: right;
+                            color: Theme.text-muted;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            if root.windows: PawTip {
+                text: "Feline is unofficial and isn't made by Roblox. It starts Roblox's own client, and mods only kick in if you switch them on.";
+            }
+            if !root.windows: Banner {
+                text: "Roblox doesn't support third-party clients. Using one can put your account at risk.";
                 tone: Theme.warning;
             }
         }

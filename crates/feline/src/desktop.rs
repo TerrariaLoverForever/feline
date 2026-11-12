@@ -59,7 +59,14 @@ pub struct Report {
     pub warnings: Vec<String>,
 }
 
+/// What the menu-entry commands say on systems without freedesktop menus.
+const NOT_HERE: &str = "menu entries are a Linux desktop feature; \
+     on Windows, Feline's Start menu shortcut comes with its installer";
+
 pub fn install() -> Result<Report, String> {
+    if cfg!(windows) {
+        return Err(NOT_HERE.to_owned());
+    }
     let data = paths::data_home().ok_or("couldn't find your home folder ($HOME is not set)")?;
     let exec = quote_exec(&exec_path()?)?;
 
@@ -81,6 +88,9 @@ pub fn install() -> Result<Report, String> {
 }
 
 pub fn uninstall() -> Result<Vec<PathBuf>, String> {
+    if cfg!(windows) {
+        return Err(NOT_HERE.to_owned());
+    }
     let data = paths::data_home().ok_or("couldn't find your home folder ($HOME is not set)")?;
     let mut removed = Vec::new();
     let mut targets = vec![data.join("applications").join(format!("{APP_ID}.desktop"))];

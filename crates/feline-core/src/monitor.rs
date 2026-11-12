@@ -17,6 +17,7 @@
 //! FPS isn't measured here: that needs a graphics layer (such as MangoHud).
 
 use std::collections::{HashMap, HashSet};
+#[cfg_attr(windows, allow(unused_imports))]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -24,7 +25,11 @@ use std::time::{Duration, Instant};
 /// CPU time in `/proc/<pid>/stat` is in "clock ticks". Linux reports them in
 /// USER_HZ, which is 100 on every architecture Feline supports. (Reading it
 /// properly needs `sysconf`, a C call; not worth `unsafe` code for a constant.)
+#[cfg(not(windows))]
 const TICKS_PER_SECOND: f64 = 100.0;
+/// On Windows, CPU time comes in 100-nanosecond units.
+#[cfg(windows)]
+const TICKS_PER_SECOND: f64 = 10_000_000.0;
 
 /// One measurement of the whole game.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,6 +100,8 @@ pub fn descendants(root: u32, parents: &HashMap<u32, u32>) -> HashSet<u32> {
 /// Measures a running game. Call [`Sampler::sample`] regularly; the first
 /// call only sets the starting point for CPU and returns `None`.
 pub struct Sampler {
+    // Linux only: Windows asks the system directly.
+    #[cfg_attr(windows, allow(dead_code))]
     proc_dir: PathBuf,
     root: u32,
     threads: usize,
@@ -121,7 +128,41 @@ impl Sampler {
         }
     }
 
+    /// Every process's parent. CPU time is read later, only for the game's
+    /// processes (opening every process on Windows would be wasteful).
+    #[cfg(windows)]
+    fn snapshot(&self) -> HashMap<u32, ProcStat> {
+        feline_win::processes()
+            .into_iter()
+            .map(|p| {
+                (
+                    p.pid,
+                    ProcStat {
+                        ppid: p.parent_pid,
+                        cpu_ticks: 0,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(windows)]
+    fn cpu_ticks(&self, pid: u32, _stat: &ProcStat) -> u64 {
+        feline_win::game::usage(pid).map_or(0, |u| u.cpu_time)
+    }
+
+    #[cfg(windows)]
+    fn memory_of(&self, pid: u32) -> u64 {
+        feline_win::game::usage(pid).map_or(0, |u| u.memory)
+    }
+
+    #[cfg(not(windows))]
+    fn cpu_ticks(&self, _pid: u32, stat: &ProcStat) -> u64 {
+        stat.cpu_ticks
+    }
+
     /// Reads every process's parent and CPU time.
+    #[cfg(not(windows))]
     fn snapshot(&self) -> HashMap<u32, ProcStat> {
         let Ok(entries) = fs::read_dir(&self.proc_dir) else {
             return HashMap::new();
@@ -137,6 +178,7 @@ impl Sampler {
             .collect()
     }
 
+    #[cfg(not(windows))]
     fn memory_of(&self, pid: u32) -> u64 {
         let dir = self.proc_dir.join(pid.to_string());
         fs::read_to_string(dir.join("smaps_rollup"))
@@ -159,7 +201,10 @@ impl Sampler {
         let parents: HashMap<u32, u32> = all.iter().map(|(&pid, s)| (pid, s.ppid)).collect();
         let game = descendants(self.root, &parents);
 
-        let ticks: HashMap<u32, u64> = game.iter().map(|pid| (*pid, all[pid].cpu_ticks)).collect();
+        let ticks: HashMap<u32, u64> = game
+            .iter()
+            .map(|pid| (*pid, self.cpu_ticks(*pid, &all[pid])))
+            .collect();
         // A process that started since the last sample counts from zero; one
         // that exited simply drops out.
         let used: u64 = ticks
@@ -226,6 +271,7 @@ mod tests {
         assert!(descendants(99, &parents).is_empty(), "exited root");
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn samples_cpu_and_memory_of_the_tree() {
         let dir = std::env::temp_dir().join(format!("feline-test-monitor-{}", std::process::id()));

@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The Tweaks page's state (FastFlags), shared with Rust as a global:
+// `ui.global::<TweaksState>()`. See feline-core's fflags.rs.
+
+import { GameProfileRow } from "types.slint";
+
+// One allowlisted flag on the "Every flag" list.
+export struct FlagRow {
+    name: string,
+    // The value Feline writes ("" = Roblox decides).
+    value: string,
+    // What it takes: "True or False", or "a number from 0 to 3".
+    hint: string,
+}
+
+export global TweaksState {
+    // False where the Tweaks can't be written (other runtimes than
+    // Roblox's official client).
+    in property <bool> supported;
+    // The friendly choices (index 0 = Roblox decides).
+    in property <int> renderer;
+    in property <int> msaa;
+    in property <int> textures;
+    in property <int> quality;
+    in property <bool> hide-grass;
+    in property <bool> still-grass;
+    in property <bool> gray-sky;
+    in property <bool> exclusive-fullscreen;
+    in property <bool> ignore-dpi;
+    in property <bool> pause-voxels;
+    // How many flags the everyday set has.
+    in property <int> count;
+    in property <[FlagRow]> flags;
+    // Profiles: names, and the per-game choices ("Everyday", then profiles).
+    in property <[string]> profiles;
+    in property <[string]> choices;
+    in property <[GameProfileRow]> games;
+    in property <string> status;
+
+    // ("renderer", i), ("msaa", i), ("textures", i), ("quality", i),
+    // ("hide-grass", 0/1), ("still-grass", 0/1), ("gray-sky", 0/1),
+    // ("exclusive-fullscreen", 0/1), ("ignore-dpi", 0/1), ("pause-voxels", 0/1).
+    callback set(string, int);
+    // One flag from the full list, as typed ("" = Roblox decides).
+    callback set-flag(string, string);
+    callback reset();
+    callback save-profile(string);
+    callback use-profile(string);
+    callback delete-profile(string);
+    // (place ID, index into `choices`).
+    callback set-game(string, int);
+}

@@ -261,7 +261,7 @@ impl RuntimeBackend for Cordial {
     fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
         let dir = match &installation.kind {
             InstallKind::Flatpak { app_id, .. } => ctx.flatpak_config_dir(app_id)?.join("cordial"),
-            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.config_dir("cordial")?,
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => ctx.config_dir("cordial")?,
         };
         Some(dir.join("shell.json"))
     }
@@ -276,7 +276,7 @@ impl RuntimeBackend for Cordial {
             InstallKind::Flatpak { app_id, .. } => ctx
                 .flatpak_data_dir(app_id)
                 .map(|data| data.join("cordial/profiles")),
-            InstallKind::AppImage(_) | InstallKind::Native(_) => {
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => {
                 ctx.data_dir("cordial").map(|dir| dir.join("profiles"))
             }
         };
@@ -387,7 +387,7 @@ fn combine(stdout: &str, stderr: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::runtime::FlatpakScope;
@@ -445,6 +445,7 @@ mod tests {
             path: Some(bin.clone().into_os_string()),
             flatpak_system_dir: system,
             config_home: None,
+            local_app_data: None,
         };
         let found = CORDIAL.detect(&ctx);
         let _ = fs::remove_dir_all(&root);

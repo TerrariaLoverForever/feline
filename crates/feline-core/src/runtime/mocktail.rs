@@ -131,7 +131,7 @@ impl RuntimeBackend for Mocktail {
             InstallKind::Flatpak { app_id, .. } => {
                 ctx.flatpak_data_dir(app_id).map(|d| d.join("mocktail"))
             }
-            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.data_dir("mocktail"),
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => ctx.data_dir("mocktail"),
         }
         .into_iter()
         .collect()
@@ -165,7 +165,7 @@ impl RuntimeBackend for Mocktail {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
@@ -195,6 +195,7 @@ mod tests {
             path: Some(root.join("usr/bin").into_os_string()),
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let nightcap = NIGHTCAP.detect(&ctx);
         let mocktail = MOCKTAIL.detect(&ctx);
@@ -217,6 +218,7 @@ mod tests {
             path: None,
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let found_mocktail = MOCKTAIL.detect(&ctx);
         let found_nightcap = NIGHTCAP.detect(&ctx);

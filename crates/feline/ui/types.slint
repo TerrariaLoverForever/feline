@@ -5,6 +5,11 @@
 export enum Page {
     home,
     runtimes,
+    studio,
+    mods,
+    library,
+    tweaks,
+    servers,
     system,
     diagnostics,
     settings,
@@ -33,6 +38,72 @@ export struct RuntimeRow {
     selected: bool,
 }
 
+// A game on the Home page (recently played, favourites).
+export struct GameCard {
+    // The place ID, as text (it doesn't fit Slint's int).
+    place: string,
+    name: string,
+    // e.g. "2 h 5 min · yesterday"
+    detail: string,
+    icon: image,
+    has-icon: bool,
+    favourite: bool,
+    // Shown as "something secret" on Discord.
+    hidden: bool,
+}
+
+// One version in the Roblox page's history.
+export struct VersionRow {
+    version: string,
+    // e.g. "since 3 days ago"
+    when: string,
+}
+
+// A game and the profile chosen for it (0 = none).
+export struct GameProfileRow {
+    place: string,
+    name: string,
+    index: int,
+}
+
+// One public server in the server picker.
+export struct ServerRow {
+    id: string,
+    // "12 / 20 players"
+    players: string,
+    // "80 ms ping · 60 FPS"
+    detail: string,
+    // How full, 0..1.
+    fill: float,
+}
+
+// One line of "Most played".
+export struct TopGame {
+    name: string,
+    time: string,
+    // Playtime relative to the most played game, 0..1.
+    share: float,
+}
+
+// One mod on the Mods page.
+export struct ModRow {
+    name: string,
+    // What it changes and how many files, e.g. "sounds, fonts · 12 files".
+    detail: string,
+    enabled: bool,
+    // A picture from the mod, and whether it has a sound to listen to.
+    preview: image,
+    has-preview: bool,
+    has-sound: bool,
+}
+
+// A Bloxstrap-family mods folder found on this computer.
+export struct FoundRow {
+    // The bootstrapper, e.g. "Bloxstrap".
+    name: string,
+    detail: string,
+}
+
 // How a value or check result should be colored.
 export enum Level {
     neutral,
@@ -53,6 +124,37 @@ export struct CheckRow {
     level: Level,
     title: string,
     detail: string,
+}
+
+// A graphics card's driver on the System page.
+export struct DriverRow {
+    gpu: string,
+    version: string,
+    // "March 2024", or empty.
+    date: string,
+    level: Level,
+    advice: string,
+    // The maker's download page, or empty.
+    link: string,
+}
+
+// One Roblox session the crash detective looked at.
+export struct CaseRow {
+    // "Today 23:17 · 25 min"
+    when: string,
+    game: string,
+    // "Closed normally", "Lost connection…", "Closed unexpectedly"
+    ending: string,
+    level: Level,
+    advice: string,
+}
+
+// One address the network test tried.
+export struct ProbeRow {
+    label: string,
+    host: string,
+    result: string,
+    level: Level,
 }
 
 // What control a runtime setting uses.

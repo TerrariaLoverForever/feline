@@ -8,13 +8,15 @@
 //!
 //! ```text
 //! … [FLog::SingleSurfaceApp] setStage: (stage:LuaApp)                 in the menus
-//! … [FLog::Output] ! Joining game '<server id>' place <place id> at … joining
+//! … [FLog::Output] ! Joining game '<server id>' place <place id> at <ip> joining
 //! … [FLog::GameJoinLoadTime] Report game_join_loadtime: … placeid:P,
 //!     userid:U, universeid:Z, …                                          joined
+//! … [FLog::Network] UDMUX Address = <ip>, Port = … | RCC Server …     server
 //! … [FLog::SingleSurfaceApp] leaveUGCGameInternal                        left
 //! ```
 //!
 //! Every line starts with an ISO 8601 UTC timestamp, used as the start time.
+//! The Windows client writes the same lines (checked in real logs).
 
 use std::fs;
 use std::io::{Read as _, Seek as _, SeekFrom};
@@ -31,6 +33,8 @@ pub enum LogEvent {
         place_id: u64,
         job_id: String,
         at: Option<u64>,
+        /// The game server's address, for its region.
+        server: Option<String>,
     },
     /// Fully joined; now the universe and the player are known.
     Joined {
@@ -40,10 +44,39 @@ pub enum LogEvent {
     },
     /// Left the game.
     Left,
+    /// The public address of the game server ("UDMUX Address"); the one in
+    /// "Joining game" is Roblox's internal one.
+    Server(String),
+    /// The game asked to change the Discord status, with Bloxstrap's
+    /// `[BloxstrapRPC] {"command": …, "data": …}` message (many games
+    /// already send it; see [`super::GameStatus`]).
+    GameMessage(serde_json::Value),
+    /// The server disconnected the player, with Roblox's reason text.
+    Disconnected(String),
+    /// When the game server started (Unix time), from its name in the log
+    /// (`Server Prefix: …_20261112T160445Z_RCC_…`).
+    ServerStarted(u64),
 }
 
 /// Parses one log line. Most lines aren't interesting and give `None`.
 pub fn parse_line(line: &str) -> Option<LogEvent> {
+    if let Some(at) = line.find("[BloxstrapRPC] ") {
+        let message: serde_json::Value = serde_json::from_str(line[at + 15..].trim()).ok()?;
+        return message.is_object().then_some(LogEvent::GameMessage(message));
+    }
+    if let Some(at) = line.find("Server Prefix: ") {
+        let rest = &line[at..];
+        let stamp = rest.split('_').find(|part| part.len() == 16 && part.ends_with('Z') && part.as_bytes()[8] == b'T')?;
+        let iso = format!(
+            "{}-{}-{}T{}:{}:{}Z",
+            &stamp[0..4], &stamp[4..6], &stamp[6..8], &stamp[9..11], &stamp[11..13], &stamp[13..15]
+        );
+        return crate::serverinfo::iso_time(&iso).map(LogEvent::ServerStarted);
+    }
+    if let Some(at) = line.find("disconnected with reason:") {
+        let reason = line[at + "disconnected with reason:".len()..].trim().trim_end_matches('.');
+        return Some(LogEvent::Disconnected(reason.to_owned()));
+    }
     if line.contains("[FLog::SingleSurfaceApp] setStage: (stage:LuaApp)") {
         return Some(LogEvent::Menu);
     }
@@ -53,12 +86,27 @@ pub fn parse_line(line: &str) -> Option<LogEvent> {
     if let Some(rest) = line.split("! Joining game '").nth(1) {
         let (job_id, rest) = rest.split_once('\'')?;
         let place = rest.trim_start().strip_prefix("place ")?;
-        let place_id = place.split_whitespace().next()?.parse().ok()?;
+        let mut words = place.split_whitespace();
+        let place_id = words.next()?.parse().ok()?;
+        // "… at 128.116.1.2" (an IPv4 or IPv6 address, nothing else).
+        let server = (words.next() == Some("at"))
+            .then(|| words.next())
+            .flatten()
+            .filter(|ip| ip.parse::<std::net::IpAddr>().is_ok())
+            .map(str::to_owned);
         return Some(LogEvent::Joining {
             place_id,
             job_id: job_id.to_owned(),
             at: line_time(line),
+            server,
         });
+    }
+    if let Some(rest) = line.split("UDMUX Address = ").nth(1) {
+        let ip = rest.split([',', ' ']).next()?;
+        return ip
+            .parse::<std::net::IpAddr>()
+            .is_ok()
+            .then(|| LogEvent::Server(ip.to_owned()));
     }
     if line.contains("Report game_join_loadtime:") {
         return Some(LogEvent::Joined {
@@ -94,7 +142,7 @@ pub fn line_time(line: &str) -> Option<u64> {
 
 /// Days since 1970-01-01 for a Gregorian date (Howard Hinnant's algorithm),
 /// so we don't need a date library for one conversion.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -246,6 +294,7 @@ mod tests {
                 place_id: 16732694052,
                 job_id: "6b1f335e-3cda-496e-9049-366bc1c79cf2".into(),
                 at: line_time(JOINING),
+                server: Some("10.0.0.1".into()),
             })
         );
         assert_eq!(

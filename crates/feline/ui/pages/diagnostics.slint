@@ -4,10 +4,13 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { CheckRow, Level } from "../types.slint";
+import { CheckRow, CaseRow, ProbeRow, Level } from "../types.slint";
 import { Icons } from "../icons.slint";
-import { PageBase, Pill, StatusDot, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, OutputBox } from "../components.slint";
+import { PageBase, Pill, StatusDot, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, OutputBox, SectionTitle, CatEmpty } from "../components.slint";
 
+// Rows made from a list are wrapped in a Rectangle whose height is pinned to
+// its content: otherwise Slint sizes the card as if every wrapped paragraph
+// were one line, and the rows spill out of the bottom of the card.
 component CheckLine inherits HorizontalLayout {
     in property <CheckRow> check;
     spacing: 14px;
@@ -37,6 +40,8 @@ component CheckLine inherits HorizontalLayout {
 }
 
 export component DiagnosticsPage inherits PageBase {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     in property <[CheckRow]> checks;
     in property <bool> checks-loading;
 
@@ -53,6 +58,21 @@ export component DiagnosticsPage inherits PageBase {
     in property <string> output;
 
     in property <string> log-folder;
+
+    // Crash detective
+    in property <[CheckRow]> clues;
+    in property <[CaseRow]> cases;
+    in property <bool> investigating;
+    callback investigate();
+    // Network test
+    in property <[ProbeRow]> probes;
+    in property <Level> net-level;
+    in property <string> net-title;
+    in property <string> net-detail;
+    in property <bool> net-running;
+    callback run-network-test();
+    // Bug report zip
+    callback save-report-zip();
 
     callback run-doctor();
     callback run-runtime-info();
@@ -74,22 +94,176 @@ export component DiagnosticsPage inherits PageBase {
                     text: "Diagnostics";
                 }
                 BodyText {
-                    text: "Find out why something doesn't work, and gather what's needed for a bug report.";
+                    text: "Figure out why something broke, and gather what a bug report needs.";
                 }
             }
 
             Card {
                 Eyebrow {
-                    text: "QUICK CHECKS";
+                    text: "Quick checks";
                 }
                 if root.checks-loading && root.checks.length == 0: BodyText {
                     text: "Checking…";
                 }
-                for check[i] in root.checks: VerticalLayout {
-                    if i > 0: Divider { }
-                    CheckLine {
-                        check: check;
+                for check[i] in root.checks: Rectangle {
+                    height: check-box.preferred-height;
+                    check-box := VerticalLayout {
+                        if i > 0: Divider { }
+                        CheckLine {
+                            check: check;
+                        }
                     }
+                }
+            }
+
+            // ---------------- Crash detective
+            Card {
+                HorizontalLayout {
+                    spacing: 12px;
+                    SectionTitle {
+                        horizontal-stretch: 1;
+                        text: "Crash detective";
+                        icon: Icons.search;
+                    }
+                    SecondaryButton {
+                        text: root.investigating ? "Sniffing around…" : "Investigate";
+                        icon: Icons.search;
+                        enabled: !root.investigating;
+                        horizontal-stretch: 0;
+                        clicked => {
+                            root.investigate();
+                        }
+                    }
+                }
+                BodyText {
+                    text: "Reads Roblox's own logs to work out how your last sessions ended, and what to try if something keeps going wrong.";
+                }
+                for clue[i] in root.clues: Rectangle {
+                    height: clue-box.preferred-height;
+                    clue-box := VerticalLayout {
+                        if i > 0: Divider { }
+                        CheckLine {
+                            check: clue;
+                        }
+                    }
+                }
+                if root.cases.length > 0: Eyebrow {
+                    text: "Recent sessions";
+                }
+                for c[i] in root.cases: Rectangle {
+                    height: case-box.preferred-height;
+                    border-radius: Theme.radius-small;
+                    background: Theme.surface-raised;
+                    case-box := HorizontalLayout {
+                        padding: 10px;
+                        padding-left: 12px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: start;
+                            padding-top: 5px;
+                            StatusDot {
+                                tone: Theme.level-color(c.level);
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: c.game;
+                                    font-size: 13.5px;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: c.when;
+                                    font-size: 12px;
+                                    color: Theme.text-faint;
+                                }
+                            }
+                            Text {
+                                text: c.ending;
+                                font-size: 12.5px;
+                                color: Theme.level-color(c.level);
+                                wrap: word-wrap;
+                            }
+                            if c.advice != "": BodyText {
+                                text: c.advice;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------------- Network test
+            Card {
+                HorizontalLayout {
+                    spacing: 12px;
+                    SectionTitle {
+                        horizontal-stretch: 1;
+                        text: "Network test";
+                        icon: Icons.network;
+                    }
+                    SecondaryButton {
+                        text: root.net-running ? "Testing…" : (root.probes.length > 0 ? "Test again" : "Run the test");
+                        icon: Icons.network;
+                        enabled: !root.net-running;
+                        horizontal-stretch: 0;
+                        clicked => {
+                            root.run-network-test();
+                        }
+                    }
+                }
+                BodyText {
+                    text: "Checks that this PC can reach Roblox's sign-in, game servers, content and updates, how quickly, and pings the last server you played on.";
+                }
+                if root.net-title != "": CheckLine {
+                    check: { level: root.net-level, title: root.net-title, detail: root.net-detail };
+                }
+                for p[i] in root.probes: Rectangle {
+                    height: probe-box.preferred-height;
+                    probe-box := VerticalLayout {
+                    spacing: 0px;
+                    if i > 0: Divider { }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        VerticalLayout {
+                            alignment: center;
+                            StatusDot {
+                                tone: Theme.level-color(p.level);
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text {
+                                text: p.label;
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+                            Text {
+                                text: p.host;
+                                font-size: 11.5px;
+                                color: Theme.text-faint;
+                            }
+                        }
+                        Text {
+                            text: p.result;
+                            font-size: 13px;
+                            color: p.level == Level.ok ? Theme.text-muted : Theme.level-color(p.level);
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            wrap: word-wrap;
+                            max-width: 260px;
+                        }
+                    }
+                }
                 }
             }
 
@@ -99,8 +273,9 @@ export component DiagnosticsPage inherits PageBase {
                     alignment: start;
                     VerticalLayout {
                         alignment: center;
-                        Eyebrow {
-                            text: "RUNTIME";
+                        SectionTitle {
+                            text: root.windows ? "Bug report" : "Runtime checks and bug report";
+                            icon: Icons.log;
                         }
                     }
                     if root.has-runtime: Pill {
@@ -113,10 +288,11 @@ export component DiagnosticsPage inherits PageBase {
                     BodyText {
                         horizontal-stretch: 1;
                         vertical-alignment: center;
-                        text: "Choose a runtime first. Its self-check looks for problems Feline can't see, such as missing graphics or sound support.";
+                        text: root.windows ? "Choose Roblox first, so the bug report knows which client you play with."
+                            : "Choose a runtime first. Its self-check looks for problems Feline can't see, such as missing graphics or sound support.";
                     }
                     SecondaryButton {
-                        text: "Choose runtime";
+                        text: root.windows ? "Choose Roblox" : "Choose a runtime";
                         clicked => {
                             root.choose-runtime();
                         }
@@ -126,12 +302,14 @@ export component DiagnosticsPage inherits PageBase {
                     text: "The self-check asks the runtime to test the display, GPU and Vulkan, sound and more. Runtime info is the block its developers ask for in bug reports.";
                 }
                 if root.has-runtime && !root.runtime-has-doctor && !root.runtime-has-info: BodyText {
-                    text: root.runtime-name + " has no self-check of its own. The quick checks above and the full bug report still work.";
+                    text: root.windows
+                        ? "Everything Feline knows about your PC, Roblox and recent games, in one block you can paste into a bug report. Personal bits (your user name in paths, anything that looks like a login) are hidden first."
+                        : root.runtime-name + " has no self-check of its own. The quick checks above and the full bug report still work.";
                 }
                 HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
-                    SecondaryButton {
+                    if root.runtime-has-doctor: SecondaryButton {
                         text: "Run self-check";
                         icon: Icons.stethoscope;
                         enabled: root.has-runtime && root.runtime-has-doctor && !root.running;
@@ -139,7 +317,7 @@ export component DiagnosticsPage inherits PageBase {
                             root.run-doctor();
                         }
                     }
-                    SecondaryButton {
+                    if root.runtime-has-info: SecondaryButton {
                         text: "Runtime info";
                         icon: Icons.about;
                         enabled: root.has-runtime && root.runtime-has-info && !root.running;
@@ -148,11 +326,19 @@ export component DiagnosticsPage inherits PageBase {
                         }
                     }
                     SecondaryButton {
-                        text: "Full bug report";
+                        text: "Make a bug report";
                         icon: Icons.copy;
                         enabled: !root.running;
                         clicked => {
                             root.build-report();
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Save as zip";
+                        icon: Icons.archive;
+                        enabled: !root.running;
+                        clicked => {
+                            root.save-report-zip();
                         }
                     }
                 }
@@ -176,7 +362,7 @@ export component DiagnosticsPage inherits PageBase {
                 OutputBox {
                     height: 260px;
                     text: root.output;
-                    placeholder: root.running ? "Working… (a runtime's self-check can take a few seconds)" : "Run a check to see its output here.";
+                    placeholder: root.running ? "Working on it… (a self-check can take a few seconds)" : "Output shows up here.";
                 }
             }
 
@@ -187,10 +373,10 @@ export component DiagnosticsPage inherits PageBase {
                         horizontal-stretch: 1;
                         spacing: 4px;
                         Eyebrow {
-                            text: "LOGS";
+                            text: "Logs";
                         }
                         BodyText {
-                            text: "Each game session's output is saved to its own file in " + root.log-folder + ". Feline keeps the most recent ones.";
+                            text: "Each game's output goes into its own file in " + root.log-folder + ". Feline keeps the most recent ones.";
                         }
                     }
                     VerticalLayout {

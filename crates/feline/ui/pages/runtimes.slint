@@ -7,7 +7,7 @@ import { ScrollView, ComboBox, SpinBox, LineEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { RuntimeRow, RuntimeTab, SettingKind, Level } from "../types.slint";
 import { Icon, Icons } from "../icons.slint";
-import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, TabBar, SettingRow, Banner } from "../components.slint";
+import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, TabBar, SettingRow, Banner, CatEmpty } from "../components.slint";
 
 // A runtime's initial in a rounded tile (Feline's own shows its logo).
 component RuntimeBadge inherits Rectangle {
@@ -42,6 +42,10 @@ component RuntimeCard inherits Rectangle {
     border-width: 1px;
     background: touch.has-hover ? Theme.surface-raised : Theme.surface;
     border-color: entry.selected ? Theme.accent.with-alpha(0.55) : touch.has-hover ? Theme.border-strong : Theme.border;
+    drop-shadow-blur: touch.has-hover ? Theme.lift-hover-blur : Theme.lift-blur;
+    drop-shadow-offset-y: touch.has-hover ? Theme.lift-hover-offset : Theme.lift-offset;
+    drop-shadow-color: Theme.lift-color;
+    animate drop-shadow-blur, drop-shadow-offset-y { duration: Theme.normal; easing: ease-out-quint; }
     opacity: root.shown ? 1 : 0;
     animate background, border-color { duration: Theme.fast; }
     animate opacity { duration: Theme.normal; easing: ease-out-quad; }
@@ -96,7 +100,7 @@ component RuntimeCard inherits Rectangle {
         VerticalLayout {
             alignment: center;
             if root.entry.selected: Pill {
-                text: "✓ In use";
+                text: "In use";
                 tone: Theme.success;
             }
             if !root.entry.selected: SecondaryButton {
@@ -263,7 +267,7 @@ component RuntimeDetail inherits VerticalLayout {
             VerticalLayout {
                 alignment: center;
                 if root.entry.selected: Pill {
-                    text: "✓ In use";
+                    text: "In use";
                     tone: Theme.success;
                 }
                 if !root.entry.selected: SecondaryButton {
@@ -295,7 +299,9 @@ component RuntimeDetail inherits VerticalLayout {
                 // Spacing 0: other tabs' (hidden) rows take no room.
                 VerticalLayout {
                 spacing: 0px;
-                for row[j] in tab.rows: VerticalLayout {
+                for row[j] in tab.rows: Rectangle {
+                    height: row-box-10.preferred-height;
+                    row-box-10 := VerticalLayout {
                     if row.tab == root.current && row.section-start && row.section != "": VerticalLayout {
                         padding-top: j > 0 ? 10px : 0px;
                         spacing: 6px;
@@ -330,6 +336,7 @@ component RuntimeDetail inherits VerticalLayout {
                     }
                 }
                 }
+                }
             }
             if tab.source != "": BodyText {
                 text: "Settings file: " + tab.source;
@@ -342,6 +349,8 @@ component RuntimeDetail inherits VerticalLayout {
 }
 
 export component RuntimesPage inherits PageBase {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     in property <[RuntimeRow]> runtimes;
     in property <bool> detecting;
     in property <string> error;
@@ -364,8 +373,8 @@ export component RuntimesPage inherits PageBase {
 
     ScrollView {
         VerticalLayout {
-            padding: 30px;
-            spacing: 14px;
+            padding: 22px;
+            spacing: 12px;
             alignment: start;
 
             // ---------------- A runtime's own page (spacing 0: the
@@ -433,8 +442,10 @@ export component RuntimesPage inherits PageBase {
             if root.open == "": VerticalLayout {
                 spacing: 14px;
                 PageHeader {
-                    title: "Runtimes";
-                    description: "A runtime is the program that actually runs Roblox. Pick one to play with; open one to change its settings.";
+                    title: root.windows ? "Roblox" : "Runtimes";
+                    description: root.windows
+                        ? "The Roblox client Feline starts when you press Play. Feline finds it on its own, even after Roblox updates."
+                        : "A runtime is the program that actually runs Roblox. Choose the one to play with, or open one to change its settings.";
                     SecondaryButton {
                         text: root.detecting ? "Scanning…" : "Rescan";
                         icon: Icons.refresh;
@@ -450,11 +461,11 @@ export component RuntimesPage inherits PageBase {
                     tone: Theme.danger;
                 }
 
-                Rectangle {
-                    height: 2px;
-                }
-                Eyebrow {
-                    text: "FELINE'S OWN";
+                if !root.windows: VerticalLayout {
+                    padding-top: 6px;
+                    Eyebrow {
+                        text: "Feline's own";
+                    }
                 }
                 for row in root.feline-runtimes: RuntimeCard {
                     entry: row;
@@ -467,7 +478,7 @@ export component RuntimesPage inherits PageBase {
                         root.open-runtime(row.id);
                     }
                 }
-                if !root.has-feline: Card {
+                if !root.has-feline && !root.windows: Card {
                     HorizontalLayout {
                         spacing: 14px;
                         VerticalLayout {
@@ -486,31 +497,31 @@ export component RuntimesPage inherits PageBase {
                                 color: Theme.text;
                             }
                             BodyText {
-                                text: "Feline's own runtime isn't set up yet. Install feline-runtime, then run `feline --update-roblox` to get the Roblox app, and press Rescan.";
+                                text: "Feline's own runtime is still napping. Install feline-runtime, run `feline --update-roblox` to fetch the Roblox app, then press Rescan.";
                             }
                         }
                     }
                 }
 
-                Rectangle {
-                    height: 6px;
-                }
                 HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
+                    padding-top: 6px;
                     VerticalLayout {
                         alignment: center;
                         Eyebrow {
-                            text: "EXTERNAL";
+                            text: root.windows ? "Your Roblox client" : "Other people's runtimes";
                         }
                     }
                     Pill {
-                        text: "Third-party";
-                        tone: Theme.warning;
+                        text: root.windows ? "Official" : "Third-party";
+                        tone: root.windows ? Theme.success : Theme.warning;
                     }
                 }
                 BodyText {
-                    text: "Separate programs you installed yourself. Feline starts them through their public command line and contains none of their code.";
+                    text: root.windows
+                        ? "Exactly as Roblox's installer put it on this PC. Feline starts it the same way Roblox's own shortcut does."
+                        : "Separate programs you installed yourself. Feline starts them through their public command line and contains none of their code.";
                 }
 
                 for row in root.runtimes: RuntimeCard {
@@ -526,20 +537,21 @@ export component RuntimesPage inherits PageBase {
                 }
 
                 if root.detecting && root.runtimes.length == 0: BodyText {
-                    text: "Looking for runtimes…";
+                    text: root.windows ? "Sniffing out Roblox…" : "Sniffing out runtimes…";
                 }
                 if !root.detecting && root.runtimes.length == 0: Card {
-                    Text {
-                        text: "No external runtimes found";
-                        font-size: 15px;
-                        font-weight: 700;
-                        color: Theme.text;
-                    }
-                    BodyText {
-                        text: "Feline works with Sober, Cordial, Stud, Tipsy, Mocktail and Nightcap. Install one, then press Rescan.";
+                    CatEmpty {
+                        title: root.windows ? "No Roblox here yet" : "No runtimes to play with yet";
+                        text: root.windows
+                            ? "Install Roblox from roblox.com, then press Rescan. Feline will sniff it out right away."
+                            : "Feline works with Sober, Cordial, Stud, Tipsy, Mocktail and Nightcap. Install one, then press Rescan.";
                     }
                 }
             }
+
+            // The Roblox tools (status, versions, profiles, repair); they
+            // hide themselves while a runtime's own page is open.
+            @children
         }
     }
 }

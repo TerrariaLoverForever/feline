@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Server picker: a game's public servers, to join a particular one.
+
+import { ScrollView, ComboBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ServerRow } from "../types.slint";
+import { More } from "../more.slint";
+import { Icon, Icons } from "../icons.slint";
+import { PageBase, Card, BodyText, PageHeader, SecondaryButton, Banner, CatEmpty } from "../components.slint";
+
+export component ServersPage inherits PageBase {
+    in property <string> game;
+    in property <[ServerRow]> servers;
+    in property <bool> loading;
+    in property <string> error;
+    in-out property <int> sort: 0;
+
+    callback back();
+    callback reload(int);
+    callback join(string);
+    callback join-any();
+    // 0 the quietest server, 1 the best ping.
+    callback quick-join(int);
+
+    ScrollView {
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            alignment: start;
+
+            PageHeader {
+                title: "Pick a server";
+                description: root.game;
+                SecondaryButton {
+                    text: "Back";
+                    icon: Icons.chevron-left;
+                    clicked => {
+                        root.back();
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                ComboBox {
+                    width: 220px;
+                    model: More.regions;
+                    current-index <=> More.region-index;
+                    selected => {
+                        More.pick-region(self.current-index);
+                    }
+                }
+                ComboBox {
+                    width: 240px;
+                    enabled: More.region-index == 0;
+                    model: ["Fewest players first", "Most players first", "Best ping first"];
+                    current-index <=> root.sort;
+                    selected => {
+                        root.reload(self.current-index);
+                    }
+                }
+                SecondaryButton {
+                    text: root.loading ? "Loading…" : "Refresh";
+                    icon: Icons.refresh;
+                    enabled: !root.loading;
+                    clicked => {
+                        root.reload(root.sort);
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                SecondaryButton {
+                    text: "Quietest";
+                    icon: Icons.paw;
+                    clicked => {
+                        root.quick-join(0);
+                    }
+                }
+                SecondaryButton {
+                    text: "Best ping";
+                    icon: Icons.network;
+                    clicked => {
+                        root.quick-join(1);
+                    }
+                }
+                SecondaryButton {
+                    text: "Any server";
+                    icon: Icons.play;
+                    clicked => {
+                        root.join-any();
+                    }
+                }
+            }
+
+            if More.region-index > 0: BodyText {
+                text: "Servers in that country, newest first, from RoValra (the server finder Fishstrap and Froststrap use). Player counts aren't known for these; click one to join it.";
+            }
+            if root.error != "": Banner {
+                text: root.error;
+                tone: Theme.danger;
+            }
+
+            for s in root.servers: Rectangle {
+                height: 60px;
+                border-radius: Theme.radius;
+                border-width: 1px;
+                border-color: area.has-hover ? Theme.border-strong : Theme.border;
+                background: area.has-hover ? Theme.surface-raised : Theme.surface;
+                drop-shadow-blur: area.has-hover ? Theme.lift-hover-blur : Theme.lift-blur;
+                drop-shadow-offset-y: area.has-hover ? Theme.lift-hover-offset : Theme.lift-offset;
+                drop-shadow-color: Theme.lift-color;
+                animate drop-shadow-blur, drop-shadow-offset-y { duration: Theme.normal; easing: ease-out-quint; }
+                area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.join(s.id);
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        width: 190px;
+                        Text {
+                            text: s.players;
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Theme.track;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * s.fill;
+                                border-radius: 3px;
+                                background: s.fill > 0.85 ? Theme.warning : Theme.accent;
+                            }
+                        }
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: s.detail;
+                        font-size: 13px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 18px;
+                            background: area.has-hover ? Theme.accent : Theme.accent.with-alpha(0.25);
+                            Icon {
+                                x: (parent.width - self.width) / 2 + 1px;
+                                y: (parent.height - self.height) / 2;
+                                width: 15px;
+                                height: 15px;
+                                commands: Icons.play;
+                                tone: Theme.text;
+                                fill: Theme.text;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !root.loading && root.servers.length == 0 && root.error == "": Card {
+                CatEmpty {
+                    title: "No open servers right now";
+                    text: "Every public server is full, or the game has none. \"Any server\" lets Roblox pick one (or start a fresh one).";
+                }
+            }
+        }
+    }
+}

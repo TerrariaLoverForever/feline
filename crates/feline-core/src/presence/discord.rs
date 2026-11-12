@@ -2,7 +2,8 @@
 //! Talking to the Discord app on this computer, to set the "Playing …" status.
 //!
 //! Discord listens on a Unix socket, `discord-ipc-0` … `discord-ipc-9`, in
-//! `$XDG_RUNTIME_DIR` (or a subfolder for the Flatpak and Snap versions). Each
+//! `$XDG_RUNTIME_DIR` (or a subfolder for the Flatpak and Snap versions). On
+//! Windows it's a named pipe, `\\.\pipe\discord-ipc-0` … `-9`. Each
 //! message is a frame: two little-endian 32-bit numbers, the *opcode* and the
 //! payload length, followed by that many bytes of JSON.
 //!
@@ -17,9 +18,18 @@
 
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::time::Duration;
+
+/// The connection to Discord: a Unix socket, or on Windows a named pipe,
+/// which opens like a file.
+#[cfg(unix)]
+pub type Stream = UnixStream;
+#[cfg(windows)]
+pub type Stream = std::fs::File;
 
 use serde_json::{Value, json};
 
@@ -64,6 +74,7 @@ impl From<io::Error> for DiscordError {
 }
 
 /// The sockets to try, in order.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn socket_candidates(runtime_dir: &Path) -> Vec<PathBuf> {
     // The plain folder is used by native Discord, Vesktop, Equibop and others.
     let dirs = [
@@ -80,12 +91,13 @@ pub fn socket_candidates(runtime_dir: &Path) -> Vec<PathBuf> {
 
 /// An open connection to Discord.
 pub struct Discord {
-    stream: UnixStream,
+    stream: Stream,
     nonce: u64,
 }
 
 impl Discord {
     /// Connects to the first Discord socket that answers, and says hello.
+    #[cfg(unix)]
     pub fn connect() -> Result<Self, DiscordError> {
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
@@ -98,11 +110,33 @@ impl Discord {
         Self::handshake(stream)
     }
 
+    /// Connects to the first Discord pipe that answers, and says hello.
+    /// Discord (and clients such as Vesktop) use `discord-ipc-0`, or the next
+    /// free number when several run.
+    #[cfg(windows)]
+    pub fn connect() -> Result<Self, DiscordError> {
+        let stream = (0..10)
+            .find_map(|n| {
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(format!(r"\\.\pipe\discord-ipc-{n}"))
+                    .ok()
+            })
+            .ok_or(DiscordError::NotRunning)?;
+        Self::handshake(stream)
+    }
+
     /// Sends the handshake on an already open stream (separate for tests).
-    pub fn handshake(stream: UnixStream) -> Result<Self, DiscordError> {
+    pub fn handshake(stream: Stream) -> Result<Self, DiscordError> {
         // Bounded waits, so a stuck Discord can't hang Feline's thread.
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        // (Named pipes opened like files have no timeouts; Feline's status
+        // runs on its own thread in its own helper process.)
+        #[cfg(unix)]
+        {
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        }
         let mut discord = Self { stream, nonce: 0 };
         discord.send(
             OP_HANDSHAKE,
@@ -172,7 +206,7 @@ impl Discord {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

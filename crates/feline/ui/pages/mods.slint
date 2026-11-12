@@ -1,0 +1,919 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Mods page: Bloxstrap-style mods (sounds, fonts, textures, cursors…), each
+// switched on or off, plus importing a bootstrapper's mods folder.
+
+import { ScrollView, ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ModRow, FoundRow } from "../types.slint";
+import { ModTools } from "../mod_tools.slint";
+import { More } from "../more.slint";
+import { Icon, Icons } from "../icons.slint";
+import { PageBase, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, SecondaryButton, ConfirmButton, Banner, PawTip, CatEmpty, Pill, Logo, SettingRow, SectionTitle, TabBar } from "../components.slint";
+
+// One of the picks: what it is, whether it's set, and its buttons.
+component PickRow inherits SettingRow {
+    in property <bool> set;
+    callback choose();
+    callback clear();
+    HorizontalLayout {
+        spacing: 10px;
+        Text {
+            text: root.set ? "Yours" : "Roblox's own";
+            color: root.set ? Theme.success : Theme.text-faint;
+            font-size: 13px;
+            vertical-alignment: center;
+            min-width: 90px;
+            horizontal-alignment: right;
+        }
+        SecondaryButton {
+            text: "Choose…";
+            icon: Icons.folder;
+            clicked => {
+                root.choose();
+            }
+        }
+        if root.set: ConfirmButton {
+            text: "Remove";
+            icon: Icons.trash;
+            confirmed => {
+                root.clear();
+            }
+        }
+    }
+}
+
+// A round preset colour to pick.
+component Swatch inherits Rectangle {
+    in property <color> tone;
+    in property <bool> chosen;
+    in property <string> name;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    background: root.tone;
+    border-width: root.chosen ? 3px : (touch.has-hover ? 2px : 0px);
+    border-color: root.chosen ? Theme.text : Theme.text-muted;
+    animate border-width { duration: Theme.fast; }
+    accessible-role: button;
+    accessible-label: root.name;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// One of the generator's colours: the presets, and your own as #RRGGBB.
+component ColourRow inherits SettingRow {
+    in property <int> which;
+    in property <color> current;
+    in property <string> hex;
+    HorizontalLayout {
+        spacing: 8px;
+        for tone[i] in ModTools.preset-colours: VerticalLayout {
+            alignment: center;
+            Swatch {
+                tone: tone;
+                name: ModTools.preset-names[i];
+                chosen: tone == root.current;
+                clicked => {
+                    ModTools.choose-preset(root.which, i);
+                }
+            }
+        }
+        LineEdit {
+            width: 110px;
+            text: root.hex;
+            placeholder-text: "#rrggbb";
+            accepted(text) => {
+                ModTools.choose-hex(root.which, text);
+            }
+            edited(text) => {
+                if text.character-count == 7 {
+                    ModTools.choose-hex(root.which, text);
+                }
+            }
+        }
+    }
+}
+
+// A switch that looks like a tag: on or off.
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    callback clicked;
+    height: 32px;
+    min-width: label.preferred-width + 30px;
+    border-radius: 16px;
+    background: root.on ? Theme.accent-soft : (touch.has-hover ? Theme.surface-hover : Theme.surface-raised);
+    border-width: 1px;
+    border-color: root.on ? Theme.accent.with-alpha(0.6) : Theme.border;
+    animate background, border-color { duration: Theme.fast; }
+    accessible-role: checkbox;
+    accessible-checked: root.on;
+    accessible-label: root.text;
+    label := Text {
+        text: (root.on ? "✓ " : "") + root.text;
+        font-size: 13px;
+        font-weight: 600;
+        color: root.on ? Theme.lavender : Theme.text-muted;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// One mod: its name, what it changes, and its switch.
+component ModCard inherits Rectangle {
+    in property <ModRow> entry;
+    callback toggled(bool);
+    callback listen();
+    property <bool> shown: false;
+    min-height: 64px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    background: Theme.surface;
+    border-color: entry.enabled ? Theme.accent.with-alpha(0.5) : Theme.border;
+    drop-shadow-blur: Theme.lift-blur;
+    drop-shadow-offset-y: Theme.lift-offset;
+    drop-shadow-color: Theme.lift-color;
+    opacity: root.shown ? 1 : 0;
+    animate border-color { duration: Theme.fast; }
+    animate opacity { duration: Theme.normal; easing: ease-out-quad; }
+    init => {
+        root.shown = true;
+    }
+    HorizontalLayout {
+        padding: 9px;
+        padding-left: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 10px;
+                clip: true;
+                background: Theme.wash;
+                if root.entry.has-preview: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.entry.preview;
+                    image-fit: contain;
+                }
+                if !root.entry.has-preview: Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 22px;
+                    height: 22px;
+                    commands: Icons.paw;
+                    tone: root.entry.enabled ? Theme.lavender : Theme.text-faint;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.entry.name;
+                font-size: 14px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.entry.detail;
+                font-size: 12.5px;
+                color: Theme.text-faint;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            SecondaryButton {
+                text: "Share";
+                icon: Icons.external;
+                clicked => {
+                    ModTools.share(root.entry.name);
+                }
+            }
+        }
+        if root.entry.has-sound: VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            SecondaryButton {
+                text: "Listen";
+                icon: Icons.play;
+                clicked => {
+                    root.listen();
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                checked: root.entry.enabled;
+                toggled(on) => {
+                    root.toggled(on);
+                }
+            }
+        }
+    }
+}
+
+export component ModsPage inherits PageBase {
+    in property <bool> windows;
+    in property <[ModRow]> mods;
+    in property <[FoundRow]> found;
+    // Can the chosen runtime load mods? And a line about it.
+    in property <bool> supported;
+    in property <string> support;
+    in property <string> status;
+    in property <string> folder;
+    in property <bool> theme-installed;
+    callback get-theme();
+    // Feline Picks: [death sound, cursor, font] set?
+    in property <[bool]> picks;
+    callback pick(int);
+    callback clear-pick(int);
+    // Mod profiles and conflicts
+    in property <[string]> mod-profiles;
+    in property <[string]> conflicts;
+    callback save-mod-profile(string);
+    callback apply-mod-profile(string);
+    callback delete-mod-profile(string);
+    callback listen(string);
+    property <string> profile-name;
+
+    callback toggle(string, bool);
+    callback import(string);
+    callback open-folder();
+    callback rescan();
+    callback restore();
+
+    in-out property <int> tab: 0;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            alignment: start;
+
+            PageHeader {
+                title: "Mods";
+                description: "Swap Roblox's sounds, fonts, cursors and textures. Mods made for Bloxstrap, Fishstrap, Froststrap and Voidstrap work too.";
+                SecondaryButton {
+                    text: "Rescan";
+                    icon: Icons.refresh;
+                    clicked => {
+                        root.rescan();
+                    }
+                }
+            }
+
+            if root.support != "": Banner {
+                text: root.support;
+                tone: root.supported ? Theme.success : Theme.warning;
+            }
+            if root.status != "": Banner {
+                text: root.status;
+            }
+
+            TabBar {
+                tabs: ["Your mods", "Make your own", "Your picks"];
+                current <=> root.tab;
+            }
+
+            // Feline's own theme
+            if root.tab == 0: Rectangle {
+                border-radius: Theme.radius-large;
+                border-width: 1px;
+                border-color: Theme.border;
+                drop-shadow-blur: Theme.lift-blur;
+                drop-shadow-offset-y: Theme.lift-offset;
+                drop-shadow-color: Theme.lift-color;
+                background: @linear-gradient(125deg, Theme.accent-deep 0%, Theme.hero-mid 60%, Theme.hero-end 100%);
+                HorizontalLayout {
+                    padding: 18px;
+                    spacing: 18px;
+                    VerticalLayout {
+                        alignment: center;
+                        Logo {
+                            size: 64px;
+                            glow: true;
+                            playful: true;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "The Feline Theme";
+                            font-size: 17px;
+                            font-weight: 800;
+                            color: Theme.text;
+                        }
+                        BodyText {
+                            text: "Feline's own icons in every game: a cat-head menu button, chat and menu bars with ears, a cat microphone, and cat-themed People, Settings, Gallery, Report and Help tabs. One switch turns it off again.";
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: root.theme-installed ? "Update it" : "Get it";
+                            icon: Icons.paw;
+                            clicked => {
+                                root.get-theme();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bootstrapper folders found on this computer
+            if root.tab == 0 && root.found.length > 0: Card {
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        Eyebrow {
+                            text: "Found on this PC";
+                        }
+                    }
+                    Pill {
+                        text: "Import";
+                        tone: Theme.lavender;
+                    }
+                }
+                BodyText {
+                    text: "Bring your mods from these apps along. Feline copies them as a new mod and leaves the originals where they are.";
+                }
+                for row in root.found: Rectangle {
+                    height: row-box-6.preferred-height;
+                    row-box-6 := HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: row.name;
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: row.detail;
+                            font-size: 12.5px;
+                            color: Theme.text-faint;
+                        }
+                    }
+                    SecondaryButton {
+                        text: "Import";
+                        icon: Icons.download;
+                        clicked => {
+                            root.import(row.name);
+                        }
+                    }
+                }
+                }
+            }
+
+            // Mod generator (the Feline Tint)
+            if root.tab == 1: Card {
+                SectionTitle {
+                    text: "Mod generator";
+                    icon: Icons.palette;
+                }
+                BodyText {
+                    text: "Recolour Roblox's grey and white icons, menus and chat with one colour or a gradient. It's made from your own copy of Roblox's images, so it keeps up with Roblox's updates. Colourful pictures stay as they are, and some backgrounds are painted by Roblox's code and keep their colour.";
+                }
+                Rectangle {
+                    height: 112px;
+                    border-radius: Theme.radius;
+                    background: #17151f;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    clip: true;
+                    if ModTools.has-preview: Image {
+                        width: parent.width - 24px;
+                        height: parent.height - 16px;
+                        source: ModTools.preview;
+                        image-fit: contain;
+                    }
+                    if !ModTools.has-preview: Rectangle {
+                        width: parent.width - 48px;
+                        height: 28px;
+                        border-radius: 14px;
+                        background: !ModTools.gradient ? ModTools.colour1
+                            : ModTools.direction == 1 ? @linear-gradient(180deg, ModTools.colour1 0%, ModTools.colour2 100%)
+                            : ModTools.direction == 2 ? @linear-gradient(135deg, ModTools.colour1 0%, ModTools.colour2 100%)
+                            : @linear-gradient(90deg, ModTools.colour1 0%, ModTools.colour2 100%);
+                    }
+                }
+                if !ModTools.has-preview: BodyText {
+                    text: "Roblox's own icons show up here once Roblox for Windows is your runtime.";
+                    color: Theme.text-faint;
+                }
+                SettingRow {
+                    label: "Style";
+                    TabBar {
+                        width: 260px;
+                        tabs: ["One colour", "Gradient"];
+                        current: ModTools.gradient ? 1 : 0;
+                        changed(i) => {
+                            ModTools.gradient = i == 1;
+                            ModTools.changed();
+                        }
+                    }
+                }
+                ColourRow {
+                    label: ModTools.gradient ? "From" : "Colour";
+                    which: 1;
+                    current: ModTools.colour1;
+                    hex: ModTools.hex1;
+                }
+                if ModTools.gradient: ColourRow {
+                    label: "To";
+                    which: 2;
+                    current: ModTools.colour2;
+                    hex: ModTools.hex2;
+                }
+                if ModTools.gradient: SettingRow {
+                    label: "Direction";
+                    help: "Across each icon, not the whole screen.";
+                    ComboBox {
+                        width: 200px;
+                        model: ["Left to right", "Top to bottom", "Diagonal"];
+                        current-index: ModTools.direction;
+                        selected => {
+                            ModTools.direction = self.current-index;
+                            ModTools.changed();
+                        }
+                    }
+                }
+                SettingRow {
+                    label: "Recolour";
+                    help: "Leave a part out to keep Roblox's own look there.";
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Chip {
+                        text: "Icons";
+                        on: ModTools.icons;
+                        clicked => {
+                            ModTools.icons = !ModTools.icons;
+                            ModTools.changed();
+                        }
+                    }
+                    Chip {
+                        text: "Menus";
+                        on: ModTools.menus;
+                        clicked => {
+                            ModTools.menus = !ModTools.menus;
+                            ModTools.changed();
+                        }
+                    }
+                    Chip {
+                        text: "Chat";
+                        on: ModTools.chat;
+                        clicked => {
+                            ModTools.chat = !ModTools.chat;
+                            ModTools.changed();
+                        }
+                    }
+                    Chip {
+                        text: "Everything else";
+                        on: ModTools.other;
+                        clicked => {
+                            ModTools.other = !ModTools.other;
+                            ModTools.changed();
+                        }
+                    }
+                }
+                if ModTools.message != "": BodyText {
+                    text: ModTools.message;
+                    color: Theme.warning;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    SecondaryButton {
+                        text: ModTools.installed ? "Update the Feline Tint" : "Make the mod";
+                        icon: Icons.palette;
+                        primary: true;
+                        enabled: ModTools.icons || ModTools.menus || ModTools.chat || ModTools.other;
+                        clicked => {
+                            ModTools.make();
+                        }
+                    }
+                }
+            }
+
+            // Sky
+            if root.tab == 1: Card {
+                SectionTitle {
+                    text: "Sky";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Roblox's default sky, made by Feline: pick one of Feline's, or turn a wide picture of yours (a panorama) into a sky. Games with their own sky keep theirs.";
+                }
+                if More.has-sky: Rectangle {
+                    height: 96px;
+                    border-radius: 10px;
+                    clip: true;
+                    Image {
+                        width: 100%;
+                        height: 100%;
+                        source: More.sky-preview;
+                        image-fit: cover;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for name[i] in ["Sunset", "Starry night", "Pastel dawn", "Feline purple"]: SecondaryButton {
+                        text: name;
+                        clicked => {
+                            More.sky-preset(i);
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    SecondaryButton {
+                        text: "From a picture…";
+                        icon: Icons.folder;
+                        clicked => {
+                            More.sky-picture();
+                        }
+                    }
+                    if More.has-sky: ConfirmButton {
+                        text: "Roblox's sky";
+                        icon: Icons.trash;
+                        confirmed => {
+                            More.sky-remove();
+                        }
+                    }
+                }
+            }
+
+            // Colour pieces
+            if root.tab == 1: Card {
+                SectionTitle {
+                    text: "Colour the little things";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Give the cursor, the shift lock pointer and the emote wheel a colour of their own, like Froststrap's generator. It colours your picked cursor too, if you have one. Type a colour like #ff8fb1; empty takes it off.";
+                }
+                for label[i] in ["Cursor", "Shift lock", "Emote wheel"]: SettingRow {
+                    label: label;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 13px;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                            background: More.piece-colours[i];
+                            Text {
+                                text: More.pieces[i] == "" ? "–" : "";
+                                color: Theme.text-faint;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        piece-hex := LineEdit {
+                            width: 120px;
+                            text: More.pieces[i];
+                            placeholder-text: "#rrggbb";
+                            accepted(text) => {
+                                More.set-piece(i, text);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Set";
+                            clicked => {
+                                More.set-piece(i, piece-hex.text);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Feline Picks
+            if root.tab == 2: Card {
+                SectionTitle {
+                    text: "Make it yours";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Pick your own files and Feline puts them where Roblox looks (as the \"Feline Picks\" mod below).";
+                }
+                PickRow {
+                    label: "Death sound";
+                    help: "The oof. Any .ogg or .mp3.";
+                    set: root.picks[0];
+                    choose => {
+                        root.pick(0);
+                    }
+                    clear => {
+                        root.clear-pick(0);
+                    }
+                }
+                Divider { }
+                PickRow {
+                    label: "Mouse cursor";
+                    help: ModTools.cursor-animated
+                        ? (ModTools.windows
+                            ? "Animated! Roblox gets a see-through cursor and Feline plays yours over the game, whenever Feline starts Roblox. Started any other way, Roblox shows its first frame."
+                            : "Animated cursors only play on Windows; here Roblox shows its first frame.")
+                        : "A PNG picture, or an animated .gif or Windows .ani cursor" + (ModTools.windows ? " (Feline plays those over the game)." : " (Windows plays those; here, the first frame).");
+                    set: root.picks[1];
+                    choose => {
+                        root.pick(1);
+                    }
+                    clear => {
+                        root.clear-pick(1);
+                    }
+                }
+                SettingRow {
+                    label: "Cursor sets";
+                    help: "Save the cursor you picked under a name, and switch back to it any time.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        set-name := LineEdit {
+                            width: 150px;
+                            placeholder-text: "Name";
+                        }
+                        SecondaryButton {
+                            text: "Save";
+                            enabled: set-name.text != "" && root.picks[1];
+                            clicked => {
+                                More.save-cursor-set(set-name.text);
+                                set-name.text = "";
+                            }
+                        }
+                    }
+                }
+                for name in More.cursor-sets: HorizontalLayout {
+                    spacing: 10px;
+                    padding-left: 12px;
+                    Text {
+                        text: name;
+                        color: Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    SecondaryButton {
+                        text: "Use";
+                        clicked => {
+                            More.use-cursor-set(name);
+                        }
+                    }
+                    ConfirmButton {
+                        text: "Delete";
+                        icon: Icons.trash;
+                        confirmed => {
+                            More.delete-cursor-set(name);
+                        }
+                    }
+                }
+                Divider { }
+                PickRow {
+                    label: "Shift lock";
+                    help: "The pointer in the middle of the screen while shift lock is on. Any PNG (or the first frame of a .gif/.ani); Feline sizes it like Roblox's own.";
+                    set: root.picks[4];
+                    choose => {
+                        root.pick(4);
+                    }
+                    clear => {
+                        root.clear-pick(4);
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Classic cursors";
+                    help: "The good old arrow, drawn by Feline: white with a black edge, or black with a white edge. It goes in as your cursor pick.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        SecondaryButton {
+                            text: "White arrow";
+                            clicked => {
+                                More.classic-cursor(true);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Black arrow";
+                            clicked => {
+                                More.classic-cursor(false);
+                            }
+                        }
+                    }
+                }
+                Divider { }
+                PickRow {
+                    label: "Font";
+                    help: "A .ttf or .otf font for the text in every game.";
+                    set: root.picks[2];
+                    choose => {
+                        root.pick(2);
+                    }
+                    clear => {
+                        root.clear-pick(2);
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Emoji";
+                    help: (ModTools.windows ? "Windows' own emoji (from this PC), " : "") + "Catmoji (Twemoji with cat faces, from Bloxstrap's emoji collection), or any colour emoji .ttf of yours. " + (root.picks[3] ? "Yours are in." : "Roblox's own for now.");
+                    HorizontalLayout {
+                        spacing: 10px;
+                        if ModTools.windows: SecondaryButton {
+                            text: "Windows";
+                            enabled: !ModTools.emoji-busy;
+                            clicked => {
+                                ModTools.emoji("windows");
+                            }
+                        }
+                        SecondaryButton {
+                            text: ModTools.emoji-busy ? "Getting it…" : "Catmoji";
+                            enabled: !ModTools.emoji-busy;
+                            clicked => {
+                                ModTools.emoji("catmoji");
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Choose…";
+                            icon: Icons.folder;
+                            enabled: !ModTools.emoji-busy;
+                            clicked => {
+                                root.pick(3);
+                            }
+                        }
+                        if root.picks[3]: ConfirmButton {
+                            text: "Remove";
+                            icon: Icons.trash;
+                            confirmed => {
+                                root.clear-pick(3);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Your mods
+            if root.tab == 0: VerticalLayout {
+                spacing: 12px;
+                // Your mods
+                HorizontalLayout {
+                    spacing: 10px;
+                    Eyebrow {
+                        text: "Your mods";
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    SecondaryButton {
+                        horizontal-stretch: 0;
+                        text: "Add a .zip…";
+                        icon: Icons.download;
+                        clicked => {
+                            ModTools.import-zip();
+                        }
+                    }
+                    SecondaryButton {
+                        horizontal-stretch: 0;
+                        text: "Open mods folder";
+                        icon: Icons.folder;
+                        clicked => {
+                            root.open-folder();
+                        }
+                    }
+                    ConfirmButton {
+                        horizontal-stretch: 0;
+                        text: "Restore Roblox's files";
+                        icon: Icons.refresh;
+                        confirmed => {
+                            root.restore();
+                        }
+                    }
+                }
+
+                for row in root.mods: ModCard {
+                    entry: row;
+                    listen => {
+                        root.listen(row.name);
+                    }
+                    toggled(on) => {
+                        root.toggle(row.name, on);
+                    }
+                }
+
+                if root.mods.length == 0: Card {
+                    CatEmpty {
+                        title: "No mods yet";
+                        text: "Add a mod someone shared with \"Add a .zip…\", or put each mod in its own folder inside the mods folder, laid out like Roblox's files (say, content/sounds/ouch.ogg), then press Rescan.";
+                    }
+                }
+
+                if root.conflicts.length > 0: Card {
+                    SectionTitle {
+                        text: "Mods changing the same file";
+                        icon: Icons.link;
+                    }
+                    for c in root.conflicts: Rectangle {
+                        height: row-box-5.preferred-height;
+                        row-box-5 := BodyText {
+                        text: c;
+                    }
+                    }
+                }
+
+                // Mod profiles
+                Card {
+                    SectionTitle {
+                        text: "Mod profiles";
+                        icon: Icons.sliders;
+                    }
+                    BodyText {
+                        text: "Save which mods are on (\"Cozy\", \"Retro\", \"Clean\") and swap the whole set in one click.";
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            placeholder-text: "Name for the mods that are on now";
+                            edited(t) => {
+                                root.profile-name = t;
+                            }
+                            accepted(t) => {
+                                root.save-mod-profile(t);
+                            }
+                        }
+                        SecondaryButton {
+                            horizontal-stretch: 0;
+                            text: "Save";
+                            icon: Icons.download;
+                            clicked => {
+                                root.save-mod-profile(root.profile-name);
+                            }
+                        }
+                    }
+                    for p in root.mod-profiles: HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: p;
+                            color: Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        SecondaryButton {
+                            horizontal-stretch: 0;
+                            text: "Use";
+                            clicked => {
+                                root.apply-mod-profile(p);
+                            }
+                        }
+                        ConfirmButton {
+                            horizontal-stretch: 0;
+                            text: "Delete";
+                            icon: Icons.trash;
+                            confirmed => {
+                                root.delete-mod-profile(p);
+                            }
+                        }
+                    }
+                }
+
+                PawTip {
+                    text: "Mods go in each time you press Play, and switching one off puts Roblox's own files back. When two mods change the same file, the one lower in the list wins.";
+                }
+                if root.folder != "": BodyText {
+                    text: "Mods folder: " + root.folder;
+                }
+            }
+            Banner {
+                text: "Roblox doesn't support modified files. Mods only swap sounds, fonts and pictures, like Bloxstrap does, but they're still at your own risk.";
+                tone: Theme.warning;
+            }
+        }
+    }
+}

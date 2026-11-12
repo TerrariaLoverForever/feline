@@ -1,0 +1,253 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The Roblox page's tools under the runtime list: Roblox's status, version
+// history, setting profiles (also per game) and repair.
+
+import { ComboBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { VersionRow, GameProfileRow } from "../types.slint";
+import { Icon, Icons } from "../icons.slint";
+import { More } from "../more.slint";
+import { TextEdit } from "std-widgets.slint";
+import { Card, BodyText, Divider, SectionTitle, SettingRow, SecondaryButton, ConfirmButton, Banner, PawTip, StatusDot, Toggle } from "../components.slint";
+
+export component RobloxExtras inherits VerticalLayout {
+    in property <bool> windows;
+    // The selected runtime's name ("" = none).
+    in property <string> runtime;
+    // status.roblox.com
+    in property <string> health;
+    in property <bool> health-ok;
+    in property <bool> health-checking;
+    in property <[string]> health-problems;
+    // Versions, profiles
+    in property <[VersionRow]> versions;
+    in property <[string]> profiles;
+    in property <[GameProfileRow]> game-profiles;
+    in property <int> everyday-profile;
+    in property <bool> has-settings;
+    in property <string> message;
+    // The per-game choices: "No profile", then the profiles.
+    in property <[string]> choices;
+
+    callback check-health();
+    callback save-profile(string);
+    callback apply-profile(string);
+    callback delete-profile(string);
+    callback set-game-profile(string, int);
+    callback repair();
+
+    // False while a runtime's own settings page is open.
+    in property <bool> show: true;
+    property <string> new-name;
+
+    if root.show: VerticalLayout {
+        spacing: 14px;
+
+        // ---------------- Is Roblox up?
+        Card {
+            SectionTitle {
+                text: "Is Roblox up?";
+                icon: Icons.bolt;
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    StatusDot {
+                        tone: root.health-checking ? Theme.text-faint : root.health-ok ? Theme.success : Theme.warning;
+                        pulse: root.health-checking;
+                    }
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.health-checking ? "Asking status.roblox.com…" : root.health == "" ? "Not checked yet." : root.health;
+                    font-size: 14.5px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                SecondaryButton {
+                    horizontal-stretch: 0;
+                    text: "Check";
+                    icon: Icons.refresh;
+                    enabled: !root.health-checking;
+                    clicked => {
+                        root.check-health();
+                    }
+                }
+            }
+            for problem in root.health-problems: Rectangle {
+                height: row-box-7.preferred-height;
+                row-box-7 := Banner {
+                    text: problem;
+                    tone: Theme.warning;
+                }
+            }
+        }
+
+        // ---------------- Version history
+        if root.versions.length > 0: Card {
+            SectionTitle {
+                text: root.runtime + " versions you've had";
+                icon: Icons.clock;
+            }
+            for v[i] in root.versions: HorizontalLayout {
+                spacing: 12px;
+                // The current version gets a live dot; older ones a quiet ring.
+                VerticalLayout {
+                    alignment: center;
+                    if i == 0: StatusDot {
+                        tone: Theme.success;
+                    }
+                    if i != 0: Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        border-width: 1.5px;
+                        border-color: Theme.text-faint;
+                    }
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: v.version;
+                    font-size: 13.5px;
+                    font-weight: i == 0 ? 700 : 400;
+                    color: i == 0 ? Theme.text : Theme.text-muted;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: v.when;
+                    font-size: 12.5px;
+                    color: Theme.text-faint;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ---------------- Profiles
+        if root.has-settings: Card {
+            SectionTitle {
+                text: "Setting profiles";
+                icon: Icons.sliders;
+            }
+            BodyText {
+                text: "Save " + root.runtime + "'s current settings under a name (\"Competitive\", \"Pretty screenshots\", \"Battery saver\") and switch between them in one click.";
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "Name for the current settings";
+                    edited(t) => {
+                        root.new-name = t;
+                    }
+                    accepted(t) => {
+                        root.save-profile(t);
+                    }
+                }
+                SecondaryButton {
+                    horizontal-stretch: 0;
+                    text: "Save";
+                    icon: Icons.download;
+                    clicked => {
+                        root.save-profile(root.new-name);
+                    }
+                }
+            }
+            for p in root.profiles: HorizontalLayout {
+                spacing: 10px;
+                Icon {
+                    width: 16px;
+                    height: 16px;
+                    commands: Icons.paw;
+                    tone: Theme.lavender;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: p;
+                    font-size: 14px;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                SecondaryButton {
+                    horizontal-stretch: 0;
+                    text: "Use now";
+                    clicked => {
+                        root.apply-profile(p);
+                    }
+                }
+                ConfirmButton {
+                    horizontal-stretch: 0;
+                    text: "Delete";
+                    icon: Icons.trash;
+                    confirmed => {
+                        root.delete-profile(p);
+                    }
+                }
+            }
+        }
+
+        // ---------------- Per game
+        if root.has-settings && root.profiles.length > 0: Card {
+            SectionTitle {
+                text: "Profiles per game";
+                icon: Icons.gamepad;
+            }
+            BodyText {
+                text: "Feline switches to the chosen profile just before the game starts.";
+            }
+            SettingRow {
+                label: "Every other game";
+                help: "Also used when you just open Roblox.";
+                ComboBox {
+                    width: 200px;
+                    model: root.choices;
+                    current-index: root.everyday-profile;
+                    selected => {
+                        root.set-game-profile("0", self.current-index);
+                    }
+                }
+            }
+            for g in root.game-profiles: Rectangle {
+                height: row-box-8.preferred-height;
+                row-box-8 := SettingRow {
+                label: g.name;
+                ComboBox {
+                    width: 200px;
+                    model: root.choices;
+                    current-index: g.index;
+                    selected => {
+                        root.set-game-profile(g.place, self.current-index);
+                    }
+                }
+            }
+            }
+        }
+
+        // ---------------- Repair
+        if root.windows: Card {
+            SectionTitle {
+                text: "Something broken?";
+                icon: Icons.stethoscope;
+            }
+            SettingRow {
+                label: "Repair Roblox";
+                help: "Takes Feline's mods out, then runs Roblox's own installer (after checking it really is Roblox's). The installer checks every file and fixes anything damaged or missing.";
+                ConfirmButton {
+                    horizontal-stretch: 0;
+                    text: "Repair";
+                    icon: Icons.refresh;
+                    confirmed => {
+                        root.repair();
+                    }
+                }
+            }
+        }
+
+        if root.message != "": Banner {
+            text: root.message;
+        }
+
+    }
+}

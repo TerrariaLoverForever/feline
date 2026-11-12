@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// How Feline's own window looks beyond its colours: the font, a picture or
+// gradient behind the pages, and Windows 11's glass. A global, so the
+// window and the About page read it directly; Rust sets it with
+// `ui.global::<Looks>()`.
+
+export global Looks {
+    // The font family ("" = Feline's own).
+    in property <string> font;
+    // 0 plain, 1 gradient, 2 picture.
+    in property <int> background;
+    in property <image> picture;
+    // 0 off, 1 Mica, 2 Acrylic (Windows 11).
+    in property <int> glass;
+    in property <bool> windows;
+    in property <string> message;
+
+    callback set-font(string);
+    callback set-background(int);
+    callback pick-picture();
+    callback set-glass(int);
+}

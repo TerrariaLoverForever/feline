@@ -2,9 +2,10 @@
 //! Runtime backends.
 //!
 //! A *runtime* is a separate program that runs the Roblox client: Feline's
-//! own, `feline-runtime` (in development, see [`feline`]), or **external,
+//! own, `feline-runtime` (in development, see [`feline`]), **external,
 //! third-party** runtimes the user installed themselves, which Feline drives
-//! through their public command line only.
+//! through their public command line only, or, on Windows, Roblox's own
+//! official client ([`roblox`]).
 //!
 //! The pieces:
 //! - [`RuntimeBackend`]: one implementation per runtime project. It knows how
@@ -21,6 +22,7 @@ pub mod config;
 pub mod cordial;
 pub mod feline;
 pub mod mocktail;
+pub mod roblox;
 pub mod sober;
 pub mod stud;
 pub mod tipsy;
@@ -48,6 +50,8 @@ pub struct DetectContext {
     /// `$XDG_CONFIG_HOME` if set (and absolute), for non-Flatpak runtimes'
     /// settings files. `None` means `~/.config`.
     pub config_home: Option<PathBuf>,
+    /// Windows: `%LOCALAPPDATA%`, where Roblox installs itself for the user.
+    pub local_app_data: Option<PathBuf>,
 }
 
 impl DetectContext {
@@ -61,6 +65,9 @@ impl DetectContext {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/var/lib/flatpak")),
             config_home: std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute()),
+            local_app_data: std::env::var_os("LOCALAPPDATA")
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute()),
         }
@@ -128,6 +135,10 @@ pub enum InstallKind {
     AppImage(PathBuf),
     /// A regular executable (distro package, `cargo install`, …).
     Native(PathBuf),
+    /// Roblox's own client where Roblox's installer put it (Windows),
+    /// started directly. The path changes with every Roblox update, so the
+    /// installation's [`Installation::key`] doesn't include it.
+    Official(PathBuf),
 }
 
 impl fmt::Display for InstallKind {
@@ -143,6 +154,7 @@ impl fmt::Display for InstallKind {
             } => f.write_str("Flatpak (system)"),
             Self::AppImage(path) => write!(f, "AppImage ({})", path.display()),
             Self::Native(path) => write!(f, "installed program ({})", path.display()),
+            Self::Official(path) => write!(f, "Roblox's installer ({})", path.display()),
         }
     }
 }
@@ -187,6 +199,8 @@ pub enum Origin {
     /// A separate, third-party project. Feline only starts it through its
     /// public interface and contains none of its code.
     External { project_url: &'static str },
+    /// Roblox's own client, made by Roblox Corporation (Windows).
+    Official,
 }
 
 impl fmt::Display for Origin {
@@ -194,6 +208,7 @@ impl fmt::Display for Origin {
         match self {
             Self::Feline => f.write_str("Feline runtime"),
             Self::External { .. } => f.write_str("external third-party runtime"),
+            Self::Official => f.write_str("official Roblox client"),
         }
     }
 }
@@ -212,7 +227,9 @@ impl Installation {
                 cmd.arg(app_id);
                 cmd
             }
-            InstallKind::AppImage(path) | InstallKind::Native(path) => Command::new(path),
+            InstallKind::AppImage(path)
+            | InstallKind::Native(path)
+            | InstallKind::Official(path) => Command::new(path),
         }
     }
 
@@ -239,6 +256,11 @@ impl Installation {
     /// Where this installation keeps its own settings file, if Feline can edit it.
     pub fn config_path(&self, ctx: &DetectContext) -> Option<PathBuf> {
         self.backend.config_path(self, ctx)
+    }
+
+    /// Where mods go for this installation, if it can use them.
+    pub fn mod_target(&self, ctx: &DetectContext) -> Option<crate::mods::ModTarget> {
+        self.backend.mod_target(self, ctx)
     }
 
     /// Where this installation's Roblox client writes its logs.
@@ -319,6 +341,7 @@ impl Installation {
             } => format!("{id}:flatpak-system"),
             InstallKind::AppImage(path) => format!("{id}:appimage:{}", path.display()),
             InstallKind::Native(path) => format!("{id}:native:{}", path.display()),
+            InstallKind::Official(_) => format!("{id}:official"),
         }
     }
 }
@@ -432,6 +455,15 @@ pub trait RuntimeBackend: Send + Sync {
     fn roblox_log_roots(&self, _installation: &Installation, _ctx: &DetectContext) -> Vec<PathBuf> {
         Vec::new()
     }
+    /// Where Bloxstrap-style mods go (see [`crate::mods`]). `None`: this
+    /// runtime has no known way to load them.
+    fn mod_target(
+        &self,
+        _installation: &Installation,
+        _ctx: &DetectContext,
+    ) -> Option<crate::mods::ModTarget> {
+        None
+    }
     /// Process names (as in `/proc/<pid>/comm`, cut to 15 characters) that
     /// mean this runtime is running.
     fn process_names(&self) -> &'static [&'static str] {
@@ -446,9 +478,10 @@ pub trait RuntimeBackend: Send + Sync {
     ) -> Result<LaunchPlan, RuntimeError>;
 }
 
-/// Every backend Feline knows about. The order is not a preference: Feline
-/// never picks a runtime on the user's behalf. A `static` lives for the whole
-/// program, so we can hand out `'static` references.
+/// Every backend Feline knows about on this system. The order is not a
+/// preference: Feline never picks a runtime on the user's behalf. A `static`
+/// lives for the whole program, so we can hand out `'static` references.
+#[cfg(target_os = "linux")]
 static BACKENDS: &[&dyn RuntimeBackend] = &[
     &feline::FELINE,
     &cordial::CORDIAL,
@@ -458,6 +491,13 @@ static BACKENDS: &[&dyn RuntimeBackend] = &[
     &mocktail::MOCKTAIL,
     &mocktail::NIGHTCAP,
 ];
+
+/// On Windows, Roblox runs natively: Feline starts its official client.
+#[cfg(windows)]
+static BACKENDS: &[&dyn RuntimeBackend] = &[&roblox::ROBLOX];
+
+#[cfg(not(any(target_os = "linux", windows)))]
+static BACKENDS: &[&dyn RuntimeBackend] = &[];
 
 pub fn backends() -> &'static [&'static dyn RuntimeBackend] {
     BACKENDS
@@ -557,10 +597,14 @@ pub(crate) fn flatpak_installs(ctx: &DetectContext, app_id: &str) -> Vec<(Flatpa
 }
 
 /// The first executable called `name` on `PATH`, like the shell would find.
+/// On Windows, `name.exe` too.
 pub(crate) fn find_on_path(ctx: &DetectContext, name: &str) -> Option<PathBuf> {
     let path_var = ctx.path.as_ref()?;
     std::env::split_paths(path_var)
-        .map(|dir| dir.join(name))
+        .flat_map(|dir| {
+            let exe = cfg!(windows).then(|| dir.join(format!("{name}.exe")));
+            std::iter::once(dir.join(name)).chain(exe)
+        })
         .find(|candidate| is_executable(candidate))
 }
 
@@ -611,10 +655,19 @@ pub fn parse_metainfo_version(xml: &str) -> Option<String> {
 }
 
 /// True if `path` is a regular file with an execute bit set.
+#[cfg(unix)]
 pub(crate) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.metadata()
         .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// True if `path` is a regular file ending in `.exe` (Windows has no
+/// execute bit; the extension decides).
+#[cfg(windows)]
+pub(crate) fn is_executable(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+        && path.metadata().is_ok_and(|m| m.is_file())
 }
 
 #[cfg(test)]

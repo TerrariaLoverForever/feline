@@ -2,11 +2,14 @@
 // Settings page: Feline's own settings, in tabs. Each runtime's own settings
 // are on its page under Runtimes.
 
-import { ScrollView, ComboBox } from "std-widgets.slint";
+import { ScrollView, ComboBox, LineEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { Level } from "../types.slint";
+import { Level, GameCard } from "../types.slint";
 import { Icons } from "../icons.slint";
-import { PageBase, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, TabBar, SettingRow, SectionTitle, SecondaryButton, ConfirmButton, Banner } from "../components.slint";
+import { Extras } from "../extras.slint";
+import { PlayExtras } from "../play_extras.slint";
+import { More } from "../more.slint";
+import { PageBase, Card, Eyebrow, BodyText, PageHeader, Divider, Toggle, TabBar, SettingRow, SectionTitle, SecondaryButton, ConfirmButton, Banner, PawTip } from "../components.slint";
 
 // One of Feline's override settings: a dropdown.
 component OverrideRow inherits SettingRow {
@@ -57,10 +60,31 @@ component StorageRow inherits SettingRow {
 }
 
 export component SettingsPage inherits PageBase {
+    // True on Windows: only the settings that apply there are shown (the
+    // others are for Linux runtimes and Feline's own runtime).
+    in property <bool> windows;
     // Feline's override settings (index into each options list).
     in property <int> renderer-index;
     in property <int> gamemode-index;
     in property <int> close-index;
+    in property <int> after-launch-index;
+    in property <int> priority-index;
+    in property <bool> fast-gpu;
+    in property <bool> verify-roblox;
+    in property <bool> close-stuck;
+    in property <bool> close-on-leave;
+    in property <bool> roblox-icon;
+    in property <int> title-bar-index;
+    // Clear Roblox
+    in property <string> roblox-data-size;
+    in-out property <bool> clear-studio;
+    in property <string> discord-text;
+    in property <bool> discord-region;
+    in property <bool> discord-today;
+    in property <[GameCard]> discord-games;
+    callback set-discord-text(string);
+    callback toggle-discord-hidden(string);
+    in property <int> break-index;
     // Result of applying Feline's settings to the runtimes.
     in property <string> apply-status;
     in property <Level> apply-level;
@@ -81,6 +105,14 @@ export component SettingsPage inherits PageBase {
     in property <int> log-days-index;
     in property <bool> has-saved-login;
     in property <string> size-roblox-cache;
+    // Storage extras
+    in property <string> size-shader-cache;
+    in property <string> space-total;
+    in property <string> space-change;
+    // Space per day, 0..1 of the largest, oldest first.
+    in property <[float]> space-history;
+    in property <int> tidy-index;
+    in property <string> last-tidy;
     in property <string> size-roblox-logs;
     in property <string> size-feline-logs;
     in property <string> size-roblox-versions;
@@ -98,24 +130,31 @@ export component SettingsPage inherits PageBase {
     callback open-runtime-privacy();
 
     in-out property <int> current: 0;
+    // Which section each visible tab shows (0 General … 5 Updates).
+    // 6 is Performance (Windows), 7 Playing.
+    property <[int]> tab-ids: root.windows ? [0, 7, 6, 2, 3, 4] : [0, 7, 1, 2, 3, 4, 5];
+    property <int> tab: root.tab-ids[root.current];
     property <[string]> toggle-options: ["Let each runtime decide", "On", "Off"];
 
     ScrollView {
         VerticalLayout {
-            padding: 30px;
-            spacing: 16px;
+            padding: 22px;
+            spacing: 12px;
             alignment: start;
 
             PageHeader {
                 title: "Settings";
-                description: "Feline's own settings. Each runtime's settings are on its page under Runtimes.";
+                description: root.windows
+                    ? "How Feline behaves, and how it treats your Roblox."
+                    : "How Feline behaves. Each runtime's own settings live on its page under Runtimes.";
             }
 
             TabBar {
-                tabs: ["General", "Overrides", "Discord", "Privacy", "Storage", "Updates"];
+                tabs: root.windows ? ["General", "Playing", "Performance", "Discord", "Privacy", "Storage"]
+                    : ["General", "Playing", "Overrides", "Discord", "Privacy", "Storage", "Updates"];
                 current <=> root.current;
                 changed(i) => {
-                    if i == 4 {
+                    if root.tab-ids[i] == 4 || root.tab-ids[i] == 3 {
                         root.housekeeping("refresh");
                     }
                 }
@@ -127,14 +166,319 @@ export component SettingsPage inherits PageBase {
             }
 
             // ---------------- General
-            if root.current == 0: Card {
+            if root.tab == 7: Card {
+                SectionTitle {
+                    text: "While you play";
+                    icon: Icons.paw;
+                }
+                if PlayExtras.windows: SettingRow {
+                    label: "More than one Roblox at once";
+                    help: "Lets you open a second Roblox window (say, an alt account) while one is running: press Play again. Feline keeps Roblox from closing the first one. Start the first Roblox from Feline for this to work.";
+                    Toggle {
+                        checked: PlayExtras.multi;
+                        toggled(on) => {
+                            PlayExtras.set-multi(on);
+                        }
+                    }
+                }
+                if PlayExtras.windows: Divider { }
+                SettingRow {
+                    label: "Ask before starting a second Roblox";
+                    help: "If Roblox is already open, Play asks first: a new one closes the old one (unless \"More than one Roblox\" is on). Press Play again to go ahead.";
+                    Toggle {
+                        checked: PlayExtras.confirm;
+                        toggled(on) => {
+                            PlayExtras.set-confirm(on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "A card while Roblox starts from a link";
+                    help: "Starting from roblox.com or a desktop shortcut, Feline has no window: a small Feline card says it's on its way, or what went wrong.";
+                    Toggle {
+                        checked: PlayExtras.splash;
+                        toggled(on) => {
+                            PlayExtras.set-splash(on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Say where the server is";
+                    help: "When you join a game, a small notification tells you where its server is, like \"Frankfurt, Germany\". It doesn't take you out of the game, and works even with Feline closed.";
+                    Toggle {
+                        checked: PlayExtras.popup;
+                        toggled(on) => {
+                            PlayExtras.set-popup(on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Keep running when closed";
+                    help: PlayExtras.windows
+                        ? "Closing Feline's window keeps it by the clock, so the desk cat, music and game helpers carry on. Click its icon to bring it back; right-click it to quit."
+                        : "Closing Feline's window keeps it running in the background, so the game's stats and helpers carry on. Open Feline again from your apps to bring it back; Quit in the sidebar ends it.";
+                    Toggle {
+                        checked: More.keep-running;
+                        toggled(on) => {
+                            More.set-switch("keep-running", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: PlayExtras.windows ? "Start Feline with Windows" : "Start Feline when you log in";
+                    help: "Feline opens (minimized) when you log in, so links, shortcuts and the desk cat are ready.";
+                    Toggle {
+                        checked: More.start-with-windows;
+                        toggled(on) => {
+                            More.set-switch("start-with-windows", on);
+                        }
+                    }
+                }
+                if PlayExtras.windows: Divider { }
+                if PlayExtras.windows: SettingRow {
+                    label: "End Roblox's crash reporter";
+                    help: "RobloxCrashHandler.exe starts with every game, just in case. Off it goes, for a little less in the background. If Roblox crashes, it won't send Roblox a report.";
+                    Toggle {
+                        checked: More.no-crash-handler;
+                        toggled(on) => {
+                            More.set-switch("no-crash-handler", on);
+                        }
+                    }
+                }
+                if !PlayExtras.windows: Divider { }
+                if !PlayExtras.windows: SettingRow {
+                    label: "Start the runtime through";
+                    help: "A command put in front of the runtime, e.g. \"gamescope -f --\" for smoother frame pacing, or \"distrobox enter games --\" to run it in a container. Empty: started directly.";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        wrapper-text := LineEdit {
+                            width: 220px;
+                            text: More.wrapper;
+                            placeholder-text: "gamescope -f --";
+                            accepted(text) => {
+                                More.set-wrapper(text);
+                            }
+                        }
+                        SecondaryButton {
+                            text: "Save";
+                            clicked => {
+                                More.set-wrapper(wrapper-text.text);
+                            }
+                        }
+                    }
+                }
+                if PlayExtras.windows: Divider { }
+                if PlayExtras.windows: SettingRow {
+                    label: "Feline icon by the clock";
+                    help: "While you play: the game, where its server is and how long it's been up, plus Copy invite link, Rejoin and Close Roblox. Works with Feline's window closed.";
+                    Toggle {
+                        checked: More.tray;
+                        toggled(on) => {
+                            More.set-switch("tray", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Rejoin after an idle kick";
+                    help: "When Roblox disconnects you for being idle, Feline closes it and puts you back in the same server (if it still has room).";
+                    Toggle {
+                        checked: More.auto-rejoin;
+                        toggled(on) => {
+                            More.set-switch("auto-rejoin", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Programs that start with Roblox";
+                    help: "A macro tool, a recorder, an FPS counter… Feline starts them right after Roblox, and can close them again when Roblox closes.";
+                    SecondaryButton {
+                        text: "Add a program…";
+                        icon: Icons.folder;
+                        clicked => {
+                            PlayExtras.add-program();
+                        }
+                    }
+                }
+                for program[i] in PlayExtras.programs: Rectangle {
+                    background: Theme.surface-raised;
+                    border-radius: 12px;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: program.name;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                }
+                                Text {
+                                    text: program.path;
+                                    font-size: 12px;
+                                    color: Theme.text-faint;
+                                    overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: "Close with Roblox";
+                                font-size: 13px;
+                                color: Theme.text-muted;
+                                vertical-alignment: center;
+                                horizontal-stretch: 0;
+                            }
+                            Toggle {
+                                checked: program.close-after;
+                                toggled(on) => {
+                                    PlayExtras.set-program-close(i, on);
+                                }
+                            }
+                            ConfirmButton {
+                                text: "Remove";
+                                icon: Icons.trash;
+                                confirmed => {
+                                    PlayExtras.remove-program(i);
+                                }
+                            }
+                        }
+                        LineEdit {
+                            text: program.args;
+                            placeholder-text: "Arguments (optional), e.g. --minimized";
+                            edited(text) => {
+                                PlayExtras.set-program-args(i, text);
+                            }
+                        }
+                    }
+                }
+                if PlayExtras.windows: Divider { }
+                if PlayExtras.windows: SettingRow {
+                    label: "Stay on this Roblox version";
+                    help: PlayExtras.pinned != ""
+                        ? "Feline starts Roblox " + PlayExtras.pinned + " even after Roblox updates. Roblox stops letting old versions join games after a while; then go back to the newest."
+                        : "Keeps a copy of the Roblox you have now (" + PlayExtras.version-now + ") and goes on starting it after Roblox updates, until you switch this off. Handy when an update breaks something. Roblox stops letting old versions join after a while.";
+                    Toggle {
+                        checked: PlayExtras.pinned != "";
+                        enabled: !PlayExtras.busy && (PlayExtras.can-pin || PlayExtras.pinned != "");
+                        toggled(on) => {
+                            if on {
+                                PlayExtras.pin();
+                            } else {
+                                PlayExtras.unpin();
+                            }
+                        }
+                    }
+                }
+                if PlayExtras.message != "": Banner {
+                    text: PlayExtras.message;
+                    tone: Theme.text-muted;
+                }
+            }
+            if root.tab == 0 && More.straps.length > 0: Card {
+                SectionTitle {
+                    text: "Moving from another launcher?";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Feline can take over your Discord status choices, server pop-up, programs that start with Roblox, more-than-one-Roblox and FastFlags. Mods come over on the Mods page.";
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for name in More.straps: SecondaryButton {
+                        text: "From " + name;
+                        clicked => {
+                            More.import-strap(name);
+                        }
+                    }
+                }
+                if More.settings-status != "": Banner {
+                    text: More.settings-status;
+                    tone: Theme.success;
+                }
+            }
+            if root.tab == 0 && root.windows: Card {
+                SectionTitle {
+                    text: "Your Roblox";
+                    icon: Icons.paw;
+                }
+                BodyText {
+                    text: "Feline starts Roblox's official client, exactly as Roblox installed it. Roblox updates itself, so there's nothing to babysit here.";
+                }
+                PawTip {
+                    text: "Looking for graphics, frame rate, volume or camera? Those are Roblox's own settings, on the Roblox page in the sidebar.";
+                }
+                PawTip {
+                    text: "Sounds, fonts, cursors and textures are on the Mods page. FastFlags and opening roblox.com links with Feline are next on the list.";
+                }
+            }
+            if root.tab == 0 && root.windows: Card {
+                SectionTitle {
+                    text: "Roblox's window";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: "Run Roblox with Feline's logo";
+                    help: "Puts Feline's cat on Roblox's window and taskbar button. It's done from the outside, the way any app can change another window's icon, so Roblox's files aren't touched. Needs Feline running while you play; closing its window keeps it running by the clock.";
+                    Toggle {
+                        checked: root.roblox-icon;
+                        toggled(on) => {
+                            root.set-override("roblox-icon", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                OverrideRow {
+                    label: "Title bar colour";
+                    help: "Windows 11 can colour Roblox's title bar. The close button still turns red when you point at it: that one's drawn by Windows for every app.";
+                    options: ["Windows' own", "Feline purple", "Feline night"];
+                    index: root.title-bar-index;
+                    changed(i) => {
+                        root.set-override("title-bar", i);
+                    }
+                }
+            }
+            if root.tab == 0: Card {
+                SectionTitle {
+                    text: "When the game starts";
+                    icon: Icons.paw;
+                }
+                OverrideRow {
+                    label: "Feline's window";
+                    help: "Your game and Discord status keep running whatever you pick.";
+                    options: ["Stay open (shows stats)", "Curl up (minimize)", "Nap (close the window)"];
+                    index: root.after-launch-index;
+                    changed(i) => {
+                        root.set-override("after-launch", i);
+                    }
+                }
+                Divider { }
+                OverrideRow {
+                    label: "Break reminder";
+                    help: "A nudge to stretch and rest your eyes. Cats nap sixteen hours a day; you can spare five minutes. Needs Feline running while you play; closing its window keeps it running by the clock.";
+                    options: ["Off", "Every 30 minutes", "Every hour", "Every 90 minutes", "Every 2 hours"];
+                    index: root.break-index;
+                    changed(i) => {
+                        root.set-override("break", i);
+                    }
+                }
+            }
+            if root.tab == 0 && !root.windows: Card {
                 SectionTitle {
                     text: "Roblox links";
                     icon: Icons.link;
                 }
                 SettingRow {
                     label: "Open Roblox links from the website with Feline";
-                    help: "When you press Play on roblox.com, Feline starts your chosen runtime (with your Discord status, if it's on). Feline gives the links back to the app that had them when you switch this off.";
+                    help: "Press Play on roblox.com and Feline starts your chosen runtime, Discord status included if it's on. Switch this off and the links go back to whichever app had them before.";
                     Toggle {
                         checked: root.link-handler;
                         toggled(on) => {
@@ -148,13 +492,13 @@ export component SettingsPage inherits PageBase {
             }
 
             // ---------------- Overrides
-            if root.current == 1: Card {
+            if root.tab == 1: Card {
                 SectionTitle {
                     text: "For every runtime";
                     icon: Icons.sliders;
                 }
                 BodyText {
-                    text: "These replace the matching setting of Sober, Cordial and Stud. Feline writes them into each runtime's settings file now, and again every time it starts a game.";
+                    text: "These override the matching setting in Sober, Cordial and Stud. Feline writes them into each runtime's settings file now, and again every time it starts a game.";
                 }
                 OverrideRow {
                     label: "Renderer";
@@ -190,15 +534,76 @@ export component SettingsPage inherits PageBase {
                 }
             }
 
+            // ---------------- Performance (Windows)
+            if root.tab == 6: Card {
+                SectionTitle {
+                    text: "Speed";
+                    icon: Icons.bolt;
+                }
+                OverrideRow {
+                    label: "Game priority";
+                    help: "Gives Roblox more of your CPU than other programs. High can make the rest of your PC sluggish while you play.";
+                    options: ["Normal", "Above normal", "High"];
+                    index: root.priority-index;
+                    changed(i) => {
+                        root.set-override("priority", i);
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Close Roblox when you leave a game";
+                    help: "Leaving a game drops you back in Roblox's menus, where it lingers in the taskbar. With this on, Feline closes the Roblox it started a few seconds after you leave. Teleports between places don't count. Needs Feline running while you play; closing its window keeps it running by the clock.";
+                    Toggle {
+                        checked: root.close-on-leave;
+                        toggled(on) => {
+                            root.set-override("close-leave", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Close a stuck Roblox first";
+                    help: "When Roblox hangs in the background after its window closed, Play ends it before starting a fresh one. Careful: it also ends a Roblox you're playing outside Feline.";
+                    Toggle {
+                        checked: root.close-stuck;
+                        toggled(on) => {
+                            root.set-override("close-stuck", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Use the fast graphics card";
+                    help: "For laptops with two GPUs: asks Windows to run Roblox on the powerful one (same as Windows' Graphics settings). Uses more battery. Switching it off removes only Feline's choice.";
+                    Toggle {
+                        checked: root.fast-gpu;
+                        toggled(on) => {
+                            root.set-override("fast-gpu", on ? 1 : 0);
+                        }
+                    }
+                }
+            }
+            if root.tab == 6: Card {
+                SectionTitle {
+                    text: "Roblox's own settings";
+                    icon: Icons.sliders;
+                }
+                BodyText {
+                    text: "Graphics quality, frame rate cap, fullscreen, volume, camera sensitivity and the rest live on the Roblox page. Feline changes them while Roblox is closed.";
+                }
+            }
+
             // ---------------- Discord
-            if root.current == 2: Card {
+            if root.tab == 2: Card {
                 SectionTitle {
                     text: "Discord status";
                     icon: Icons.discord;
                 }
                 SettingRow {
                     label: "Show what you're playing on Discord";
-                    help: "Works with every runtime, and keeps going if you close Feline's window, until the game ends. Turns off Sober's and Stud's own Discord status, so they don't fight over it.";
+                    help: root.windows
+                        ? "Shows your game on your Discord profile until the game ends, even if you close Feline."
+                        : "Works with every runtime and keeps going until the game ends, even if you close Feline. Turns off Sober's and Stud's own Discord status so they don't fight over it.";
                     Toggle {
                         checked: root.discord-on;
                         toggled(on) => {
@@ -257,9 +662,97 @@ export component SettingsPage inherits PageBase {
                     text: root.presence-status;
                 }
             }
+            if root.tab == 2: Card {
+                SectionTitle {
+                    text: "Make it yours";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: "Let games set my status";
+                    help: "Some games write their own status, like \"Fishing at the lake · Level 12\" (the BloxstrapRPC messages Bloxstrap shows). Off: Feline's status only.";
+                    Toggle {
+                        checked: More.game-status;
+                        enabled: root.discord-on;
+                        toggled(on) => {
+                            More.set-switch("game-status", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Show the server's region";
+                    help: "e.g. \"📍 Frankfurt am Main, Germany\". Feline looks up only the server's address, never yours.";
+                    Toggle {
+                        checked: root.discord-region;
+                        enabled: root.discord-on;
+                        toggled(on) => {
+                            root.set-presence("region", on);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Show today's playtime";
+                    help: "e.g. \"1 h 20 min today\", updated every minute.";
+                    Toggle {
+                        checked: root.discord-today;
+                        enabled: root.discord-on;
+                        toggled(on) => {
+                            root.set-presence("today", on);
+                        }
+                    }
+                }
+                Divider { }
+                VerticalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Your own second line";
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    BodyText {
+                        text: root.windows
+                            ? "Leave it empty to use Feline's. Placeholders: {game} {creator} {region} {today}."
+                            : "Leave it empty to use Feline's. Placeholders: {game} {creator} {region} {runtime} {today}.";
+                    }
+                    LineEdit {
+                        text: root.discord-text;
+                        placeholder-text: "Being a cat in {game} · {region} 🐾";
+                        enabled: root.discord-on;
+                        accepted(t) => {
+                            root.set-discord-text(t);
+                        }
+                        edited(t) => {
+                            root.set-discord-text(t);
+                        }
+                    }
+                }
+            }
+            if root.tab == 2 && root.discord-games.length > 0: Card {
+                SectionTitle {
+                    text: "Keep a game secret";
+                    icon: Icons.lock;
+                }
+                BodyText {
+                    text: "Secret games show as \"Playing something secret 🤫\": no name, picture, server or buttons.";
+                }
+                for game in root.discord-games: Rectangle {
+                    height: row-box-9.preferred-height;
+                    row-box-9 := SettingRow {
+                    label: game.name;
+                    Toggle {
+                        checked: game.hidden;
+                        toggled(on) => {
+                            root.toggle-discord-hidden(game.place);
+                        }
+                    }
+                }
+                }
+            }
 
             // ---------------- Privacy & security
-            if root.current == 3: Card {
+            if root.tab == 3 && !root.windows: Card {
                 SectionTitle {
                     text: "Your Roblox login";
                     icon: Icons.lock;
@@ -279,13 +772,15 @@ export component SettingsPage inherits PageBase {
                     }
                 }
             }
-            if root.current == 3: Card {
+            if root.tab == 3: Card {
                 SectionTitle {
                     text: "Logs";
                     icon: Icons.log;
                 }
                 BodyText {
-                    text: "Roblox writes its own logs while it runs, and Feline keeps one log per game for bug reports. Logs can contain your username and the games you played; typed text is never in Feline's logs.";
+                    text: root.windows
+                        ? "Feline keeps one log per game for bug reports. Logs can contain your username and the games you played; typed text is never in Feline's logs."
+                        : "Roblox writes its own logs while it runs, and Feline keeps one log per game for bug reports. Logs can contain your username and the games you played; typed text is never in Feline's logs.";
                 }
                 SettingRow {
                     label: "Delete logs automatically";
@@ -302,7 +797,7 @@ export component SettingsPage inherits PageBase {
                 Divider { }
                 StorageRow {
                     label: "Roblox's logs";
-                    help: "What the Roblox app itself writes (Feline's runtime).";
+                    help: root.windows ? "What Roblox itself writes while it runs." : "What the Roblox app itself writes (Feline's runtime).";
                     size: root.size-roblox-logs;
                     action: "Delete";
                     act => {
@@ -320,7 +815,105 @@ export component SettingsPage inherits PageBase {
                     }
                 }
             }
-            if root.current == 3: Card {
+            if root.tab == 3: Card {
+                SectionTitle {
+                    text: "Start fresh";
+                    icon: Icons.trash;
+                }
+                SettingRow {
+                    label: root.windows ? "Clear Roblox" : "Clear Feline's runtime";
+                    help: root.windows
+                        ? "Signs you out and deletes everything Roblox keeps on this PC: saved login, caches, settings, logs and app data. Roblox stays installed and starts as if it were on a new computer. " + (root.roblox-data-size != "" ? "Right now: " + root.roblox-data-size + "." : "")
+                        : "Signs you out and deletes the runtime's Roblox data: saved login, caches, settings and logs. The Roblox app stays. " + (root.roblox-data-size != "" ? "Right now: " + root.roblox-data-size + "." : "");
+                    ConfirmButton {
+                        text: "Clear";
+                        icon: Icons.trash;
+                        confirmed => {
+                            root.housekeeping(root.clear-studio ? "clear-roblox-studio" : "clear-roblox");
+                        }
+                    }
+                }
+                if root.windows: Divider { }
+                if root.windows: SettingRow {
+                    label: "Also clear Roblox Studio";
+                    help: "Studio's own data and its saved login too. Off: Studio isn't touched.";
+                    Toggle {
+                        checked: root.clear-studio;
+                        toggled(on) => {
+                            root.clear-studio = on;
+                        }
+                    }
+                }
+            }
+            if root.tab == 3: Card {
+                SectionTitle {
+                    text: "When Feline closes";
+                    icon: Icons.logout;
+                }
+                BodyText {
+                    text: "Feline deletes what you pick here every time you close it. Your playtime goes into Feline's history first, so Home keeps it (unless you pick history too). Anything Roblox is still using is left alone.";
+                }
+                SettingRow {
+                    label: "Roblox's logs";
+                    help: "The crash detective (Diagnostics) reads these, so it'll only see games since Feline last closed.";
+                    Toggle {
+                        checked: Extras.exit-roblox-logs;
+                        toggled(on) => {
+                            Extras.set("exit-roblox-logs", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Feline's logs";
+                    help: "Feline's own notes from each game, used for bug reports.";
+                    Toggle {
+                        checked: Extras.exit-feline-logs;
+                        toggled(on) => {
+                            Extras.set("exit-feline-logs", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Roblox's cache";
+                    help: "Saved game models, textures and sounds. Games load a little slower the first time after.";
+                    Toggle {
+                        checked: Extras.exit-cache;
+                        toggled(on) => {
+                            Extras.set("exit-cache", on ? 1 : 0);
+                        }
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Play history";
+                    help: "Playtime and recently played games on the Home page. Favourites and unlocked achievements stay.";
+                    Toggle {
+                        checked: Extras.exit-history;
+                        toggled(on) => {
+                            Extras.set("exit-history", on ? 1 : 0);
+                        }
+                    }
+                }
+            }
+            if root.tab == 3 && root.windows: Card {
+                SectionTitle {
+                    text: "Is it really Roblox?";
+                    icon: Icons.shield-check;
+                }
+                SettingRow {
+                    label: "Check Roblox before starting it";
+                    help: "Feline only starts Roblox's program if it carries Roblox Corporation's digital signature and hasn't been changed since. Protects you from fake or tampered copies.";
+                    Toggle {
+                        checked: root.verify-roblox;
+                        toggled(on) => {
+                            root.set-override("verify-roblox", on ? 1 : 0);
+                        }
+                    }
+                }
+            }
+            if root.tab == 3 && !root.windows: Card {
                 SectionTitle {
                     text: "Tracking and proxy";
                     icon: Icons.shield;
@@ -337,25 +930,102 @@ export component SettingsPage inherits PageBase {
                     }
                 }
             }
-            if root.current == 3: Card {
+            if root.tab == 3: Card {
                 SectionTitle {
                     text: "Security";
                     icon: Icons.shield-check;
                 }
                 BodyText {
-                    text: "Roblox updates are only installed if they're signed with Roblox's own certificate (Android's APK signature, checked in full). Feline contains no Roblox files and never sends your data anywhere but Roblox and, if it's on, Discord on this computer.";
+                    text: root.windows
+                        ? "Feline contains no Roblox files, and apart from mods you switch on it doesn't change Roblox. It never sends your data anywhere but Roblox and, if it's on, Discord on this computer."
+                        : "Roblox updates are only installed if they're signed with Roblox's own certificate (Android's APK signature, checked in full). Feline contains no Roblox files and never sends your data anywhere but Roblox and, if it's on, Discord on this computer.";
                 }
             }
 
             // ---------------- Storage
-            if root.current == 4: Card {
+            if root.tab == 4: Card {
                 SectionTitle {
-                    text: "Space used by Feline's runtime";
+                    text: "How much space Roblox takes";
+                    icon: Icons.storage;
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.space-total != "" ? root.space-total : "…";
+                            font-size: 26px;
+                            font-weight: 800;
+                            color: Theme.text;
+                        }
+                        BodyText {
+                            text: root.space-change;
+                        }
+                    }
+                    chart := Rectangle {
+                        horizontal-stretch: 1;
+                        height: 64px;
+                        border-radius: Theme.radius-small;
+                        background: Theme.surface-raised;
+                        clip: true;
+                        property <length> step: (self.width - 12px) / max(14, root.space-history.length);
+                        for v[i] in root.space-history: Rectangle {
+                            x: chart.width - 6px - (root.space-history.length - i) * chart.step;
+                            width: max(2px, chart.step - 3px);
+                            height: max(2px, (chart.height - 12px) * v);
+                            y: chart.height - 6px - self.height;
+                            border-radius: 2px;
+                            background: i == root.space-history.length - 1 ? Theme.accent : Theme.accent.with-alpha(0.45);
+                        }
+                    }
+                }
+                BodyText {
+                    text: root.windows
+                        ? "Roblox's app, caches, logs and settings, one bar per day you opened Feline (the last 60)."
+                        : "Feline's runtime with its Roblox versions, caches and logs, one bar per day you opened Feline (the last 60).";
+                }
+            }
+            if root.tab == 4: Card {
+                SectionTitle {
+                    text: "Tidy up by itself";
+                    icon: Icons.sparkles;
+                }
+                OverrideRow {
+                    label: "Tidy up automatically";
+                    help: (root.windows
+                        ? "When Feline opens, it deletes Roblox's download cache, old Roblox versions and logs older than a week. Never while Roblox runs; your login and settings are never touched."
+                        : "When Feline opens, it deletes logs older than a week, and the content cache once it's over 2 GB. Never while Roblox runs; your login and settings are never touched.")
+                        + (root.last-tidy != "" ? " " + root.last-tidy : "");
+                    options: ["Never", "Every week", "Every month"];
+                    index: root.tidy-index;
+                    changed(i) => {
+                        root.set-override("tidy", i);
+                    }
+                }
+                Divider { }
+                SettingRow {
+                    label: "Tidy up now";
+                    help: "The same, right away.";
+                    SecondaryButton {
+                        text: "Tidy up";
+                        icon: Icons.sparkles;
+                        clicked => {
+                            root.housekeeping("tidy");
+                        }
+                    }
+                }
+            }
+            if root.tab == 4: Card {
+                SectionTitle {
+                    text: root.windows ? "What Roblox leaves lying around" : "Space used by Feline's runtime";
                     icon: Icons.storage;
                 }
                 StorageRow {
-                    label: "Roblox's content cache";
-                    help: "Game models, textures and sounds Roblox saved. Safe to clear; games load a little slower the next time.";
+                    label: root.windows ? "Roblox's download cache" : "Roblox's content cache";
+                    help: root.windows
+                        ? "Installer downloads Roblox keeps after updating. Safe to clear; Roblox only needs them again for its next update."
+                        : "Game models, textures and sounds Roblox saved. Safe to clear; games load a little slower the next time.";
                     size: root.size-roblox-cache;
                     action: "Clear";
                     act => {
@@ -363,7 +1033,7 @@ export component SettingsPage inherits PageBase {
                     }
                 }
                 Divider { }
-                StorageRow {
+                if !root.windows: StorageRow {
                     label: "Roblox app versions";
                     help: "The current Roblox app, and the last one that worked (kept so Feline can go back if an update breaks).";
                     size: root.size-roblox-versions;
@@ -371,6 +1041,25 @@ export component SettingsPage inherits PageBase {
                     danger: false;
                     act => {
                         root.housekeeping("refresh");
+                    }
+                }
+                if root.windows: StorageRow {
+                    label: "Old Roblox versions";
+                    help: "Folders from earlier Roblox versions that Roblox didn't clean up after updating. Your current Roblox and Studio are never touched.";
+                    size: root.size-roblox-versions;
+                    action: "Delete";
+                    act => {
+                        root.housekeeping("clean-versions");
+                    }
+                }
+                Divider { }
+                StorageRow {
+                    label: "Graphics shader cache";
+                    help: "Shaders your graphics driver compiled for games (Roblox and everything else). After a driver update an old cache can cause stutter or crashes. Safe to clear: games rebuild it, so the first few minutes may stutter. Files a running game is using stay put.";
+                    size: root.size-shader-cache;
+                    action: "Clear";
+                    act => {
+                        root.housekeeping("clear-shaders");
                     }
                 }
                 Divider { }
@@ -387,7 +1076,7 @@ export component SettingsPage inherits PageBase {
             }
 
             // ---------------- Updates
-            if root.current == 5: Card {
+            if root.tab == 5: Card {
                 SectionTitle {
                     text: "Roblox app";
                     icon: Icons.download;

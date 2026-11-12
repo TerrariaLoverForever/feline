@@ -55,6 +55,9 @@ fn set_default(entry: &str) -> Result<(), String> {
 
 /// Makes Feline the handler, remembering the previous one in `settings`.
 pub fn enable(settings: &mut Settings) -> Result<(), String> {
+    if cfg!(windows) {
+        return Err("opening Roblox links with Feline isn't available on Windows yet".to_owned());
+    }
     let previous = current_handler().filter(|h| h != LINK_ENTRY);
     desktop::install_link_entry()?;
     set_default(LINK_ENTRY)?;
@@ -66,10 +69,56 @@ pub fn enable(settings: &mut Settings) -> Result<(), String> {
 
 /// Gives the links back to the previous handler (if there was one).
 pub fn disable(settings: &mut Settings) -> Result<(), String> {
+    if cfg!(windows) {
+        return Ok(());
+    }
     if let Some(previous) = settings.previous_link_handler.take() {
         set_default(&previous)?;
     }
     desktop::uninstall_link_entry()
+}
+
+/// The card shown while Roblox starts from a link or shortcut (Feline has no
+/// window then), so problems aren't lost in a hidden console.
+struct Splash {
+    on: bool,
+    shown: Option<std::time::Instant>,
+}
+
+impl Splash {
+    const SECONDS: u64 = 4;
+
+    fn show(&mut self, title: &str, text: &str) {
+        if !self.on {
+            return;
+        }
+        #[cfg(windows)]
+        {
+            feline_win::overlay::card(title, text, Self::SECONDS);
+            self.shown = Some(std::time::Instant::now());
+        }
+        #[cfg(not(windows))]
+        launch::notify(title, text);
+    }
+
+    /// A problem: printed, and on the card for longer.
+    fn fail(&mut self, text: &str) -> ExitCode {
+        eprintln!("feline: {text}");
+        if self.on {
+            self.wait();
+            self.show("Roblox didn't start", text);
+            self.wait();
+        }
+        ExitCode::FAILURE
+    }
+
+    /// Keeps Feline (and so the card) around until the card is done.
+    fn wait(&mut self) {
+        if let Some(shown) = self.shown.take() {
+            let total = std::time::Duration::from_millis(Self::SECONDS * 1000 + 700);
+            std::thread::sleep(total.saturating_sub(shown.elapsed()));
+        }
+    }
 }
 
 /// `feline <roblox-link>`: starts the chosen runtime with the link. Opens
@@ -90,27 +139,53 @@ pub fn open(arg: &str) -> ExitCode {
             Err(_) => ExitCode::FAILURE,
         };
     };
+    let mut splash = Splash { on: settings.launch_splash, shown: None };
     let game = match link::parse(arg) {
         Ok(game) => game,
         Err(e) => {
-            eprintln!("feline: {e}");
+            splash.fail(&format!("That link didn't make sense to Feline: {e}"));
             return ExitCode::from(2);
         }
     };
+    let name = game
+        .place_id()
+        .and_then(|place| {
+            let history = feline_core::history::History::load();
+            let games = history.games_played();
+            games.iter().find(|g| g.any_place_in(&[place])).map(|g| history.name_of(g))
+        })
+        .unwrap_or_else(|| "the game".to_owned());
+    splash.show("Getting Roblox ready", &format!("Pouncing into {name}…"));
 
     let ctx = DetectContext::host();
+    // The kept Roblox version (if you stay on one); room for more Robloxes.
+    let (installation, lines) = crate::companion::before(installation, &settings);
+    let installation = &installation;
+    lines.iter().for_each(|l| eprintln!("feline: {l}"));
+    let hide_cursor = crate::companion::hide_cursor(installation, &settings);
     if let Err(e) = installation.apply_overrides(&ctx, &settings.overrides) {
         eprintln!("feline: Feline's settings weren't applied: {e}");
     }
+    // Roblox's own client (Windows): is it really Roblox's? Which GPU?
+    match feline_core::runtime::roblox::prepare(installation, &settings) {
+        Ok(warnings) => warnings.iter().for_each(|w| eprintln!("feline: {w}")),
+        Err(why) => return splash.fail(&why),
+    }
+    for line in feline_core::mods::apply_for_launch(installation, &ctx, &settings.mods, hide_cursor) {
+        eprintln!("feline: {line}");
+    }
+    // Tweaks (FastFlags), as for Play: this game's profile, or the everyday ones.
+    for line in feline_core::fflags::apply_for_launch(installation, &ctx, &settings, game.place_id()) {
+        eprintln!("feline: {line}");
+    }
+    if let Some(line) =
+        feline_core::roblox_tools::apply_game_profile(installation, &ctx, &settings, game.place_id())
+    {
+        eprintln!("feline: {line}");
+    }
     let plan = match installation.plan_launch(&LaunchTarget::Game(game)) {
         Ok(plan) => plan,
-        Err(e) => {
-            eprintln!(
-                "feline: {} couldn't be prepared: {e}",
-                installation.backend.name()
-            );
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return splash.fail(&format!("{} couldn't be prepared: {e}", installation.backend.name())),
     };
     if settings.overrides.discord_presence
         && let Err(e) = crate::presence_helper::start()
@@ -120,15 +195,19 @@ pub fn open(arg: &str) -> ExitCode {
     let log_dir = paths::log_dir().unwrap_or_else(|| Path::new("/tmp").to_owned());
     // The runtime runs in its own process group; Feline exits right away and
     // the game keeps going.
-    match launch::spawn(plan.command, &log_dir, installation.backend.id()) {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!(
-                "feline: {} couldn't be started: {e}",
-                installation.backend.name()
-            );
-            ExitCode::FAILURE
+    let command = if cfg!(windows) { plan.command } else { launch::wrap(plan.command, &settings.runtime_wrapper) };
+    match launch::spawn(command, &log_dir, installation.backend.id()) {
+        Ok(game) => {
+            if let Some(w) = feline_core::runtime::roblox::after_start(game.pid(), &settings) {
+                eprintln!("feline: {w}");
+            }
+            if let Some(w) = crate::companion::after(game.pid(), hide_cursor) {
+                eprintln!("feline: {w}");
+            }
+            splash.wait();
+            ExitCode::SUCCESS
         }
+        Err(e) => splash.fail(&format!("{} couldn't be started: {e}", installation.backend.name())),
     }
 }
 

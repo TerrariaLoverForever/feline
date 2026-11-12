@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The "just for fun" options and their state, shared by every page: the
+// accent colour and seasonal themes, the desk cat, achievements, and what
+// to clear when Feline closes. A global, so pages read it directly and Rust
+// sets it with `ui.global::<Extras>()`.
+
+export struct AchievementTile {
+    title: string,
+    text: string,
+    unlocked: bool,
+    // When it was unlocked, e.g. "10 Nov 2026" ("" while locked).
+    when: string,
+}
+
+export global Extras {
+    // ---- Look
+    // 0 dark, 1 light, 2 match the system.
+    in property <int> appearance-index;
+    // The accent presets (names and colours), then "Your own".
+    in property <[string]> accent-names;
+    in property <[color]> accent-swatches;
+    // Index into the presets; the number of presets = your own colour.
+    in property <int> accent-index;
+    in property <string> accent-hex;
+    in property <string> accent-message;
+    // 0 follow the calendar, 1 off, 2… always that season.
+    in property <[string]> season-names;
+    in property <int> season-index;
+    // The season showing right now (Home page decorations).
+    in property <bool> season-on;
+    in property <string> season-title;
+    in property <string> season-greeting;
+    in property <color> sprinkle: #ffffff;
+
+    // ---- Desk cat
+    // False where the cat can't follow the pointer (Linux, for now).
+    in property <bool> cat-supported;
+    in property <bool> cat-on;
+    in property <int> cat-coat-index;
+    in property <int> cat-size-index;
+    in property <int> cat-when-index;
+    in property <image> cat-preview;
+
+    // ---- Music
+    in property <bool> music-on;
+    // "All my tracks…", then each track's title.
+    in property <[string]> music-tracks;
+    in property <int> music-track-count;
+    in property <int> music-track-index;
+    // 0–100.
+    in property <float> music-volume;
+    // 0 only while Feline is focused, 1 always.
+    in property <int> music-when-index;
+    // What happened with the last add/fetch/remove.
+    in property <string> music-message;
+    // A link is being fetched.
+    in property <bool> music-busy;
+    in-out property <string> music-link;
+    callback music-add-file();
+    callback music-add-link(string);
+    callback music-remove();
+    callback music-open-folder();
+
+    // ---- Achievements
+    in property <bool> achievements-on;
+    in property <[AchievementTile]> achievements;
+    in property <string> achievements-count;
+
+    // ---- Clear when Feline closes
+    in property <bool> exit-roblox-logs;
+    in property <bool> exit-feline-logs;
+    in property <bool> exit-cache;
+    in property <bool> exit-history;
+
+    // Changes one option: ("appearance", index), ("accent", index), ("season", index), ("cat", 0/1),
+    // ("cat-coat", i), ("cat-size", i), ("cat-when", i), ("achievements",
+    // 0/1), ("exit-roblox-logs", 0/1), ("exit-feline-logs", 0/1),
+    // ("exit-cache", 0/1), ("exit-history", 0/1), ("music", 0/1),
+    // ("music-track", i), ("music-volume", 0–100), ("music-when", i).
+    callback set(string, int);
+    // Your own accent colour, as typed (#rrggbb).
+    callback set-accent-hex(string);
+}

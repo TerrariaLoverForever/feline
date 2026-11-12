@@ -10,7 +10,8 @@ authors.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+# Linux only: on other systems the program only says so (see src/main.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
 # Roblox's login page in a real browser engine (its security checks need
 # one). WebKitGTK 6.0 through gtk-rs; `pacman -S webkitgtk-6.0`. MIT.
 webkit6 = "0.6"

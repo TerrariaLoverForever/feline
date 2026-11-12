@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Reusable building blocks with Feline's look.
+// Reusable building blocks with Feline's look ("The Night-Lit Den", see
+// DESIGN.md). Every colour comes from Theme, so the light and dark dens and
+// any accent colour work everywhere.
 //
 // Performance note: there are no endless animations. Everything animates
-// only in response to something happening (hover, press, a page or card
-// appearing), so the launcher draws nothing while idle and costs no GPU time
-// while you play. The only repeating animation, the "starting" pulse of a
-// StatusDot, runs only while a game is starting.
+// only in response to something happening (hover, press, focus, a page or
+// card appearing), so the launcher draws nothing while idle and costs no GPU
+// time while you play. The only repeating animation, the "starting" pulse of
+// a StatusDot, runs only while a game is starting.
 //
 // How "appear" animations work: an element starts with `shown: false`
 // (transparent, slightly smaller); its `init` callback, which Slint runs when
 // the element is created, sets `shown: true`, and `animate` turns that change
 // into a smooth transition. Elements inside `if` are created each time the
 // condition becomes true, so they animate in every time.
+//
+// Keyboard: buttons, switches, tabs and the sidebar take focus with Tab
+// (not with a click), show an accent ring while focused, and act on Space
+// or Enter.
 
 import { TextEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
@@ -21,12 +27,29 @@ import { Icon, Icons } from "icons.slint";
 export component PageBase inherits Rectangle {
     property <bool> shown: false;
     opacity: root.shown ? 1 : 0;
-    transform-scale: root.shown ? 1 : 0.985;
     animate opacity { duration: Theme.normal; easing: ease-out-quad; }
-    animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
     init => {
         root.shown = true;
     }
+}
+
+// The keyboard-focus ring: drawn just outside its parent, in the accent.
+// Put it last in a control so it sits on top.
+component FocusRing inherits Rectangle {
+    in property <bool> show;
+    in property <length> radius;
+    // The size of the control it rings.
+    in property <length> around-width;
+    in property <length> around-height;
+    x: -3px;
+    y: -3px;
+    width: root.around-width + 6px;
+    height: root.around-height + 6px;
+    border-radius: root.radius + 3px;
+    border-width: root.show ? Theme.focus-width : 0px;
+    border-color: Theme.accent;
+    opacity: root.show ? 1 : 0;
+    animate opacity { duration: Theme.fast; }
 }
 
 // The Feline logo with rounded corners and an optional soft glow.
@@ -39,7 +62,7 @@ export component Logo inherits Rectangle {
     height: size;
     border-radius: size * 0.24;
     drop-shadow-blur: glow ? (hover.has-hover ? size * 0.5 : size * 0.32) : 0px;
-    drop-shadow-color: Theme.accent.with-alpha(0.45);
+    drop-shadow-color: Theme.accent.with-alpha(Theme.dark ? 0.45 : 0.35);
     transform-rotation: hover.has-hover ? -6deg : 0deg;
     transform-scale: hover.has-hover ? 1.04 : 1;
     animate transform-rotation, transform-scale { duration: Theme.slow; easing: ease-out-back; }
@@ -59,13 +82,13 @@ export component Logo inherits Rectangle {
     }
 }
 
-// A small rounded label, e.g. "Third-party" or "In development".
+// A small rounded label, e.g. "Third-party" or "In use".
 export component Pill inherits Rectangle {
     in property <string> text;
-    in property <color> tone: Theme.accent;
+    in property <color> tone: Theme.accent-ink;
     height: 22px;
     border-radius: 11px;
-    background: tone.with-alpha(0.13);
+    background: tone.with-alpha(Theme.dark ? 0.13 : 0.11);
     HorizontalLayout {
         padding-left: 9px;
         padding-right: 9px;
@@ -90,7 +113,7 @@ export component StatusDot inherits Rectangle {
     border-radius: 4px;
     background: tone;
     opacity: root.pulse && root.dim ? 0.35 : 1;
-    drop-shadow-blur: root.pulse && root.dim ? 2px : 7px;
+    drop-shadow-blur: root.pulse && root.dim ? 2px : (Theme.dark ? 7px : 4px);
     drop-shadow-color: tone.with-alpha(0.6);
     animate opacity, drop-shadow-blur { duration: 600ms; easing: ease-in-out-sine; }
     animate background { duration: Theme.normal; }
@@ -112,10 +135,14 @@ export component NavItem inherits Rectangle {
     in property <bool> soon;
     callback clicked;
 
-    height: 40px;
+    height: 34px;
     border-radius: Theme.radius-small;
-    background: active ? Theme.accent-soft : touch.has-hover ? Theme.surface-hover.with-alpha(0.7) : transparent;
+    background: root.active ? Theme.accent-soft
+        : touch.pressed ? Theme.surface-hover
+        : touch.has-hover ? Theme.surface-hover.with-alpha(0.7) : transparent;
     animate background { duration: Theme.fast; }
+    accessible-role: button;
+    accessible-label: root.label;
 
     HorizontalLayout {
         // A small nudge to the right on hover.
@@ -127,7 +154,7 @@ export component NavItem inherits Rectangle {
             alignment: center;
             Icon {
                 commands: root.icon;
-                tone: root.active ? Theme.accent : touch.has-hover ? Theme.text : Theme.text-faint;
+                tone: root.active ? Theme.accent-ink : touch.has-hover ? Theme.text : Theme.text-faint;
                 animate tone { duration: Theme.fast; }
             }
         }
@@ -135,9 +162,9 @@ export component NavItem inherits Rectangle {
             text: root.label;
             horizontal-stretch: 1;
             vertical-alignment: center;
-            font-size: 14px;
+            font-size: Theme.text-label;
             font-weight: root.active ? 600 : 500;
-            color: root.active ? Theme.text : touch.has-hover ? Theme.text : Theme.text-muted;
+            color: root.active || touch.has-hover ? Theme.text : Theme.text-muted;
         }
         if root.soon: VerticalLayout {
             alignment: center;
@@ -154,6 +181,22 @@ export component NavItem inherits Rectangle {
             root.clicked();
         }
     }
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    FocusRing {
+        show: focus.has-focus;
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // The big call-to-action button, with a play icon.
@@ -167,15 +210,17 @@ export component PlayButton inherits Rectangle {
     border-radius: 26px;
     background: !root.enabled ? Theme.surface-hover
         : touch.pressed ? Theme.accent-strong.darker(0.15)
-        : touch.has-hover ? @linear-gradient(100deg, #a596ff 0%, #8471f5 100%)
-        : @linear-gradient(100deg, #9988fa 0%, #7a67f2 100%);
+        : touch.has-hover ? @linear-gradient(100deg, Theme.accent-hover 0%, Theme.accent.mix(Theme.accent-strong, 0.6) 100%)
+        : @linear-gradient(100deg, Theme.accent-light 0%, Theme.accent-strong 100%);
     drop-shadow-blur: root.enabled ? (touch.has-hover ? 26px : 16px) : 0px;
     drop-shadow-offset-y: root.enabled ? 4px : 0px;
-    drop-shadow-color: Theme.accent.with-alpha(0.38);
-    transform-scale: !root.enabled ? 1 : touch.pressed ? 0.96 : touch.has-hover ? 1.025 : 1;
+    drop-shadow-color: Theme.accent.with-alpha(Theme.dark ? 0.38 : 0.3);
+    transform-scale: root.enabled && touch.pressed ? 0.97 : 1;
     animate drop-shadow-blur { duration: 180ms; }
     animate transform-scale { duration: Theme.normal; easing: ease-out-back; }
     animate background { duration: Theme.fast; }
+    accessible-role: button;
+    accessible-label: root.text;
 
     HorizontalLayout {
         padding-left: 26px;
@@ -210,6 +255,23 @@ export component PlayButton inherits Rectangle {
             root.clicked();
         }
     }
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    FocusRing {
+        show: focus.has-focus;
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // A quieter button, optionally with an icon. `danger` for actions that
@@ -226,16 +288,19 @@ export component SecondaryButton inherits Rectangle {
     height: 36px;
     border-radius: Theme.radius-small;
     background: !root.enabled ? transparent
-        : root.primary ? (touch.pressed ? Theme.accent-strong : touch.has-hover ? #9d8efa : Theme.accent)
+        : root.primary ? (touch.pressed ? Theme.accent-strong : touch.has-hover ? Theme.accent-light : Theme.accent)
         : touch.pressed ? root.tone.with-alpha(0.22)
-        : touch.has-hover ? root.tone.with-alpha(0.14) : Theme.surface-raised;
+        : touch.has-hover ? root.tone.with-alpha(0.12) : Theme.surface-raised;
     border-width: 1px;
     border-color: !root.enabled ? Theme.border
         : root.primary ? transparent
         : touch.has-hover ? root.tone.with-alpha(0.45) : Theme.border;
     transform-scale: root.enabled && touch.pressed ? 0.96 : 1;
+    opacity: root.enabled ? 1 : 0.6;
     animate background, border-color { duration: Theme.fast; }
     animate transform-scale { duration: Theme.fast; easing: ease-out-quad; }
+    accessible-role: button;
+    accessible-label: root.text;
 
     HorizontalLayout {
         padding-left: 14px;
@@ -267,10 +332,27 @@ export component SecondaryButton inherits Rectangle {
             root.clicked();
         }
     }
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    FocusRing {
+        show: focus.has-focus;
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // A button for something that can't be undone: the first click asks
-// ("Click again to confirm" for 3 seconds), the second one acts.
+// ("Sure? Click again" for 3 seconds), the second one acts.
 export component ConfirmButton inherits Rectangle {
     in property <string> text;
     in property <string> icon: "";
@@ -281,7 +363,7 @@ export component ConfirmButton inherits Rectangle {
     height: button.preferred-height;
     button := SecondaryButton {
         width: 100%;
-        text: root.armed ? "Click again to confirm" : root.text;
+        text: root.armed ? "Sure? Click again" : root.text;
         icon: root.armed ? "" : root.icon;
         danger: true;
         primary: false;
@@ -316,10 +398,14 @@ export component Toggle inherits Rectangle {
     height: 24px;
     border-radius: 12px;
     background: !root.enabled ? (root.checked ? Theme.accent.with-alpha(0.35) : Theme.surface-hover)
-        : root.checked ? (touch.has-hover ? #9d8efa : Theme.accent)
+        : root.checked ? (touch.has-hover ? Theme.accent-light : Theme.accent)
         : touch.has-hover ? Theme.border-strong : Theme.surface-hover;
+    border-width: root.checked ? 0px : 1px;
+    border-color: Theme.border-strong;
     animate background { duration: Theme.normal; }
-    opacity: root.enabled ? 1 : 0.7;
+    opacity: root.enabled ? 1 : 0.6;
+    accessible-role: checkbox;
+    accessible-checked: root.checked;
 
     Rectangle {
         y: 3px;
@@ -327,9 +413,10 @@ export component Toggle inherits Rectangle {
         width: 18px;
         height: 18px;
         border-radius: 9px;
-        background: root.checked ? (root.enabled ? #ffffff : #ffffffaa) : Theme.text-muted;
-        drop-shadow-blur: 3px;
-        drop-shadow-color: #00000055;
+        background: root.checked ? Theme.knob : (Theme.dark ? Theme.text-muted : Theme.knob);
+        drop-shadow-blur: Theme.nudge-blur;
+        drop-shadow-offset-y: Theme.nudge-offset / 2;
+        drop-shadow-color: Theme.lift-color;
         animate x { duration: Theme.normal; easing: ease-out-back; }
         animate background { duration: Theme.normal; }
     }
@@ -342,9 +429,28 @@ export component Toggle inherits Rectangle {
             root.toggled(root.checked);
         }
     }
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    FocusRing {
+        show: focus.has-focus;
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
 // A row of equal-width tabs with a sliding highlight under the chosen one.
+// With focus, the arrow keys move between tabs.
 export component TabBar inherits Rectangle {
     in property <[string]> tabs;
     in-out property <int> current: 0;
@@ -356,17 +462,21 @@ export component TabBar inherits Rectangle {
     background: Theme.surface;
     border-width: 1px;
     border-color: Theme.border;
+    accessible-role: tab-list;
 
-    // The highlight slides to the chosen tab.
+    // The highlight slides to the chosen tab and sits a little raised.
     Rectangle {
         x: 4px + root.current * root.tab-width;
         y: 4px;
         width: root.tab-width;
         height: parent.height - 8px;
         border-radius: Theme.radius-small - 1px;
-        background: Theme.surface-hover;
+        background: Theme.dark ? Theme.surface-hover : Theme.bg;
         border-width: 1px;
         border-color: Theme.border-strong;
+        drop-shadow-blur: Theme.nudge-blur;
+        drop-shadow-offset-y: Theme.nudge-offset;
+        drop-shadow-color: Theme.lift-color;
         animate x { duration: Theme.normal; easing: ease-out-quint; }
     }
 
@@ -375,11 +485,13 @@ export component TabBar inherits Rectangle {
         y: 4px;
         width: root.tab-width;
         height: parent.height - 8px;
+        accessible-role: AccessibleRole.tab;
+        accessible-label: tab;
         Text {
             text: tab;
             font-size: 13px;
             font-weight: root.current == i ? 600 : 500;
-            color: root.current == i ? Theme.text : area.has-hover ? Theme.text : Theme.text-muted;
+            color: root.current == i || area.has-hover ? Theme.text : Theme.text-muted;
             horizontal-alignment: center;
             vertical-alignment: center;
             animate color { duration: Theme.fast; }
@@ -392,27 +504,50 @@ export component TabBar inherits Rectangle {
             }
         }
     }
+    focus := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.RightArrow && root.current < root.tabs.length - 1 {
+                root.current += 1;
+                root.changed(root.current);
+                return accept;
+            }
+            if event.text == Key.LeftArrow && root.current > 0 {
+                root.current -= 1;
+                root.changed(root.current);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    FocusRing {
+        show: focus.has-focus;
+        radius: root.border-radius;
+        around-width: root.width;
+        around-height: root.height;
+    }
 }
 
-// A panel that stacks its children vertically. Fades and settles in when
-// it appears.
+// A panel that stacks its children vertically, lifted off the floor. Fades
+// and settles in when it appears.
 export component Card inherits Rectangle {
-    in property <length> inner-padding: 20px;
+    in property <length> inner-padding: 16px;
     property <bool> shown: false;
     background: Theme.surface;
     border-radius: Theme.radius;
     border-width: 1px;
     border-color: Theme.border;
+    drop-shadow-blur: Theme.lift-blur;
+    drop-shadow-offset-y: Theme.lift-offset;
+    drop-shadow-color: Theme.lift-color;
     opacity: root.shown ? 1 : 0;
-    transform-scale: root.shown ? 1 : 0.985;
     animate opacity { duration: Theme.normal; easing: ease-out-quad; }
-    animate transform-scale { duration: Theme.slow; easing: ease-out-quint; }
     init => {
         root.shown = true;
     }
     VerticalLayout {
         padding: root.inner-padding;
-        spacing: 12px;
+        spacing: 8px;
         alignment: start;
         @children
     }
@@ -424,12 +559,12 @@ export component CardTitle inherits Text {
     color: Theme.text;
 }
 
-// A small uppercase label above a section.
+// A small heading for a group of rows ("Recently played", "Help"): sentence
+// case, bold, in the secondary text colour. Not a shouty ALL CAPS label.
 export component Eyebrow inherits Text {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 1.1px;
-    color: Theme.text-faint;
+    color: Theme.text-muted;
 }
 
 export component BodyText inherits Text {
@@ -441,6 +576,7 @@ export component BodyText inherits Text {
 export component PageTitle inherits Text {
     font-size: Theme.text-page;
     font-weight: 800;
+    letter-spacing: -0.4px;
     color: Theme.text;
 }
 
@@ -454,6 +590,7 @@ export component PageHeader inherits HorizontalLayout {
     in property <string> title;
     in property <string> description;
     spacing: 16px;
+    padding-bottom: 4px;
     VerticalLayout {
         horizontal-stretch: 1;
         spacing: 6px;
@@ -477,20 +614,20 @@ export component SectionTitle inherits HorizontalLayout {
     spacing: 10px;
     alignment: start;
     if root.icon != "": Rectangle {
-        width: 30px;
-        height: 30px;
-        border-radius: 9px;
+        width: 24px;
+        height: 24px;
+        border-radius: 7px;
         background: Theme.accent-soft;
         Icon {
-            width: 17px;
-            height: 17px;
+            width: 14px;
+            height: 14px;
             commands: root.icon;
             tone: Theme.lavender;
         }
     }
     Text {
         text: root.text;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 700;
         color: Theme.text;
         vertical-alignment: center;
@@ -503,9 +640,9 @@ export component SettingRow inherits HorizontalLayout {
     in property <string> label;
     in property <string> help;
     in property <string> managed-reason;
-    spacing: 20px;
-    padding-top: 9px;
-    padding-bottom: 9px;
+    spacing: 18px;
+    padding-top: 6px;
+    padding-bottom: 6px;
 
     VerticalLayout {
         horizontal-stretch: 1;
@@ -516,7 +653,7 @@ export component SettingRow inherits HorizontalLayout {
             alignment: start;
             Text {
                 text: root.label;
-                font-size: 14px;
+                font-size: Theme.text-label;
                 font-weight: 600;
                 color: Theme.text;
                 vertical-alignment: center;
@@ -529,7 +666,7 @@ export component SettingRow inherits HorizontalLayout {
         }
         if root.managed-reason != "": BodyText {
             text: root.managed-reason + ".";
-            color: Theme.lavender.with-alpha(0.8);
+            color: Theme.lavender;
         }
         if root.managed-reason == "" && root.help != "": BodyText {
             text: root.help;
@@ -543,14 +680,14 @@ export component SettingRow inherits HorizontalLayout {
     }
 }
 
-// A message box: a status line with a colored dot.
+// A message box: a status line with a coloured dot.
 export component Banner inherits Rectangle {
     in property <string> text;
     in property <color> tone: Theme.accent;
     border-radius: Theme.radius-small;
-    background: root.tone.with-alpha(0.08);
+    background: root.tone.with-alpha(Theme.dark ? 0.08 : 0.07);
     border-width: 1px;
-    border-color: root.tone.with-alpha(0.3);
+    border-color: root.tone.with-alpha(Theme.dark ? 0.3 : 0.35);
     HorizontalLayout {
         padding: 12px;
         padding-left: 14px;
@@ -570,31 +707,103 @@ export component Banner inherits Rectangle {
     }
 }
 
-// A small tile with an icon, a label and a value (Home page facts, stats).
+// A friendly tip marked with a paw instead of a dot.
+export component PawTip inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: Theme.lavender;
+    border-radius: Theme.radius-small;
+    background: Theme.accent.with-alpha(Theme.dark ? 0.07 : 0.06);
+    border-width: 1px;
+    border-color: Theme.accent.with-alpha(0.25);
+    HorizontalLayout {
+        padding: 12px;
+        padding-left: 14px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: start;
+            Icon {
+                width: 17px;
+                height: 17px;
+                commands: Icons.paw;
+                tone: root.tone;
+            }
+        }
+        BodyText {
+            horizontal-stretch: 1;
+            text: root.text;
+            color: Theme.text;
+        }
+    }
+}
+
+// A filled paw print, for decoration (the Home page's trail of steps).
+export component PawPrint inherits Path {
+    in property <length> size: 22px;
+    in property <color> tone: Theme.accent.with-alpha(Theme.dark ? 0.14 : 0.18);
+    width: root.size;
+    height: root.size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: Icons.paw;
+    fill: root.tone;
+    stroke: transparent;
+}
+
+// A small cat face with a message, for lists with nothing in them yet.
+export component CatEmpty inherits VerticalLayout {
+    in property <string> title;
+    in property <string> text;
+    spacing: 8px;
+    padding: 18px;
+    alignment: center;
+    HorizontalLayout {
+        alignment: center;
+        Icon {
+            width: 38px;
+            height: 38px;
+            commands: Icons.cat;
+            tone: Theme.lavender.with-alpha(0.8);
+        }
+    }
+    Text {
+        text: root.title;
+        horizontal-alignment: center;
+        font-size: 15px;
+        font-weight: 700;
+        color: Theme.text;
+    }
+    if root.text != "": BodyText {
+        text: root.text;
+        horizontal-alignment: center;
+    }
+}
+
+// A small lifted tile with an icon, a label and a value (Home page facts).
 export component StatTile inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <string> value;
     in property <color> tone: Theme.lavender;
     property <bool> shown: false;
-    min-height: 74px;
+    min-height: 58px;
     border-radius: Theme.radius;
-    background: area.has-hover ? Theme.surface-raised : Theme.surface;
+    background: Theme.surface;
     border-width: 1px;
     border-color: Theme.border;
+    drop-shadow-blur: Theme.lift-blur;
+    drop-shadow-offset-y: Theme.lift-offset;
+    drop-shadow-color: Theme.lift-color;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Theme.slow; easing: ease-out-quad; }
-    animate background { duration: Theme.fast; }
     init => {
         root.shown = true;
     }
-    area := TouchArea { }
     HorizontalLayout {
-        padding: 14px;
-        spacing: 12px;
+        padding: 10px;
+        spacing: 10px;
         Rectangle {
-            width: 36px;
-            height: 36px;
+            width: 30px;
+            height: 30px;
             border-radius: 11px;
             background: root.tone.with-alpha(0.12);
             Icon {
@@ -613,7 +822,7 @@ export component StatTile inherits Rectangle {
             }
             Text {
                 text: root.value;
-                font-size: 14px;
+                font-size: Theme.text-label;
                 font-weight: 700;
                 color: Theme.text;
                 overflow: elide;
@@ -627,12 +836,12 @@ export component StatTile inherits Rectangle {
 // goes through the text box itself: select everything, then copy.
 export component OutputBox inherits Rectangle {
     in property <string> text;
-    in property <string> placeholder: "Nothing to show yet.";
+    in property <string> placeholder: "Nothing here yet.";
     property <bool> copied: false;
 
     min-height: 160px;
     border-radius: Theme.radius-small;
-    background: #0b0c10;
+    background: Theme.inset;
     border-width: 1px;
     border-color: Theme.border;
 

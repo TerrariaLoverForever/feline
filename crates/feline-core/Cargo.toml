@@ -29,3 +29,8 @@ miniz_oxide = "0.9"
 # 1024-bit RSA (from 2010), below ring's 2048-bit minimum. Verification
 # only. MIT OR Apache-2.0.
 rsa = { version = "0.9", default-features = false, features = ["std", "sha2"] }
+
+[target.'cfg(windows)'.dependencies]
+# Feline's own safe wrappers for the Windows API (listing processes, …).
+# This crate forbids `unsafe`, so those calls live there.
+feline-win = { path = "../feline-win" }

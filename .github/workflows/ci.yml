@@ -1,0 +1,30 @@
+# Builds and tests Feline on Linux and Windows on every push, so code for
+# one system is checked even when it's written on the other.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests (feline-core, feline-win)
+        run: cargo test -p feline-core -p feline-win
+      - name: Clippy (the app)
+        run: cargo clippy -p feline -p feline-core -p feline-win -- -D warnings

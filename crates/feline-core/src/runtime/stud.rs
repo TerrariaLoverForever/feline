@@ -234,7 +234,7 @@ impl RuntimeBackend for Stud {
     fn config_path(&self, installation: &Installation, ctx: &DetectContext) -> Option<PathBuf> {
         let dir = match &installation.kind {
             InstallKind::Flatpak { app_id, .. } => ctx.flatpak_config_dir(app_id)?.join("stud"),
-            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.config_dir("stud")?,
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => ctx.config_dir("stud")?,
         };
         Some(dir.join("config.json"))
     }
@@ -246,7 +246,7 @@ impl RuntimeBackend for Stud {
             InstallKind::Flatpak { app_id, .. } => {
                 ctx.flatpak_data_dir(app_id).map(|d| d.join("stud"))
             }
-            InstallKind::AppImage(_) | InstallKind::Native(_) => ctx.data_dir("stud"),
+            InstallKind::AppImage(_) | InstallKind::Native(_) | InstallKind::Official(_) => ctx.data_dir("stud"),
         }
         .into_iter()
         .collect()
@@ -287,7 +287,7 @@ fn metainfo_in(prefix: &Path) -> std::path::PathBuf {
         .join(format!("{APP_ID}.metainfo.xml"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
@@ -322,6 +322,7 @@ mod tests {
             path: Some(root.join(path).into_os_string()),
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let real = STUD.detect(&ctx("usr/bin"));
         let impostor = STUD.detect(&ctx("other/bin"));
@@ -342,6 +343,7 @@ mod tests {
             path: None,
             flatpak_system_dir: PathBuf::from("/nonexistent"),
             config_home: None,
+            local_app_data: None,
         };
         let found = STUD.detect(&ctx);
         let _ = fs::remove_dir_all(&root);

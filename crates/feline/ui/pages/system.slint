@@ -1,18 +1,143 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// System page: what Feline knows about this machine, with a copyable report
-// for bug reports. Everything here is read from /proc, /sys and /etc.
+// System page: can this PC run Roblox well (PC check), live usage, the
+// graphics drivers, and what Feline knows about this machine, with a
+// copyable report for bug reports.
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { InfoRow, Level } from "../types.slint";
-import { Icons } from "../icons.slint";
-import { PageBase, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, InfoLine, OutputBox } from "../components.slint";
+import { InfoRow, CheckRow, DriverRow, Level } from "../types.slint";
+import { Icons, Icon } from "../icons.slint";
+import { PageBase, SecondaryButton, Card, Eyebrow, BodyText, PageTitle, Divider, InfoLine, OutputBox, StatusDot, SectionTitle, Pill } from "../components.slint";
+
+// A finding with a coloured dot (PC check).
+component FindingLine inherits HorizontalLayout {
+    in property <CheckRow> check;
+    spacing: 14px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    VerticalLayout {
+        alignment: start;
+        padding-top: 5px;
+        StatusDot {
+            tone: Theme.level-color(root.check.level);
+        }
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text {
+            text: root.check.title;
+            font-size: 14px;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        if root.check.detail != "": BodyText {
+            text: root.check.detail;
+        }
+    }
+}
+
+// The last minute as bars: `values` (0..1) and Roblox's share on top.
+component UsageGraph inherits Rectangle {
+    in property <[float]> values;
+    in property <[float]> roblox;
+    in property <color> tone: Theme.accent;
+    // How many samples fit (the graph scrolls when full).
+    in property <int> slots: 60;
+    height: 84px;
+    border-radius: Theme.radius-small;
+    background: Theme.surface-raised;
+    clip: true;
+    property <length> step: (self.width - 12px) / root.slots;
+    // Grid lines at 50 % and 100 %.
+    Rectangle {
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        height: 1px;
+        background: Theme.border;
+    }
+    Rectangle {
+        x: 6px;
+        y: 6px + (parent.height - 12px) / 2;
+        width: parent.width - 12px;
+        height: 1px;
+        background: Theme.border;
+    }
+    for v[i] in root.values: Rectangle {
+        x: 6px + (root.slots - root.values.length + i) * root.step;
+        width: max(1px, root.step - 1px);
+        height: max(1px, (root.height - 12px) * min(1, v));
+        y: root.height - 6px - self.height;
+        border-radius: 1px;
+        background: root.tone.with-alpha(0.55);
+    }
+    for v[i] in root.roblox: Rectangle {
+        x: 6px + (root.slots - root.roblox.length + i) * root.step;
+        width: max(1px, root.step - 1px);
+        height: v > 0 ? max(1px, (root.height - 12px) * min(1, v)) : 0px;
+        y: root.height - 6px - self.height;
+        border-radius: 1px;
+        background: Theme.lavender;
+    }
+}
+
+// A legend swatch with its text.
+component Swatch inherits HorizontalLayout {
+    in property <color> tone;
+    in property <string> text;
+    spacing: 6px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 9px;
+            height: 9px;
+            border-radius: 3px;
+            background: root.tone;
+        }
+    }
+    Text {
+        text: root.text;
+        font-size: 12px;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+    }
+}
 
 export component SystemPage inherits PageBase {
+    // True on Windows: shows the Windows wording and hides Linux-only parts.
+    in property <bool> windows;
     in property <[InfoRow]> rows;
     in property <string> report;
     in property <bool> loading;
+    // PC check
+    in property <Level> verdict-level;
+    in property <string> verdict-title;
+    in property <string> verdict-detail;
+    in property <[CheckRow]> pc-checks;
+    // Drivers
+    in property <[DriverRow]> drivers;
+    // Live usage (0..1, oldest first)
+    in property <[float]> cpu-history;
+    in property <[float]> roblox-cpu-history;
+    in property <[float]> memory-history;
+    in property <[float]> roblox-memory-history;
+    in property <string> cpu-now;
+    in property <string> memory-now;
+    in property <string> roblox-now;
     callback refresh();
+    // Once a second while the page is open.
+    callback tick();
+    callback open-link(string);
+
+    Timer {
+        interval: 1s;
+        running: true;
+        triggered => {
+            root.tick();
+        }
+    }
 
     ScrollView {
         VerticalLayout {
@@ -29,7 +154,8 @@ export component SystemPage inherits PageBase {
                         text: "System";
                     }
                     BodyText {
-                        text: "Your distribution, hardware and desktop session, as Feline sees them.";
+                        text: root.windows ? "Your Windows and hardware, as Feline sees them."
+                            : "Your distribution, hardware and desktop session, as Feline sees them.";
                     }
                 }
                 VerticalLayout {
@@ -45,11 +171,222 @@ export component SystemPage inherits PageBase {
                 }
             }
 
+            // ---------------- PC check
             Card {
+                SectionTitle {
+                    text: "Can this PC run Roblox?";
+                    icon: Icons.cat;
+                }
+                if root.verdict-title != "": Rectangle {
+                    border-radius: Theme.radius;
+                    background: Theme.level-color(root.verdict-level).with-alpha(0.10);
+                    border-width: 1px;
+                    border-color: Theme.level-color(root.verdict-level).with-alpha(0.30);
+                    HorizontalLayout {
+                        padding: 14px;
+                        spacing: 14px;
+                        Rectangle {
+                            width: 44px;
+                            height: 44px;
+                            border-radius: 14px;
+                            background: Theme.level-color(root.verdict-level).with-alpha(0.16);
+                            Icon {
+                                width: 26px;
+                                height: 26px;
+                                commands: Icons.cat;
+                                tone: Theme.level-color(root.verdict-level);
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text {
+                                text: root.verdict-title;
+                                font-size: 17px;
+                                font-weight: 700;
+                                color: Theme.text;
+                            }
+                            BodyText {
+                                text: root.verdict-detail;
+                            }
+                        }
+                    }
+                }
+                if root.pc-checks.length == 0: BodyText {
+                    text: "Checking…";
+                }
+                for check[i] in root.pc-checks: Rectangle {
+                    height: row-box-1.preferred-height;
+                    row-box-1 := VerticalLayout {
+                    if i > 0: Divider { }
+                    FindingLine {
+                        check: check;
+                    }
+                }
+                }
+            }
+
+            // ---------------- Live usage
+            Card {
+                SectionTitle {
+                    text: "Right now";
+                    icon: Icons.cpu;
+                }
+                BodyText {
+                    text: "The whole PC over the last minute, and how much of it is Roblox. Only measured while this page is open.";
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    VerticalLayout {
+                        spacing: 8px;
+                        horizontal-stretch: 1;
+                        HorizontalLayout {
+                            Text {
+                                text: "Processor";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: root.cpu-now;
+                                font-size: 13px;
+                                color: Theme.text-muted;
+                            }
+                        }
+                        UsageGraph {
+                            values: root.cpu-history;
+                            roblox: root.roblox-cpu-history;
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 8px;
+                        horizontal-stretch: 1;
+                        HorizontalLayout {
+                            Text {
+                                text: "Memory";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: root.memory-now;
+                                font-size: 13px;
+                                color: Theme.text-muted;
+                            }
+                        }
+                        UsageGraph {
+                            values: root.memory-history;
+                            roblox: root.roblox-memory-history;
+                            tone: Theme.info;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: start;
+                    Swatch {
+                        tone: Theme.accent.with-alpha(0.55);
+                        text: "Processor, everything";
+                    }
+                    Swatch {
+                        tone: Theme.info.with-alpha(0.55);
+                        text: "Memory, everything";
+                    }
+                    Swatch {
+                        tone: Theme.lavender;
+                        text: root.roblox-now;
+                    }
+                }
+            }
+
+            // ---------------- Drivers
+            Card {
+                SectionTitle {
+                    text: "Graphics drivers";
+                    icon: Icons.sparkles;
+                }
+                BodyText {
+                    text: root.windows
+                        ? "An old graphics driver is the number one cause of crashes and stutter. Here's how old yours is."
+                        : "On Linux, graphics drivers come with your system's updates (Mesa, or NVIDIA's packages).";
+                }
+                if root.drivers.length == 0: BodyText {
+                    text: "No graphics card found.";
+                }
+                for d[i] in root.drivers: Rectangle {
+                    height: row-box-2.preferred-height;
+                    row-box-2 := VerticalLayout {
+                    spacing: 0px;
+                    if i > 0: Divider { }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        VerticalLayout {
+                            alignment: start;
+                            padding-top: 5px;
+                            StatusDot {
+                                tone: Theme.level-color(d.level);
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 3px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: d.gpu;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                if d.date != "": Pill {
+                                    text: d.date;
+                                    tone: Theme.level-color(d.level);
+                                }
+                            }
+                            Text {
+                                text: "Driver " + d.version;
+                                font-size: 12px;
+                                color: Theme.text-faint;
+                                wrap: word-wrap;
+                            }
+                            if d.advice != "": BodyText {
+                                text: d.advice;
+                            }
+                        }
+                        if d.link != "": VerticalLayout {
+                            alignment: center;
+                            SecondaryButton {
+                                text: "Get the latest";
+                                icon: Icons.external;
+                                horizontal-stretch: 0;
+                                clicked => {
+                                    root.open-link(d.link);
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
+
+            // ---------------- Details
+            Card {
+                SectionTitle {
+                    text: "Details";
+                    icon: Icons.system;
+                }
                 if root.loading && root.rows.length == 0: BodyText {
                     text: "Reading system information…";
                 }
-                for row[i] in root.rows: VerticalLayout {
+                for row[i] in root.rows: Rectangle {
+                    height: row-box-3.preferred-height;
+                    row-box-3 := VerticalLayout {
                     spacing: 0px;
                     if i > 0: Divider { }
                     InfoLine {
@@ -58,13 +395,14 @@ export component SystemPage inherits PageBase {
                         value-color: row.level == Level.neutral ? Theme.text : Theme.level-color(row.level);
                     }
                 }
+                }
             }
 
             Eyebrow {
-                text: "REPORT FOR BUG REPORTS";
+                text: "As plain text";
             }
             BodyText {
-                text: "The same information as plain text (also printed by `feline --info`). It contains no personal data apart from your hardware and distribution.";
+                text: "The same details, ready to paste into a bug report (also printed by `feline --info`). Nothing personal in there apart from your hardware and system.";
             }
             OutputBox {
                 height: 230px;
