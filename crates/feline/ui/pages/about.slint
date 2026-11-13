@@ -9,7 +9,7 @@ import { Icons, Icon } from "../icons.slint";
 import { Extras } from "../extras.slint";
 import { Looks } from "../looks.slint";
 import { More } from "../more.slint";
-import { PageBase, Logo, Pill, SecondaryButton, Card, Eyebrow, BodyText, Divider, TabBar, SectionTitle, SettingRow, Toggle, PawTip } from "../components.slint";
+import { PageBase, Logo, SecondaryButton, Card, Eyebrow, BodyText, Divider, TabBar, SectionTitle, SettingRow, Toggle, PawTip } from "../components.slint";
 
 component Credit inherits VerticalLayout {
     in property <string> name;
@@ -94,10 +94,6 @@ export component AboutPage inherits PageBase {
                             font-size: 14px;
                             color: Theme.lavender;
                             vertical-alignment: center;
-                        }
-                        Pill {
-                            text: "Still a kitten";
-                            tone: Theme.warning;
                         }
                     }
                     BodyText {

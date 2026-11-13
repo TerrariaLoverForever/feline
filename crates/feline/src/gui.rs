@@ -1424,7 +1424,7 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
             ui.set_selected_has_info(f.installation.backend.has_diagnostics());
             ui.set_selected_detail(
                 match f.installation.backend.origin() {
-                    Origin::Feline => "Feline's own runtime · in development".to_owned(),
+                    Origin::Feline => "Feline's own runtime".to_owned(),
                     Origin::External { .. } => {
                         format!("External runtime · {}", short_kind(&f.installation.kind))
                     }

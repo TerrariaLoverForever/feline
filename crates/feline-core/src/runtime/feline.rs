@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Feline's own runtime, `feline-runtime` (in development).
+//! Feline's own runtime, `feline-runtime`.
 //!
 //! It runs Roblox's Android engine (`libroblox.so`, with the app's
 //! `base.apk` next to it), which the user copies from their own install;

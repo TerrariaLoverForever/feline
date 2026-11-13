@@ -4,7 +4,7 @@
 
 ```
 ┌──────────────────────┐   Feline runtime protocol   ┌───────────────────────────┐
-│ feline (launcher)    │ ──────────────────────────► │ feline-runtime (FUTURE)   │
+│ feline (launcher)    │ ──────────────────────────► │ feline-runtime (Linux)    │
 │ GUI + text commands  │   separate process          │ own Android compatibility │
 └──────────┬───────────┘                             │ layer, independently      │
            │ uses                                    │ developed                 │
@@ -23,16 +23,17 @@ All Feline code is licensed GPL-3.0-or-later.
 1. **Feline will have its own runtime, developed independently.** It is not a
    fork, port, translation or adaptation of Cordial, Sober or any other Roblox
    runtime. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the clean-room rule.
-2. **The launcher and the runtime are separate programs.** They will talk over
-   a protocol Feline defines (versioned, with no dependency on any other
-   project's protocol). It is designed in the runtime-research milestone, not
-   before. See [ROADMAP.md](ROADMAP.md).
+2. **The launcher and the runtime are separate programs.** The launcher
+   starts `feline-runtime --play <engine>` and hands it its settings in
+   `~/.config/feline/runtime.json`; a protocol of Feline's own between the
+   two (versioned, with no dependency on any other project's protocol) may
+   follow.
 3. **External runtimes are optional adapters.** They are used only through
    their public interfaces, are never required, are never selected
    automatically, and are always labelled "external third-party runtime".
 4. **`RuntimeBackend` is written in Feline's own terms** (detect, version,
-   doctor, diagnostics, and later launch), so `feline-runtime` will be just
-   another backend.
+   doctor, diagnostics, launch), so `feline-runtime` is just another backend
+   (`runtime::feline`).
 5. **The launcher is never in the game's critical path.** A runtime runs in its
    own process group, so closing or crashing the launcher doesn't end the game.
 6. **The GUI never blocks.** Slow work runs on a background thread.
@@ -67,11 +68,15 @@ All Feline code is licensed GPL-3.0-or-later.
 Detection never starts processes; only `Installation::version()` (when the
 version isn't in a file), `doctor()` and `diagnostics()` do, always with a timeout.
 
-## `feline-runtime` (in development, M3)
+## `feline-runtime`
 
 Feline's own runtime, licensed GPL-3.0-or-later with the additional
 permission in [`LICENSE.exception`](../LICENSE.exception). See
-[runtime/M2-RESEARCH.md](runtime/M2-RESEARCH.md) for the plan.
+[runtime/M2-RESEARCH.md](runtime/M2-RESEARCH.md) for the research it started
+from. The table lists the parts it was first built from; newer ones
+(`vulkan`, `egl`, `audio`, `voice`, `text`, `keys`, `gamepad`, `login`,
+`prefs`, `pacing`, `tuning`, `net`, `versions`) describe themselves at the
+top of their files in `crates/feline-runtime/src/`.
 
 | Module | Purpose |
 |---|---|

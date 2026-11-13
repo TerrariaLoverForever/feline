@@ -18,7 +18,7 @@ Power users (FFlags, runtimes, diagnostics) are welcome, but they are not who th
 
 Feline is a launcher for Roblox. It gets players into games, keeps their settings and mods in one place, and shows what they're playing on Discord.
 
-- On Linux it starts an external third-party runtime that the player installs themselves (Sober, Cordial, Stud, Tipsy, Mocktail, Nightcap). Feline's own runtime is in development.
+- On Linux it plays Roblox with Feline's own runtime, or starts an external third-party runtime that the player installs themselves (Sober, Cordial, Stud, Tipsy, Mocktail, Nightcap).
 - On Windows it bootstraps the official Roblox client.
 
 It works when a player can press Play and be in a game without reading anything. Everything else is optional.
@@ -29,7 +29,7 @@ It works when a player can press Play and be in a game without reading anything.
 - **Honest and safe:**
   - It never injects anything into the game client and only writes settings values it has verified.
   - It backs up files before changing them and gives control back when a feature is turned off.
-  - It is upfront about account risk, and never claims compatibility it hasn't demonstrated.
+  - It is upfront about account risk, and about what hasn't been tested yet (README, "Not tested yet").
 - **Cat personality:** cat-themed wording, a desk cat, seasonal touches and achievements. It's a launcher with charm.
 - **Light on resources:** nothing animates while idle, so Feline uses no GPU time while a game runs.
 
@@ -48,11 +48,10 @@ It works when a player can press Play and be in a game without reading anything.
 ## Capabilities and Constraints
 
 - Unofficial, not affiliated with Roblox Corporation. Roblox does not support third-party clients (see docs/LEGAL.md).
-- Ships no Roblox files and no runtime code. It never picks a runtime for the player.
+- Ships no Roblox files and no code of other people's runtimes. It never picks a runtime for the player.
 - Mods are Bloxstrap-style folders, applied at launch with backups. Code files are skipped. FFlags are allowlisted only.
 - The desk cat is a separate always-on-top window and is never drawn into the game.
 - Idle must stay idle: animations are event-driven only.
-- Status: "still a kitten". Milestone 1 (the launcher) is done; the runtime is in M4 bring-up.
 
 ## Brand Commitments
 
@@ -64,10 +63,10 @@ It works when a player can press Play and be in a game without reading anything.
 
 ## Evidence on Hand
 
-- Screenshots in `docs/screenshots/` (home, settings, about).
-- Roadmap and research docs in `docs/`.
+- Screenshots in `docs/screenshots/` (home, runtimes, runtime, mods, settings, about).
+- Research docs in `docs/runtime/`.
 - There are no user counts, testimonials, press or benchmarks. Don't invent any.
-- Roblox compatibility of Feline's own runtime has not been demonstrated. Don't claim it.
+- Feline's own runtime signs in and plays games on the developer's PC (Arch Linux, KDE Wayland, NVIDIA). What hasn't been tested is listed in the README; don't claim more.
 
 ## Product Principles
 

@@ -432,7 +432,8 @@ impl UsageMeter {
             let text = std::fs::read_to_string("/proc/meminfo").ok()?;
             let total = crate::monitor::parse_kib_field(&text, "MemTotal:")?;
             let available = crate::monitor::parse_kib_field(&text, "MemAvailable:")?;
-            Some((total * 1024, available * 1024))
+            // Already in bytes.
+            Some((total, available))
         }
     }
 

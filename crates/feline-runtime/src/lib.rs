@@ -2,11 +2,10 @@
 // (with the additional permission in LICENSE.exception)
 //! Feline's own runtime for Roblox's Android client.
 //!
-//! **Milestone M3, step 2.** This crate can read the engine library
-//! (`libroblox.so`): its ELF structure, imports, exports and relocations
-//! (including Android's packed format), and put it into memory with every
-//! relocation applied that doesn't need an import. None of its code is run
-//! yet. See `docs/runtime/M2-RESEARCH.md`.
+//! This crate reads the engine library (`libroblox.so`), puts it into
+//! memory, and gives it what it expects from Android: a Java world, a
+//! window, graphics, input, sound and files. See `docs/ARCHITECTURE.md`,
+//! and `docs/runtime/M2-RESEARCH.md` for the research it started from.
 //!
 //! Clean-room rule: no code from Sober, Cordial, Stud or other Roblox
 //! runtimes is used (see CONTRIBUTING.md). Roblox's library is only inspected

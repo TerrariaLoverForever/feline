@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // (with the additional permission in LICENSE.exception)
-//! `feline-runtime`: Feline's own runtime (in development).
+//! `feline-runtime`: Feline's own runtime.
 //!
 //! So far `--check` (read the engine library and report what loading it
 //! involves) and `--load` (also put it into memory and relocate it). Neither
@@ -9,7 +9,7 @@
 use std::process::ExitCode;
 
 const HELP: &str = "\
-feline-runtime: Feline's own runtime for Roblox's Android client (in development)
+feline-runtime: Feline's own runtime for Roblox's Android client
 
 Usage: feline-runtime --play <libroblox.so>
        feline-runtime --check <libroblox.so>

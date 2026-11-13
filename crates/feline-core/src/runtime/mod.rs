@@ -2,7 +2,7 @@
 //! Runtime backends.
 //!
 //! A *runtime* is a separate program that runs the Roblox client: Feline's
-//! own, `feline-runtime` (in development, see [`feline`]), **external,
+//! own, `feline-runtime` (see [`feline`]), **external,
 //! third-party** runtimes the user installed themselves, which Feline drives
 //! through their public command line only, or, on Windows, Roblox's own
 //! official client ([`roblox`]).

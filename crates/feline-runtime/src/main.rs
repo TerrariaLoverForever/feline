@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // (with the additional permission in LICENSE.exception)
-//! `feline-runtime`: Feline's own runtime (in development). The program
+//! `feline-runtime`: Feline's own runtime. The program
 //! itself is in `app.rs`; it runs on Linux only.
 
 #[cfg(target_os = "linux")]

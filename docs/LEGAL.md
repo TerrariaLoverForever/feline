@@ -15,7 +15,7 @@ Roblox Corporation and is used here only to describe what Feline works with.
   own certificate (SHA-256 `44932ea3…ba1477`, pinned in
   `feline-core/src/engine/mod.rs`). Feline never modifies, repackages or
   redistributes the app. `feline --update-roblox` does the same by hand.
-- Feline's own runtime (`feline-runtime`, in development) runs that app.
+- Feline's own runtime (`feline-runtime`) runs that app.
   Feline can also start an **external third-party runtime** that you
   installed yourself (Sober, Cordial, Stud, Tipsy, Mocktail, Nightcap),
   through that program's public command line. Feline never selects one for you.

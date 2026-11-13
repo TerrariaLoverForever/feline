@@ -32,7 +32,7 @@ Options:
   -V, --version  Print Feline's version
   -h, --help     Print this help
 
-Listed runtimes are Feline's own (in development) or external third-party
+Listed runtimes are Feline's own or external third-party
 programs you installed yourself; Feline never picks one for you.
 ";
 
