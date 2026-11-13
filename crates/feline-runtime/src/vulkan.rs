@@ -118,6 +118,10 @@ macro_rules! ours {
 pub unsafe extern "C" fn get_instance_proc_addr(instance: *mut c_void, name: *const c_char) -> Pfn {
     // SAFETY: the caller passes a valid C string.
     let wanted = unsafe { CStr::from_ptr(name) };
+    // ETC2 textures (vktex.rs).
+    if let Some(f) = crate::vktex::hook(wanted.to_bytes()) {
+        return Some(f);
+    }
     match wanted.to_bytes() {
         b"vkGetInstanceProcAddr" => ours!(get_instance_proc_addr as unsafe extern "C" fn(*mut c_void, *const c_char) -> Pfn),
         b"vkEnumerateInstanceExtensionProperties" => ours!(enumerate_instance_extensions as EnumerateExtensions),
@@ -150,6 +154,9 @@ type GetDeviceProcAddr = unsafe extern "C" fn(*mut c_void, *const c_char) -> Pfn
 unsafe extern "C" fn get_device_proc_addr(device: *mut c_void, name: *const c_char) -> Pfn {
     // SAFETY: the caller passes a valid C string.
     let wanted = unsafe { CStr::from_ptr(name) };
+    if let Some(f) = crate::vktex::hook(wanted.to_bytes()) {
+        return Some(f);
+    }
     if wanted.to_bytes() == b"vkCreateSwapchainKHR" {
         return ours!(create_swapchain as CreateSwapchain);
     }
@@ -466,12 +473,20 @@ unsafe extern "C" fn create_device(
     let pointers: Vec<*const c_char> = kept.iter().map(|n| n.as_ptr()).collect();
     copy.extensions = pointers.as_ptr();
     copy.extension_count = pointers.len() as u32;
+    // ETC2 is Feline's (vktex.rs), not the driver's.
+    // SAFETY: the engine's valid features and chain.
+    let features = unsafe { crate::vktex::strip_device_features(copy.enabled_features, copy.p_next) };
+    if let Some(f) = &features {
+        copy.enabled_features = std::ptr::from_ref(f).cast();
+    }
     PHYSICAL.store(physical as usize, Ordering::Release);
     // SAFETY: the engine's create info with a valid extension list.
     let result = unsafe { host_create(physical, &copy, allocator, device) };
     if result == VK_SUCCESS {
         // SAFETY: filled by the driver.
         crate::vkoverlay::device_made(unsafe { *device } as u64, physical as u64);
+        // SAFETY: as above.
+        crate::vktex::device_made(unsafe { *device } as u64, physical as u64);
     } else {
         eprintln!("feline-runtime: vulkan: vkCreateDevice failed ({result})");
     }
@@ -485,6 +500,16 @@ static INSTANCE: AtomicUsize = AtomicUsize::new(0);
 
 fn instance() -> *mut c_void {
     INSTANCE.load(Ordering::Acquire) as *mut c_void
+}
+
+/// The engine's current instance (0 before it made one).
+pub fn current_instance() -> u64 {
+    INSTANCE.load(Ordering::Acquire) as u64
+}
+
+/// The driver's device function `name` (for vktex.rs).
+pub fn host_device_function(device: *mut c_void, name: &CStr) -> Pfn {
+    get_device_function(device, name)
 }
 
 #[repr(C)]
@@ -740,6 +765,7 @@ unsafe extern "C" fn queue_present(queue: *mut c_void, info: *const c_void) -> i
         // SAFETY: the engine's queue and present info.
         unsafe { f(queue, info) }
     };
+    crate::vktex::frame_presented();
     let n = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
     if n == 1 || (n.is_power_of_two() && n >= 64) {
         eprintln!("feline-runtime: vulkan: frame {n} presented ({result})");
