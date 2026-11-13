@@ -18,64 +18,108 @@ your password or Robux.
 
 ## Contents
 
-- [Install on Linux](#install-on-linux)
-- [Install on Windows](#install-on-windows)
+- [Install](#install): [Arch Linux](#arch-linux), [other Linux](#other-linux-distributions), [Windows](#windows)
 - [What the launcher does](#what-the-launcher-does)
 - [Feline's own runtime](#felines-own-runtime-linux)
 - [Not tested yet](#not-tested-yet)
 - [Known problems](#known-problems)
 - [Updating](#updating)
+- [Text commands](#text-commands)
 
-## Install on Linux
+## Install
 
-There is no ready-made download for Linux yet: you build Feline from its
-source. It needs a 64-bit Intel/AMD PC, Vulkan (or OpenGL ES) graphics
-drivers, PulseAudio or PipeWire for sound, and Rust 1.99 or newer.
+There are no ready-made downloads yet, so Feline is built from its source on
+every system. Pick yours:
 
-### Arch Linux and relatives (CachyOS, EndeavourOS, Manjaro)
+- [Arch Linux](#arch-linux) (also CachyOS, EndeavourOS, Manjaro)
+- [Other Linux distributions](#other-linux-distributions)
+- [Windows](#windows)
 
-```sh
-git clone https://github.com/TerrariaLoverForever/feline
-cd feline/packaging/aur
-makepkg -si
-```
+While this repository is private, `git clone` asks for a GitHub login that
+has access to it (`gh auth login`, then `gh auth setup-git`, sets that up
+once).
 
-That builds and installs the `feline-git` package: the launcher, Feline's
-runtime and its login window. Remove it with `sudo pacman -R feline-git`.
-More in [packaging/aur](packaging/aur/README.md).
+### Arch Linux
 
-### Any distribution
+Feline is installed as a normal package, `feline-git`: the launcher, Feline's
+runtime and its login window. pacman installs what it needs.
 
-1. Install the build tools and libraries. On Arch:
+1. Get the build tools:
 
    ```sh
-   sudo pacman -S --needed rust git pkgconf alsa-lib fontconfig freetype2 \
-     libxkbcommon wayland libpulse vulkan-icd-loader gtk4 webkitgtk-6.0 xdg-utils
+   sudo pacman -S --needed base-devel git
    ```
 
-   Other distributions have the same things under their own names: the
-   development packages of ALSA, fontconfig, freetype, xkbcommon, Wayland,
-   PulseAudio, GTK 4 and WebKitGTK 6.0, plus a Vulkan loader.
+2. Build and install the package:
 
-2. Build and install for your user:
+   ```sh
+   git clone https://github.com/TerrariaLoverForever/feline
+   cd feline/packaging/aur
+   makepkg -si
+   ```
+
+3. Open **Feline** from your app menu and follow [First start](#first-start-on-linux).
+
+- **Update:** `git pull` in the `feline` folder, then `makepkg -si` again.
+- **Remove:** `sudo pacman -R feline-git`.
+
+### Other Linux distributions
+
+Feline is built with cargo and installed into your home folder. It needs a
+64-bit Intel/AMD PC and working Vulkan (or OpenGL ES) graphics drivers.
+
+1. Install Rust **1.99 or newer**. If your distribution's Rust is older, use
+   [rustup](https://rustup.rs).
+
+2. Install what Feline builds against and uses:
+
+   ```sh
+   # Debian, Ubuntu, Linux Mint
+   sudo apt install build-essential git pkg-config libasound2-dev \
+     libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev \
+     libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev libpulse0 libvulkan1 xdg-utils
+
+   # Fedora
+   sudo dnf install gcc git pkgconf-pkg-config alsa-lib-devel fontconfig-devel \
+     freetype-devel libxkbcommon-devel wayland-devel systemd-devel gtk4-devel \
+     webkitgtk6.0-devel pulseaudio-libs vulkan-loader xdg-utils
+   ```
+
+   On another distribution, install the same things under its own names:
+   a C compiler, git, pkg-config, the development files of ALSA, fontconfig,
+   freetype, xkbcommon, Wayland, udev, GTK 4 and WebKitGTK 6.0, and the
+   PulseAudio and Vulkan libraries.
+
+3. Build Feline and install it for your user:
 
    ```sh
    git clone https://github.com/TerrariaLoverForever/feline
    cd feline
    cargo build --release
-   install -Dm755 target/release/feline target/release/feline-runtime \
-     target/release/feline-login -t ~/.local/bin/
-   feline --install-desktop-entry      # adds Feline to your app menu
+   install -Dm755 -t ~/.local/bin target/release/feline \
+     target/release/feline-runtime target/release/feline-login
+   ~/.local/bin/feline --install-desktop-entry
    ```
 
-   (`~/.local/bin` has to be on your `PATH`.)
+   The last line adds Feline to your app menu.
 
-3. Open Feline, go to **Runtimes** and press **Use** on *Feline Runtime*.
-   The first Play downloads Roblox's Android app, checks that it is really
-   signed by Roblox, and opens a window to sign in on Roblox's own website.
+4. Open **Feline** from your app menu and follow [First start](#first-start-on-linux).
 
-To use a runtime made by someone else instead, install it yourself and pick
-it on the same page:
+- **Update:** quit Feline (also from its tray icon: closing the window keeps
+  it running), `git pull` in the `feline` folder, then repeat step 3.
+- **Remove:** `~/.local/bin/feline --uninstall-desktop-entry`, then delete the
+  three programs from `~/.local/bin`.
+
+### First start on Linux
+
+1. Go to **Runtimes** and press **Use** on *Feline Runtime*.
+2. Press **Play Roblox**. The first time, Feline downloads Roblox's Android
+   app (about 240 MB) and checks that it is really signed by Roblox.
+3. A window opens for signing in on Roblox's own website. After that you
+   stay signed in.
+
+To play with a runtime made by someone else instead, install it yourself and
+press **Use** on it on the same page:
 
 | Runtime | Feline can… |
 |---|---|
@@ -89,16 +133,15 @@ it on the same page:
 Feline never picks one for you and starts them only through their public
 command line.
 
-## Install on Windows
+### Windows
 
-Roblox's official client has to be installed first (from roblox.com): Feline
-starts that copy and ships none of Roblox's files.
+On Windows, Feline starts Roblox's official client, so that has to be
+installed first, from [roblox.com](https://www.roblox.com/download).
 
-No release has been published yet, so for now `feline.exe` is built from
-source (Rust 1.92 or newer):
+1. Install [Git](https://git-scm.com/download/win) and
+   [Rust](https://rustup.rs). Rust's installer offers to install Microsoft's
+   C++ build tools; say yes.
 
-1. Install [Rust](https://rustup.rs) (it offers to install Microsoft's C++
-   build tools; say yes) and [Git](https://git-scm.com/download/win).
 2. In PowerShell:
 
    ```powershell
@@ -107,12 +150,13 @@ source (Rust 1.92 or newer):
    cargo build --release -p feline
    ```
 
-3. Run `target\release\feline.exe`. It's a single file: put it wherever you
-   like and make a shortcut to it.
+3. The program is `target\release\feline.exe`, a single file. Copy it
+   wherever you like, make a shortcut to it, and open it.
 
-Once releases exist, `feline.exe` and its SHA-256 checksum will be on the
-[Releases page](https://github.com/TerrariaLoverForever/feline/releases), and
-Feline will update itself from there.
+- **Update:** quit Feline (also from its icon by the clock), `git pull` in
+  the `feline` folder, then repeat steps 2 and 3.
+- **Remove:** delete `feline.exe`. Feline's settings are in
+  `%APPDATA%\Feline`.
 
 ## What the launcher does
 
@@ -243,6 +287,7 @@ Expect rough edges, and please say what you find.
 | The release build (GitHub Actions) | Never run: no version has been tagged |
 | The Arch package | The recipe is written; a full `makepkg` build hasn't been run |
 | Studio's script status plugin (Windows) | Not tried in Studio |
+| Install steps for Debian/Ubuntu and Fedora | The package lists were written from each distribution's package names, not run there; only Arch has been used |
 | Everything Windows-only | Built and unit-tested automatically on every change, but not confirmed by hand on a Windows PC |
 
 ## Known problems
@@ -258,13 +303,17 @@ Expect rough edges, and please say what you find.
 
 ## Updating
 
-- **Built from source:** `git pull`, then build and install again. Close
-  Feline first, also from its tray icon: closing the window keeps it running.
-- **Arch package:** run `makepkg -si` again.
-- **Roblox itself** (Feline's runtime): Feline looks for a new version when
-  it opens. `feline --update-roblox` does it by hand.
+How to update Feline itself is at the end of each [install](#install)
+section. Once releases are published, Feline will also be able to update
+itself (About → Updates), checking each download against its published
+SHA-256 checksum.
 
-Text commands, handy for bug reports:
+Roblox, for Feline's runtime: Feline looks for a new version when it opens.
+`feline --update-roblox` does it by hand.
+
+## Text commands
+
+Handy for bug reports:
 
 ```sh
 feline --info        # system information
