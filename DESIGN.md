@@ -216,7 +216,7 @@ The same den with the lights on (About → Make it yours → Light or dark: Dark
 - The spacing rhythm is 2 / 4 / 8 / 12 / 16 / 20 / 32. 10px and 14px appear as fine-tuning inside components.
 - Information is dense but calm: one idea per card, grouped by tabs (TabBar) rather than by long scrolling pages.
 
-**The Pinned Row Rule.** Every row made from a list (`for … in …`) that can hold wrapped text sits in a Rectangle whose `height` is bound to its content's `preferred-height`. Without it, Slint sizes the card as if each wrapped paragraph were one line, and the rows spill out of the bottom of the card (the old Crash detective bug).
+**The Pinned Row Rule.** Every row made from a list (`for … in …`) that can hold wrapped text sits in a Rectangle whose `height` is bound to its content's `preferred-height`. Without it, Slint sizes the card as if each wrapped paragraph were one line, and the rows spill out of the bottom of the card (the old Crash detective bug). Inside such a row, don't wrap the row's parts in `if`: an `if` around a part that itself has an `if` (like `SettingRow`) is measured as one line again, and the rows overlap in a narrow window (the old runtime-settings bug). Give hidden parts height 0 instead.
 
 ## Elevation & Depth
 

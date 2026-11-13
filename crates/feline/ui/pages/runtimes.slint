@@ -299,21 +299,31 @@ component RuntimeDetail inherits VerticalLayout {
                 // Spacing 0: other tabs' (hidden) rows take no room.
                 VerticalLayout {
                 spacing: 0px;
+                // No `if` around the row's parts: inside one, Slint
+                // measures wrapped help text as a single line and the rows
+                // overlap in a narrow window. Hidden parts get height 0.
                 for row[j] in tab.rows: Rectangle {
-                    height: row-box-10.preferred-height;
+                    property <bool> shown: row.tab == root.current;
+                    property <bool> titled: self.shown && row.section-start && row.section != "";
+                    height: self.shown ? row-box-10.preferred-height : 0px;
+                    visible: self.shown;
                     row-box-10 := VerticalLayout {
-                    if row.tab == root.current && row.section-start && row.section != "": VerticalLayout {
-                        padding-top: j > 0 ? 10px : 0px;
-                        spacing: 6px;
-                        Text {
+                    Rectangle {
+                        height: titled ? (j > 0 ? 10px : 0px) + section-title.preferred-height + 6px : 0px;
+                        visible: titled;
+                        section-title := Text {
+                            x: 0px;
+                            y: j > 0 ? 10px : 0px;
                             text: row.section;
                             font-size: 13px;
                             font-weight: 700;
                             color: Theme.lavender;
                         }
                     }
-                    if row.tab == root.current && !row.section-start: Divider { }
-                    if row.tab == root.current: SettingRow {
+                    Divider {
+                        height: shown && !row.section-start ? 1px : 0px;
+                    }
+                    SettingRow {
                         label: row.label;
                         help: row.help;
                         managed-reason: row.managed-reason;

@@ -112,6 +112,26 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // Developer aid: FELINE_SCREENSHOT=file.ppm saves the window after
     // 2.5 s (for checking the design) and quits.
     if let Some(path) = std::env::var_os("FELINE_SCREENSHOT") {
+        // FELINE_SCREENSHOT_SIZE=960x660 checks the layout in a small window.
+        if let Some((w, h)) = std::env::var("FELINE_SCREENSHOT_SIZE").ok().and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?))
+        }) {
+            ui.window().set_size(slint::LogicalSize::new(w, h));
+        }
+        // FELINE_SCREENSHOT_SCROLL=600 scrolls the page down that far first.
+        if let Some(by) = std::env::var("FELINE_SCREENSHOT_SCROLL").ok().and_then(|s| s.parse::<f32>().ok()) {
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(700), move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let size = ui.window().size().to_logical(ui.window().scale_factor());
+                ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                    position: slint::LogicalPosition::new(size.width * 0.6, size.height * 0.5),
+                    delta_x: 0.0,
+                    delta_y: -by,
+                });
+            });
+        }
         let weak = ui.as_weak();
         let delay = std::env::var("FELINE_SCREENSHOT_DELAY").ok().and_then(|d| d.parse().ok()).unwrap_or(2500);
         slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
