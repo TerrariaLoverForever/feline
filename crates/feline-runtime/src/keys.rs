@@ -139,6 +139,21 @@ pub fn meta_state(modifiers: ModifiersState) -> i32 {
     meta
 }
 
+/// Android codes of the modifier keys `modifiers` says aren't held.
+pub fn released_modifiers(modifiers: ModifiersState) -> Vec<i32> {
+    let mut codes = Vec::new();
+    if !modifiers.alt_key() {
+        codes.extend([57, 58]); // KEYCODE_ALT_LEFT, _RIGHT
+    }
+    if !modifiers.shift_key() {
+        codes.extend([59, 60]); // KEYCODE_SHIFT_LEFT, _RIGHT
+    }
+    if !modifiers.control_key() {
+        codes.extend([113, 114]); // KEYCODE_CTRL_LEFT, _RIGHT
+    }
+    codes
+}
+
 /// The Android key event for a desktop key event (None for keys Android
 /// has no code for).
 pub fn android_key(event: &KeyEvent, modifiers: ModifiersState) -> Option<Key> {
@@ -177,5 +192,7 @@ mod tests {
             meta_state(ModifiersState::SHIFT | ModifiersState::CONTROL),
             0x1001
         );
+        let up = released_modifiers(ModifiersState::SHIFT);
+        assert!(up.contains(&57) && up.contains(&113) && !up.contains(&59));
     }
 }

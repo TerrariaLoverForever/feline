@@ -152,6 +152,22 @@ struct App {
     /// The right and middle buttons are held.
     other_pressed: [bool; 2],
     modifiers: winit::keyboard::ModifiersState,
+    /// Keys Roblox was told are down (code → the key-down event), so they
+    /// can be released when the window system loses their release.
+    held: std::collections::HashMap<i32, Key>,
+}
+
+impl App {
+    /// Tells Roblox `key` went up (if it was down).
+    fn release(&mut self, code: i32) {
+        if let Some(mut key) = self.held.remove(&code) {
+            key.down = false;
+            key.repeat = false;
+            key.unicode = 0;
+            key.meta = crate::keys::meta_state(self.modifiers);
+            self.changes.push(WindowChange::Key(key));
+        }
+    }
 }
 
 fn handles(window: &Window) -> Result<NativeHandles, String> {
@@ -334,6 +350,14 @@ impl ApplicationHandler for App {
             // finger is lifted, so it isn't left "down".
             WindowEvent::Focused(false) => {
                 crate::pacing::set_focused(false);
+                // Keys let go while another window has the focus (Alt
+                // after Alt-Tab) never send their release here: Roblox
+                // would keep them held (a stuck Alt turns Esc, L, Enter
+                // and number keys into Alt shortcuts).
+                let codes: Vec<i32> = self.held.keys().copied().collect();
+                for code in codes {
+                    self.release(code);
+                }
                 if self.pressed {
                     self.pressed = false;
                     self.touch(TouchAction::Up);
@@ -364,7 +388,14 @@ impl ApplicationHandler for App {
                     self.changes.push(WindowChange::Wheel { x, y, dy });
                 }
             }
-            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+            WindowEvent::ModifiersChanged(m) => {
+                self.modifiers = m.state();
+                // A modifier the system says is up, whose release Roblox
+                // never got.
+                for code in crate::keys::released_modifiers(self.modifiers) {
+                    self.release(code);
+                }
+            }
             // F11: fullscreen on or off (not passed to the game).
             WindowEvent::KeyboardInput { event, .. }
                 if event.physical_key
@@ -383,6 +414,12 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let key = crate::keys::android_key(&event, self.modifiers);
                 if let Some(key) = key {
+                    if key.down {
+                        self.held.insert(key.code, key.clone());
+                    } else if self.held.remove(&key.code).is_none() {
+                        // A release Roblox already got (see `release`).
+                        return;
+                    }
                     self.changes.push(WindowChange::Key(key));
                 }
             }
@@ -410,6 +447,7 @@ impl DesktopWindow {
                 pressed: false,
                 other_pressed: [false; 2],
                 modifiers: Default::default(),
+                held: Default::default(),
             },
         };
         // The window is created on the first `resumed` event.
