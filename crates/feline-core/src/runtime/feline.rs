@@ -176,6 +176,31 @@ static SETTINGS: &[SettingDef] = &[
         }),
     },
     SettingDef {
+        key: "graphicsOptimization",
+        label: "Graphics optimisation",
+        help: "What Feline tells Roblox this is, and how many CPU cores the engine may use. Windows PC: games see a Windows player (PC layouts and hints instead of mobile ones). More cores: lets the engine spread its work over your CPU's cores (Roblox's Android settings are sized for phones). Fewer cores: only small scheduler tweaks. Measured on an 8-core Ryzen 7 5700X with no FPS limit: about 160–185 FPS as Roblox app, 220–240 with more cores; other PCs may differ.",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "roblox-app",
+                label: "Roblox app",
+            },
+            Choice {
+                value: "windows-pc",
+                label: "Windows PC",
+            },
+            Choice {
+                value: "windows-pc-more-cores",
+                label: "Windows PC - more cores",
+            },
+            Choice {
+                value: "windows-pc-fewer-cores",
+                label: "Windows PC - fewer cores",
+            },
+        ]),
+        default: Val::Str("roblox-app"),
+        link: None,
+    },
+    SettingDef {
         key: "graphicsQuality",
         label: "Graphics quality",
         help: "Roblox's own graphics quality, 1 (fastest) to 10 (best looking), set each time the game starts. 0 = Roblox decides (automatic, or what you set in the game).",
@@ -331,7 +356,7 @@ static TABS: &[super::SettingTab] = &[
             },
             super::SettingSection {
                 title: "Picture",
-                keys: &["renderer", "graphicsQuality", "startFullscreen"],
+                keys: &["renderer", "graphicsOptimization", "graphicsQuality", "startFullscreen"],
             },
         ],
     },

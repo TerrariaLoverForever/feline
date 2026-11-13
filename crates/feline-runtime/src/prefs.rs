@@ -14,6 +14,7 @@
 //! | `framePacing` | with an `fpsLimit`: Feline holds frames to an even rhythm at presentation (pacing.rs) |
 //! | `throttleUnfocused` | 30 FPS while the window isn't focused |
 //! | `renderer` | `"vulkan"` (when the desktop has a Vulkan driver) or `"opengl"` (OpenGL ES; see vulkan.rs) |
+//! | `graphicsOptimization` | `"roblox-app"` (Android, as the app is), `"windows-pc"` (games are told the platform is Windows), `"windows-pc-more-cores"` / `"windows-pc-fewer-cores"` (also the engine's thread flags, sized to the CPU's cores) |
 //! | `graphicsQuality` | 0: Roblox decides; 1–10: Roblox's graphics quality, set at each start |
 //! | `microphone` | let voice chat use the microphone (off: others hear silence) |
 //! | `controllers` | pass gamepads to Roblox |
@@ -43,6 +44,9 @@ pub struct Prefs {
     pub throttle_unfocused: bool,
     /// "vulkan" or "opengl".
     pub renderer: String,
+    /// "roblox-app", "windows-pc", "windows-pc-more-cores" or
+    /// "windows-pc-fewer-cores".
+    pub graphics_optimization: String,
     /// Roblox's graphics quality 1–10; 0 leaves it to Roblox.
     pub graphics_quality: u32,
     pub microphone: bool,
@@ -63,6 +67,7 @@ impl Default for Prefs {
             frame_pacing: true,
             throttle_unfocused: false,
             renderer: "vulkan".into(),
+            graphics_optimization: "roblox-app".into(),
             graphics_quality: 0,
             microphone: true,
             controllers: true,
@@ -139,6 +144,12 @@ impl Prefs {
                 Some(r @ ("vulkan" | "opengl")) => r.to_owned(),
                 _ => d.renderer,
             },
+            graphics_optimization: match json.get("graphicsOptimization").and_then(Value::as_str) {
+                Some(
+                    g @ ("roblox-app" | "windows-pc" | "windows-pc-more-cores" | "windows-pc-fewer-cores"),
+                ) => g.to_owned(),
+                _ => d.graphics_optimization,
+            },
             graphics_quality: json
                 .get("graphicsQuality")
                 .and_then(Value::as_u64)
@@ -171,6 +182,7 @@ impl Prefs {
             "framePacing": self.frame_pacing,
             "throttleUnfocused": self.throttle_unfocused,
             "renderer": self.renderer,
+            "graphicsOptimization": self.graphics_optimization,
             "graphicsQuality": self.graphics_quality,
             "microphone": self.microphone,
             "controllers": self.controllers,
@@ -186,7 +198,70 @@ impl Prefs {
     /// settings and absent from Android's).
     /// (`fpsLimit` isn't a flag: see [`write_framerate_cap`].)
     pub fn flags(&self) -> Vec<(&'static str, String)> {
-        vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())]
+        let mut flags = vec![("FFlagGameBasicSettingsFramerateCap5", "True".to_owned())];
+        flags.extend(core_flags(&self.graphics_optimization, physical_cores()));
+        flags
+    }
+}
+
+impl Prefs {
+    /// The platform games are told (`getPlatformName`).
+    pub fn platform_name(&self) -> &'static str {
+        if self.graphics_optimization.starts_with("windows-pc") {
+            "Windows"
+        } else {
+            "Android"
+        }
+    }
+}
+
+/// The engine's thread flags for a `graphicsOptimization` choice, on a CPU
+/// with `cores` physical cores. Roblox's Android settings size these for
+/// phones (e.g. 3 parallel cluster tasks, 2 occlusion workers); "more
+/// cores" lets the engine use a desktop CPU's cores, "fewer cores" only
+/// trims the scheduler's minimum and batches physics contacts.
+pub fn core_flags(choice: &str, cores: u32) -> Vec<(&'static str, String)> {
+    let cores = cores.max(1);
+    match choice {
+        "windows-pc-more-cores" => vec![
+            ("FIntTaskSchedulerThreadMin", "0".to_owned()),
+            ("FIntTaskSchedulerAsyncTasksMinimumThreadCount", cores.min(3).to_string()),
+            ("FIntTaskSchedulerAutoThreadLimit", cores.to_string()),
+            ("FIntSmoothClusterTaskQueueMaxParallelTasks", cores.to_string()),
+            ("FIntOcclusionWorkerThreadCount", cores.div_ceil(2).to_string()),
+            ("FFlagMovePrerenderV2", "True".to_owned()),
+            ("FFlagGcInParallelWithRenderPrepare3", "True".to_owned()),
+            ("DFIntSimMidPhaseContactPipelineBatchSize", "128".to_owned()),
+        ],
+        "windows-pc-fewer-cores" => vec![
+            ("FIntTaskSchedulerThreadMin", "0".to_owned()),
+            ("DFIntSimMidPhaseContactPipelineBatchSize", "128".to_owned()),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Physical CPU cores (not threads): distinct (package, core) pairs in
+/// sysfs, else the number of threads.
+pub fn physical_cores() -> u32 {
+    let mut seen = std::collections::BTreeSet::new();
+    if let Ok(cpus) = std::fs::read_dir("/sys/devices/system/cpu") {
+        for cpu in cpus.flatten() {
+            let name = cpu.file_name();
+            let name = name.to_string_lossy();
+            if !name.strip_prefix("cpu").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+                continue;
+            }
+            let read = |f: &str| std::fs::read_to_string(cpu.path().join("topology").join(f)).ok();
+            if let (Some(package), Some(core)) = (read("physical_package_id"), read("core_id")) {
+                seen.insert((package.trim().to_owned(), core.trim().to_owned()));
+            }
+        }
+    }
+    if seen.is_empty() {
+        std::thread::available_parallelism().map_or(4, |n| n.get() as u32)
+    } else {
+        seen.len() as u32
     }
 }
 
@@ -389,4 +464,18 @@ mod tests {
         assert_eq!(v["applicationSettings"]["FFlagGameBasicSettingsFramerateCap5"], "True");
         assert_eq!(v["applicationSettings"]["A"], "1");
     }
+
+    #[test]
+    fn core_flags_follow_the_cpu() {
+        let more = core_flags("windows-pc-more-cores", 8);
+        let get = |name: &str| more.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone());
+        assert_eq!(get("FIntSmoothClusterTaskQueueMaxParallelTasks").as_deref(), Some("8"));
+        assert_eq!(get("FIntOcclusionWorkerThreadCount").as_deref(), Some("4"));
+        assert_eq!(get("FIntTaskSchedulerAsyncTasksMinimumThreadCount").as_deref(), Some("3"));
+        assert_eq!(core_flags("windows-pc-fewer-cores", 8).len(), 2);
+        assert!(core_flags("windows-pc", 8).is_empty());
+        assert!(core_flags("roblox-app", 8).is_empty());
+        assert!(physical_cores() >= 1);
+    }
+
 }

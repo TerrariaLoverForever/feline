@@ -445,11 +445,14 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                     &feline_runtime::prefs::get().theme,
                 );
                 // The platform games are told, as the Android app's Java side
-                // answers (empty showed as "unknown" in games).
+                // answers (empty showed as "unknown" in games): Android, or
+                // Windows with the "Windows PC" graphics optimisation.
+                let platform = feline_runtime::prefs::get().platform_name();
+                eprintln!("feline-runtime: games are told the platform is {platform}");
                 feline_runtime::jni::set_known_string(
                     "com/roblox/engine/jni/user/NativeUserJavaInterface",
                     "getPlatformName",
-                    "Android",
+                    platform,
                 );
                 // The FPS limit: Roblox's own Maximum Frame Rate setting.
                 // Graphics quality: Roblox's own setting, if one is chosen.
