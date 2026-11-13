@@ -21,6 +21,10 @@
 //! | `blockTracking` | Roblox's analytics/telemetry hosts look nonexistent to it (see net.rs) |
 //! | `proxy` | "" or an `http://`, `https://`, `socks5://` or `socks5h://` address for Roblox's web traffic |
 //! | `detailedLogs` | log every Java call the engine makes (for bug reports) |
+//! | `cpuThreads` | 0: every CPU thread; otherwise Roblox runs on that many (see tuning.rs) |
+//! | `priority` | `"low"`, `"normal"` or `"high"`: the game's CPU priority |
+//! | `trimMemory` | while the window isn't focused, hand memory Roblox isn't touching back to the system |
+//! | `blockCaptures` | Roblox's own screenshots and video recordings can't be saved |
 //!
 //! Frame rate, camera sensitivity and graphics quality are Roblox's own
 //! in-game settings (Esc → Settings), as on PC; see [`Prefs::flags`].
@@ -55,6 +59,14 @@ pub struct Prefs {
     /// "" (no proxy) or a checked proxy address.
     pub proxy: String,
     pub detailed_logs: bool,
+    /// CPU threads Roblox may run on; 0 = all of them.
+    pub cpu_threads: u32,
+    /// "low", "normal" or "high".
+    pub priority: String,
+    /// Page out idle memory while the window isn't focused.
+    pub trim_memory: bool,
+    /// Roblox's own captures (screenshots, recordings) can't be saved.
+    pub block_captures: bool,
 }
 
 impl Default for Prefs {
@@ -74,6 +86,10 @@ impl Default for Prefs {
             block_tracking: true,
             proxy: String::new(),
             detailed_logs: false,
+            cpu_threads: 0,
+            priority: "normal".into(),
+            trim_memory: false,
+            block_captures: false,
         }
     }
 }
@@ -170,6 +186,19 @@ impl Prefs {
                 .get("detailedLogs")
                 .and_then(Value::as_bool)
                 .unwrap_or(d.detailed_logs),
+            cpu_threads: json
+                .get("cpuThreads")
+                .and_then(Value::as_u64)
+                .map_or(d.cpu_threads, |n| n.min(1024) as u32),
+            priority: match json.get("priority").and_then(Value::as_str) {
+                Some(p @ ("low" | "normal" | "high")) => p.to_owned(),
+                _ => d.priority,
+            },
+            trim_memory: json.get("trimMemory").and_then(Value::as_bool).unwrap_or(d.trim_memory),
+            block_captures: json
+                .get("blockCaptures")
+                .and_then(Value::as_bool)
+                .unwrap_or(d.block_captures),
         }
     }
 
@@ -189,6 +218,10 @@ impl Prefs {
             "blockTracking": self.block_tracking,
             "proxy": self.proxy,
             "detailedLogs": self.detailed_logs,
+            "cpuThreads": self.cpu_threads,
+            "priority": self.priority,
+            "trimMemory": self.trim_memory,
+            "blockCaptures": self.block_captures,
         })
     }
 

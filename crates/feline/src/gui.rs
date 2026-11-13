@@ -212,6 +212,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     let _music_focus = crate::music::watch_focus(&ui);
     // Bloxstrap-style extras on several pages (More in more.slint).
     crate::more::wire(&ui, &shared);
+    crate::accounts_page::wire(&ui);
     if ui.get_page() == Page::Library {
         ui.global::<More>().invoke_load_library();
     }
@@ -765,6 +766,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
             move |name| {
                 if let Some(ui) = weak.upgrade() {
                     crate::mods_page::share(&ui, name.as_str());
+                }
+            }
+        });
+        tools.on_set_target({
+            let weak = ui.as_weak();
+            let shared = shared.clone();
+            move |name, target| {
+                if let Some(ui) = weak.upgrade() {
+                    crate::mods_page::set_target(&ui, &shared, name.as_str(), target);
                 }
             }
         });
@@ -1720,7 +1730,7 @@ fn run_game(
     warnings.extend(feline_core::mods::apply_for_launch(
         installation,
         &DetectContext::host(),
-        &settings.mods,
+        &settings.player_mods(),
         hide_cursor,
     ));
 

@@ -754,13 +754,78 @@ export component SettingsPage inherits PageBase {
             // ---------------- Privacy & security
             if root.tab == 3 && !root.windows: Card {
                 SectionTitle {
-                    text: "Your Roblox login";
+                    text: "Your Roblox accounts";
                     icon: Icons.lock;
                 }
+                BodyText {
+                    text: "The accounts Feline's runtime can sign in with. Each is saved only on this computer, readable only by you, and sent only to Roblox; Feline never sees a password. Switching takes effect the next time the game starts.";
+                }
+                for account[i] in More.accounts: Rectangle {
+                    height: account-box.preferred-height;
+                    account-box := VerticalLayout {
+                        Divider {
+                            height: i > 0 ? 1px : 0px;
+                        }
+                        SettingRow {
+                            label: account.name;
+                            help: account.detail;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                SecondaryButton {
+                                    text: account.active ? "In use" : "Use";
+                                    icon: account.active ? Icons.check : "";
+                                    enabled: !account.active && !More.accounts-busy;
+                                    clicked => {
+                                        More.account("use", account.id);
+                                    }
+                                }
+                                ConfirmButton {
+                                    text: "Remove";
+                                    icon: Icons.trash;
+                                    enabled: !More.accounts-busy;
+                                    confirmed => {
+                                        More.account("remove", account.id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if More.accounts.length > 0: Divider { }
                 SettingRow {
-                    label: "Saved login for Feline's runtime";
+                    label: "Add an account";
+                    help: More.accounts-busy
+                        ? "Working… (if the login window is open, sign in there)."
+                        : "Opens Roblox's own sign-in page in Feline's login window. The account you're using now stays in the list.";
+                    SecondaryButton {
+                        text: "Add account…";
+                        icon: Icons.external;
+                        enabled: !More.accounts-busy;
+                        clicked => {
+                            More.account("add", "");
+                        }
+                    }
+                }
+                if More.account-unsaved: Divider { }
+                if More.account-unsaved: SettingRow {
+                    label: "The login in use isn't in the list yet";
+                    help: "Feline asks Roblox whose it is and keeps it, so you can switch back to it later.";
+                    SecondaryButton {
+                        text: "Keep it";
+                        enabled: !More.accounts-busy;
+                        clicked => {
+                            More.account("save", "");
+                        }
+                    }
+                }
+                if More.accounts-status != "": Banner {
+                    text: More.accounts-status;
+                }
+                Divider { }
+                SettingRow {
+                    label: "Sign out";
                     help: root.has-saved-login
-                        ? "Saved only on this computer, readable only by you, and sent only to Roblox. Feline never sees your password."
+                        ? "Feline's runtime forgets the account in use (it leaves the list too) and asks you to sign in next time."
                         : "Not signed in. Feline's runtime asks you to sign in when it starts.";
                     ConfirmButton {
                         text: "Sign out";

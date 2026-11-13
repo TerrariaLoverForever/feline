@@ -67,6 +67,9 @@ cargo build --release
 ./target/release/feline --install-desktop-entry  # add Feline to your app menu
 ```
 
+On Arch Linux and its relatives there's a package recipe instead:
+`cd packaging/aur && makepkg -si` (see [packaging/aur](packaging/aur/README.md)).
+
 ## Updating
 
 Feline updates itself from this repository's GitHub releases: About →
@@ -95,6 +98,12 @@ feline --doctor N    # run runtime N's self-check (Cordial)
 
 Feline's own files: settings in `~/.config/feline/settings.conf`, game session
 logs in `~/.local/state/feline/logs/`.
+
+## Community
+
+Feline's official group on Roblox:
+[FelineClient](https://www.roblox.com/communities/618646286/FelineClient#!/about)
+(news, help and feedback). Feline never asks for your password or Robux.
 
 ## Documentation
 

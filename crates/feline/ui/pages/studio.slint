@@ -78,6 +78,17 @@ export component StudioPage inherits PageBase {
                         }
                     }
                 }
+                if More.windows && More.studio-discord: Divider { }
+                if More.windows && More.studio-discord: SettingRow {
+                    label: "Show the script I'm editing";
+                    help: "\"Editing MainLoop (module, 240 lines)\". Feline puts a small plugin into Studio that tells Feline, on this computer only, which script is open; Studio asks once whether it may. Off: the plugin is taken out the next time Feline opens Studio.";
+                    Toggle {
+                        checked: More.studio-script;
+                        toggled(on) => {
+                            More.set-switch("studio-script", on);
+                        }
+                    }
+                }
                 if More.windows: Divider { }
                 if More.windows: BodyText {
                     text: "Studio's FastFlags. Roblox's allowlist is for the game only, so Studio takes any flag: paste them as JSON. Empty: none.";

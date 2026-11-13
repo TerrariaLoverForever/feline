@@ -191,7 +191,11 @@ pub fn delete_old_logs(days: u32) -> usize {
 /// Forgets the saved Roblox login of Feline's runtime (the next start asks
 /// to sign in again). True if there was one.
 pub fn forget_login() -> bool {
-    saved_login().is_some_and(|p| std::fs::remove_file(p).is_ok())
+    // Signing out also drops that account from the saved ones: otherwise
+    // one click would sign it back in.
+    let had = saved_login().is_some_and(|p| p.exists());
+    crate::accounts::remove_active();
+    saved_login().is_some_and(|p| std::fs::remove_file(p).is_ok()) || had
 }
 
 /// Clears Roblox's content cache. Games load a bit slower the first time

@@ -171,7 +171,7 @@ pub fn open(arg: &str) -> ExitCode {
         Ok(warnings) => warnings.iter().for_each(|w| eprintln!("feline: {w}")),
         Err(why) => return splash.fail(&why),
     }
-    for line in feline_core::mods::apply_for_launch(installation, &ctx, &settings.mods, hide_cursor) {
+    for line in feline_core::mods::apply_for_launch(installation, &ctx, &settings.player_mods(), hide_cursor) {
         eprintln!("feline: {line}");
     }
     // Tweaks (FastFlags), as for Play: this game's profile, or the everyday ones.

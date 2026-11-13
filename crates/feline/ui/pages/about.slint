@@ -60,6 +60,7 @@ export component AboutPage inherits PageBase {
     in property <string> version;
     in-out property <int> current: 0;
     callback show-notice();
+    callback open-link(string);
 
     ScrollView {
         VerticalLayout {
@@ -149,6 +150,23 @@ export component AboutPage inherits PageBase {
                         checked: More.check-updates;
                         toggled(on) => {
                             More.set-switch("check-updates", on);
+                        }
+                    }
+                }
+            }
+            if root.current == 0: Card {
+                SectionTitle {
+                    text: "Community";
+                    icon: Icons.paw;
+                }
+                SettingRow {
+                    label: "Feline's group on Roblox";
+                    help: "The official Feline group (FelineClient): news, help and a place to tell us what broke. Feline never asks for your password or Robux there, or anywhere.";
+                    SecondaryButton {
+                        text: "Open the group";
+                        icon: Icons.external;
+                        clicked => {
+                            root.open-link("https://www.roblox.com/communities/618646286/FelineClient#!/about");
                         }
                     }
                 }

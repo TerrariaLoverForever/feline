@@ -99,6 +99,11 @@ pub fn main() -> ExitCode {
             let _ = ENGINE_PATH.set(std::path::PathBuf::from(path));
             // Proxy (runtime setting), before any thread starts.
             feline_runtime::net::use_proxy(&feline_runtime::prefs::get().proxy);
+            // CPU threads and priority (runtime settings), also before any
+            // thread starts, so every thread inherits them.
+            if flag == "--play" {
+                feline_runtime::tuning::apply_at_start(feline_runtime::prefs::get());
+            }
             if flag == "--play" {
                 feline_runtime::versions::started(std::path::Path::new(path));
             }
@@ -464,6 +469,11 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                     );
                 }
                 let prefs = feline_runtime::prefs::get();
+                feline_runtime::tuning::block_captures(
+                    &data.join("feline/runtime/files/appData"),
+                    prefs.block_captures,
+                );
+                feline_runtime::tuning::start_trimmer(prefs);
                 if prefs.fps_limit > 0 {
                     // Feline paces frames itself: the engine's limit opens
                     // up so the two don't fight (see pacing.rs).

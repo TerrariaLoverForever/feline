@@ -32,6 +32,11 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
                 preview: preview.unwrap_or_default(),
                 has_sound,
                 enabled: enabled.contains(&pack.name),
+                target: match state.settings.mod_scope(&pack.name) {
+                    feline_core::settings::ModScope::Player => 0,
+                    feline_core::settings::ModScope::Studio => 1,
+                    feline_core::settings::ModScope::Both => 2,
+                },
                 detail: if pack.summary.is_empty() {
                     files.into()
                 } else {
@@ -113,6 +118,33 @@ pub fn toggle(ui: &AppWindow, shared: &Shared, name: &str, on: bool) {
     let status = match crate::settings_page::save_own(shared) {
         Ok(()) if on => format!("{name} is on. It goes in when you press Play."),
         Ok(()) => format!("{name} is off. Roblox's own files come back when you press Play."),
+        Err(e) => format!("Couldn't save: {e}"),
+    };
+    ui.set_mods_status(status.into());
+    refresh(ui, shared);
+}
+
+/// Sends an enabled mod to the player (0), Studio only (1) or both (2).
+pub fn set_target(ui: &AppWindow, shared: &Shared, name: &str, target: i32) {
+    use feline_core::settings::ModScope;
+    let scope = match target {
+        1 => ModScope::Studio,
+        2 => ModScope::Both,
+        _ => ModScope::Player,
+    };
+    {
+        let mut state = lock(shared);
+        if state.settings.mod_scope(name) == scope {
+            return;
+        }
+        state.settings.set_mod_scope(name, scope);
+    }
+    let status = match crate::settings_page::save_own(shared) {
+        Ok(()) => match scope {
+            ModScope::Player => format!("{name} goes into Roblox."),
+            ModScope::Studio => format!("{name} goes into Roblox Studio only, when Feline opens Studio."),
+            ModScope::Both => format!("{name} goes into Roblox and Roblox Studio."),
+        },
         Err(e) => format!("Couldn't save: {e}"),
     };
     ui.set_mods_status(status.into());

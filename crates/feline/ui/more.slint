@@ -33,7 +33,26 @@ export struct VisitRow {
     detail: string,
 }
 
+// A saved Roblox account (Settings → Privacy).
+export struct AccountRow {
+    // Roblox's user id, as text (too big for a Slint int).
+    id: string,
+    name: string,
+    // "@kitty · in use"
+    detail: string,
+    active: bool,
+}
+
 export global More {
+    // Saved Roblox accounts for Feline's runtime.
+    in property <[AccountRow]> accounts;
+    // The runtime's login isn't one of the saved accounts yet.
+    in property <bool> account-unsaved;
+    // The login window is open, or Roblox is being asked.
+    in property <bool> accounts-busy;
+    in property <string> accounts-status;
+    // "add", "use", "remove" or "save" (the current login), and the id.
+    callback account(string, string);
     in property <[VisitRow]> visits;
     // Your last sessions (Home): game, then "Tue 12 Nov, 20:14 · 45 min · Frankfurt".
     in property <[VisitRow]> sessions;
@@ -68,6 +87,7 @@ export global More {
     in property <string> studio-version;
     in property <bool> studio-mods;
     in property <bool> studio-discord;
+    in property <bool> studio-script;
     in property <string> studio-flags;
     in property <string> studio-status;
     // The mod library.

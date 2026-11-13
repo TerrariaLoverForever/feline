@@ -205,6 +205,10 @@ pub struct Settings {
     pub verify_roblox: bool,
     /// The enabled mods (folder names in Feline's mods folder).
     pub mods: Vec<String>,
+    /// Enabled mods that go into Roblox Studio only, not the player.
+    pub mods_studio: Vec<String>,
+    /// Enabled mods that go into both the player and Roblox Studio.
+    pub mods_both: Vec<String>,
     /// Windows: end a Roblox that's still running in the background before
     /// starting a new one.
     pub close_stuck_roblox: bool,
@@ -277,6 +281,9 @@ pub struct Settings {
     pub studio_mods: bool,
     /// Windows: a Discord status while you build in Studio.
     pub studio_discord: bool,
+    /// Studio's Discord status names the script you're editing (through
+    /// Feline's Studio plugin).
+    pub studio_script: bool,
     /// The mod library shows Froststrap's community mods too.
     pub library_froststrap: bool,
     /// Windows: end Roblox's crash reporter (`RobloxCrashHandler.exe`)
@@ -504,6 +511,8 @@ impl Default for Settings {
             fast_gpu: false,
             verify_roblox: true,
             mods: Vec::new(),
+            mods_studio: Vec::new(),
+            mods_both: Vec::new(),
             close_stuck_roblox: false,
             close_roblox_on_leave: false,
             break_minutes: 0,
@@ -536,6 +545,7 @@ impl Default for Settings {
             launch_splash: true,
             studio_mods: false,
             studio_discord: false,
+            studio_script: false,
             library_froststrap: false,
             no_crash_handler: false,
             rbxl_previous: None,
@@ -545,7 +555,51 @@ impl Default for Settings {
     }
 }
 
+/// Where an enabled mod goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModScope {
+    /// The Roblox player (the default).
+    Player,
+    /// Roblox Studio only.
+    Studio,
+    /// Both.
+    Both,
+}
+
 impl Settings {
+    /// Where the mod `name` goes when it's enabled.
+    pub fn mod_scope(&self, name: &str) -> ModScope {
+        if self.mods_studio.iter().any(|m| m == name) {
+            ModScope::Studio
+        } else if self.mods_both.iter().any(|m| m == name) {
+            ModScope::Both
+        } else {
+            ModScope::Player
+        }
+    }
+
+    /// Sends the mod `name` to `scope`.
+    pub fn set_mod_scope(&mut self, name: &str, scope: ModScope) {
+        self.mods_studio.retain(|m| m != name);
+        self.mods_both.retain(|m| m != name);
+        match scope {
+            ModScope::Player => {}
+            ModScope::Studio => self.mods_studio.push(name.to_owned()),
+            ModScope::Both => self.mods_both.push(name.to_owned()),
+        }
+    }
+
+    /// The enabled mods that go into the player, in order.
+    pub fn player_mods(&self) -> Vec<String> {
+        self.mods.iter().filter(|m| self.mod_scope(m) != ModScope::Studio).cloned().collect()
+    }
+
+    /// Whether the mod `name` goes into Roblox Studio: it's enabled, and
+    /// either sent there or "my mods in Studio too" is on.
+    pub fn mod_in_studio(&self, name: &str) -> bool {
+        self.mods.iter().any(|m| m == name) && (self.studio_mods || self.mod_scope(name) != ModScope::Player)
+    }
+
     /// True if the account-risk notice should be shown (never accepted, or
     /// only an older version of it was).
     pub fn needs_account_notice(&self) -> bool {
@@ -662,6 +716,7 @@ impl Settings {
                 "launch_splash" => settings.launch_splash = value != "off",
                 "keep_running" => settings.keep_running = value != "off",
                 "studio_mods" => settings.studio_mods = value == "on",
+                "studio_script" => settings.studio_script = value == "on",
                 "studio_discord" => settings.studio_discord = value == "on",
                 "library_froststrap" => settings.library_froststrap = value == "on",
                 "no_crash_handler" => settings.no_crash_handler = value == "on",
@@ -675,6 +730,14 @@ impl Settings {
                 "with_roblox" => settings.programs.extend(Program::parse(value)),
                 "roblox_pin" if value.starts_with("version-") && !value.contains(['/', '\\']) => {
                     settings.roblox_pin = Some(value.to_owned())
+                }
+                "mods_studio" | "mods_both" => {
+                    let names = value.split('|').map(str::trim).filter(|m| !m.is_empty()).map(str::to_owned).collect();
+                    if key.trim() == "mods_studio" {
+                        settings.mods_studio = names;
+                    } else {
+                        settings.mods_both = names;
+                    }
                 }
                 "mods" => {
                     settings.mods = value
@@ -782,6 +845,12 @@ impl Settings {
         if !self.mods.is_empty() {
             text.push_str(&format!("mods = {}\n", self.mods.join(" | ")));
         }
+        if !self.mods_studio.is_empty() {
+            text.push_str(&format!("mods_studio = {}\n", self.mods_studio.join(" | ")));
+        }
+        if !self.mods_both.is_empty() {
+            text.push_str(&format!("mods_both = {}\n", self.mods_both.join(" | ")));
+        }
         if self.clear_on_exit.any() {
             text.push_str(&format!("clear_on_exit = {}\n", self.clear_on_exit.to_text()));
         }
@@ -860,6 +929,9 @@ impl Settings {
         }
         if self.studio_mods {
             text.push_str("studio_mods = on\n");
+        }
+        if self.studio_script {
+            text.push_str("studio_script = on\n");
         }
         if self.studio_discord {
             text.push_str("studio_discord = on\n");
@@ -1002,6 +1074,19 @@ mod new_option_tests {
         // A pin that isn't a plain version folder is ignored.
         assert_eq!(Settings::parse("roblox_pin = ../evil\n").roblox_pin, None);
         // Unknown values fall back to the safe default.
+        let mut scoped = Settings::parse("mods = A | B | C\nmods_studio = B\nmods_both = C | Gone\n");
+        assert_eq!(scoped.player_mods(), ["A", "C"]);
+        assert!(!scoped.mod_in_studio("A") && scoped.mod_in_studio("B") && scoped.mod_in_studio("C"));
+        // Not enabled: nowhere, whatever its scope says.
+        assert!(!scoped.mod_in_studio("Gone"));
+        scoped.studio_mods = true;
+        assert!(scoped.mod_in_studio("A"));
+        scoped.set_mod_scope("B", ModScope::Player);
+        assert_eq!(scoped.mod_scope("B"), ModScope::Player);
+        assert_eq!(scoped.player_mods(), ["A", "B", "C"]);
+        let again = Settings::parse(&scoped.to_text());
+        assert_eq!(again.mods_both, scoped.mods_both);
+        assert_eq!(again.mods_studio, scoped.mods_studio);
         let odd = Settings::parse("game_priority = realtime\nafter_launch = explode\n");
         assert_eq!(odd.game_priority, GamePriority::Normal);
         assert_eq!(odd.after_launch, AfterLaunch::Stay);

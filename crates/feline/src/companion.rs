@@ -50,7 +50,7 @@ pub fn before(installation: &Installation, settings: &Settings) -> (Installation
 /// cursor is picked and on, and Feline can draw it (Windows).
 pub fn hide_cursor(installation: &Installation, settings: &Settings) -> bool {
     official(installation)
-        && settings.mods.iter().any(|m| m == feline_core::mods::FELINE_PICKS)
+        && settings.player_mods().iter().any(|m| m == feline_core::mods::FELINE_PICKS)
         && feline_core::mods::mods_dir().and_then(|d| feline_core::mods::animated_cursor(&d)).is_some()
 }
 
@@ -459,7 +459,7 @@ fn restore_cursor(settings: &Settings) {
         return;
     };
     let (installation, _) = before(installation, &Settings { multi_roblox: false, ..settings.clone() });
-    let _ = feline_core::mods::apply_for_launch(&installation, &ctx, &settings.mods, false);
+    let _ = feline_core::mods::apply_for_launch(&installation, &ctx, &settings.player_mods(), false);
 }
 
 /// Plays the animated cursor over Roblox's windows, a frame at a time.
@@ -553,9 +553,16 @@ impl CursorPainter {
 }
 
 /// `feline --with-studio <pid>`: the Discord status while Roblox Studio
-/// runs, from the place in its window title.
+/// runs, from the place in its window title and, if asked, the open script
+/// from Feline's Studio plugin.
 pub fn run_studio_helper(pid: u32) -> std::process::ExitCode {
     let since = feline_core::history::now();
+    let plugin = Settings::path()
+        .and_then(|p| Settings::load_from(&p).ok())
+        .unwrap_or_default()
+        .studio_script
+        .then(|| feline_core::studio::PluginListener::start(feline_core::studio::PLUGIN_PORT).ok())
+        .flatten();
     let mut discord: Option<feline_core::presence::discord::Discord> = None;
     let mut shown: Option<serde_json::Value> = None;
     let mut tried = Instant::now() - Duration::from_secs(60);
@@ -566,7 +573,12 @@ pub fn run_studio_helper(pid: u32) -> std::process::ExitCode {
             .find_map(|w| feline_core::studio::place_from_title(&feline_win::window::title(w)));
         #[cfg(not(windows))]
         let place: Option<String> = None;
-        let activity = feline_core::studio::activity(place.as_deref(), since);
+        // The plugin reports every 5 seconds; silent for 20: Studio's
+        // editing session is gone (or the plugin wasn't allowed).
+        let report = plugin.as_ref().and_then(|p| p.latest(Duration::from_secs(20)));
+        let place = place.or_else(|| report.as_ref().and_then(|r| r.place.clone()));
+        let script = report.and_then(|r| r.script);
+        let activity = feline_core::studio::activity(place.as_deref(), script.as_ref(), since);
         if discord.is_none() && tried.elapsed() > Duration::from_secs(15) {
             tried = Instant::now();
             discord = feline_core::presence::discord::Discord::connect().ok();
@@ -604,7 +616,7 @@ pub fn launch_studio(settings: &Settings, place: Option<&std::path::Path>) -> Re
                 .map(feline_core::mods::list_packs)
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|p| p.name == feline_core::studio::ICONS_MOD || (settings.studio_mods && settings.mods.contains(&p.name)))
+                .filter(|p| p.name == feline_core::studio::ICONS_MOD || settings.mod_in_studio(&p.name))
                 .collect();
             match feline_core::mods::apply(&feline_core::mods::ModTarget { dir, overlay: false }, &packs) {
                 Ok(applied) if applied.files > 0 => lines.push(format!("{} mod files are in Studio.", applied.files)),
@@ -637,13 +649,23 @@ pub fn launch_studio(settings: &Settings, place: Option<&std::path::Path>) -> Re
         .into_iter()
         .filter(|p| {
             // Your Studio icons always; the rest only if asked.
-            p.name == feline_core::studio::ICONS_MOD || (settings.studio_mods && settings.mods.contains(&p.name))
+            p.name == feline_core::studio::ICONS_MOD || settings.mod_in_studio(&p.name)
         })
         .collect();
     match feline_core::mods::apply(&feline_core::mods::ModTarget { dir: dir.clone(), overlay: false }, &packs) {
         Ok(applied) if applied.files > 0 => lines.push(format!("{} mod files are in Studio.", applied.files)),
         Ok(_) => {}
         Err(e) => lines.push(format!("Mods didn't go into Studio: {e}.")),
+    }
+    // Feline's Studio plugin (the open script, for the Discord status): in
+    // when asked for, out otherwise.
+    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) {
+        let wanted = settings.studio_discord && settings.studio_script;
+        if let Err(e) = feline_core::studio::set_plugin(&feline_core::studio::plugins_dir(&local), wanted)
+            && wanted
+        {
+            lines.push(format!("Feline's Studio plugin wasn't added: {e}."));
+        }
     }
     let mut command = Command::new(&exe);
     command.current_dir(&dir);

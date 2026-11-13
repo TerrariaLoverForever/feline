@@ -244,6 +244,51 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
+        key: "cpuThreads",
+        label: "CPU threads",
+        help: "How many of your CPU's threads Roblox may run on. 0 = all of them. Fewer leaves room for a recording, a stream or another game, at the cost of frame rate.",
+        kind: Kind::Number { min: 0, max: 256 },
+        default: Val::Int(0),
+        link: None,
+    },
+    SettingDef {
+        key: "priority",
+        label: "Game priority",
+        help: "Low lets everything else go first (handy next to a stream or a second game). High asks the system to put Roblox first: most Linux systems only allow that with a raised nice limit or GameMode, and Feline's log says when it was refused.",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "low",
+                label: "Low",
+            },
+            Choice {
+                value: "normal",
+                label: "Normal",
+            },
+            Choice {
+                value: "high",
+                label: "High",
+            },
+        ]),
+        default: Val::Str("normal"),
+        link: None,
+    },
+    SettingDef {
+        key: "trimMemory",
+        label: "Trim memory in the background",
+        help: "While the game window isn't focused, memory Roblox isn't touching is handed back to the system (to swap, or dropped if it's an unchanged file), every two minutes. It comes back by itself when Roblox needs it, so switching back can hitch for a moment.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
+        key: "blockCaptures",
+        label: "Turn off Roblox's screenshots and recordings",
+        help: "Roblox's own capture feature (the Captures tab and its screenshot key) can't save anything. Your desktop's screenshot and recording tools keep working. Used from the next start.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
         key: "detailedLogs",
         label: "Detailed logs",
         help: "Logs every call between Roblox and Feline's runtime. Only turn on when a developer asks for a log: the logs get much bigger.",
@@ -362,10 +407,16 @@ static TABS: &[super::SettingTab] = &[
     },
     super::SettingTab {
         name: "Performance",
-        sections: &[super::SettingSection {
-            title: "Tools",
-            keys: &["gamemode", "mangohud", "vkbasalt"],
-        }],
+        sections: &[
+            super::SettingSection {
+                title: "Processor and memory",
+                keys: &["cpuThreads", "priority", "trimMemory"],
+            },
+            super::SettingSection {
+                title: "Tools",
+                keys: &["gamemode", "mangohud", "vkbasalt"],
+            },
+        ],
     },
     super::SettingTab {
         name: "Audio & controls",
@@ -385,7 +436,7 @@ static TABS: &[super::SettingTab] = &[
         sections: &[
             super::SettingSection {
                 title: "Privacy",
-                keys: &["blockTracking"],
+                keys: &["blockTracking", "blockCaptures"],
             },
             super::SettingSection {
                 title: "Network",

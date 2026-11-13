@@ -24,6 +24,11 @@ pub fn set_focused(focused: bool) {
     FOCUSED.store(focused, Ordering::Relaxed);
 }
 
+/// Whether the window has the focus.
+pub fn focused() -> bool {
+    FOCUSED.load(Ordering::Relaxed)
+}
+
 /// Frames per second while unfocused, with `throttleUnfocused`.
 const UNFOCUSED_FPS: u32 = 30;
 

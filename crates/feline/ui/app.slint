@@ -6,7 +6,7 @@ import { Theme } from "theme.slint";
 import { Extras, AchievementTile } from "extras.slint";
 import { ModTools } from "mod_tools.slint";
 import { PlayExtras, ProgramRow } from "play_extras.slint";
-import { More, VisitRow, LibraryRow, IconRow } from "more.slint";
+import { More, VisitRow, LibraryRow, IconRow, AccountRow } from "more.slint";
 import { Looks } from "looks.slint";
 import { TweaksState, FlagRow } from "tweaks_state.slint";
 import { TweaksPage } from "pages/tweaks.slint";
@@ -27,7 +27,7 @@ import { RobloxExtras } from "pages/roblox_extras.slint";
 import { AccountNotice } from "pages/notice.slint";
 
 // Make the shared types visible to Rust.
-export { Theme, Extras, AchievementTile, TweaksState, FlagRow, ModTools, PlayExtras, ProgramRow, More, VisitRow, LibraryRow, IconRow, Looks }
+export { Theme, Extras, AchievementTile, TweaksState, FlagRow, ModTools, PlayExtras, ProgramRow, More, VisitRow, LibraryRow, IconRow, AccountRow, Looks }
 export { Page, LaunchState, RuntimeRow, Level, InfoRow, CheckRow, SettingKind, SettingRow, RuntimeTab, ModRow, FoundRow, GameCard, TopGame, VersionRow, GameProfileRow, ServerRow, DriverRow, CaseRow, ProbeRow }
 
 export component AppWindow inherits Window {
@@ -858,6 +858,9 @@ export component AppWindow inherits Window {
             current <=> root.about-tab;
             show-notice => {
                 root.show-notice = true;
+            }
+            open-link(url) => {
+                root.open-link(url);
             }
         }
     }

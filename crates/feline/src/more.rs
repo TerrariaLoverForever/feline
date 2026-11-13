@@ -344,6 +344,7 @@ pub fn refresh_switches(ui: &AppWindow, shared: &Shared) {
     more.set_check_updates(state.settings.check_updates);
     more.set_studio_mods(state.settings.studio_mods);
     more.set_studio_discord(state.settings.studio_discord);
+    more.set_studio_script(state.settings.studio_script);
     more.set_library_froststrap(state.settings.library_froststrap);
     more.set_no_crash_handler(state.settings.no_crash_handler);
     more.set_keep_running(state.settings.keep_running);
@@ -725,6 +726,7 @@ pub fn wire(ui: &AppWindow, shared: &Shared) {
                     "check-updates" => state.settings.check_updates = on,
                     "studio-mods" => state.settings.studio_mods = on,
                     "studio-discord" => state.settings.studio_discord = on,
+                    "studio-script" => state.settings.studio_script = on,
                     "library-froststrap" => state.settings.library_froststrap = on,
                     "no-crash-handler" => state.settings.no_crash_handler = on,
                     "keep-running" => state.settings.keep_running = on,

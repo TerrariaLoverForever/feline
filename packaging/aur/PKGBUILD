@@ -1,0 +1,88 @@
+# Maintainer: The Feline contributors
+#
+# Feline for Arch Linux and its relatives (CachyOS, EndeavourOS, Manjaro):
+# the launcher (`feline`), Feline's own runtime (`feline-runtime`) and its
+# login window (`feline-login`), built from the newest source.
+#
+# Build and install it from this folder:
+#     makepkg -si
+#
+# While the repository is private, git asks for your GitHub login when it
+# fetches the source (`gh auth setup-git` makes that automatic).
+pkgname=feline-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="A cat-shaped launcher for Roblox on Linux, with its own runtime (unofficial)"
+arch=('x86_64')
+url="https://github.com/TerrariaLoverForever/feline"
+license=('GPL-3.0-or-later')
+depends=(
+    'alsa-lib'
+    'fontconfig'
+    'freetype2'
+    'gcc-libs'
+    'glibc'
+    'gtk4'
+    'hicolor-icon-theme'
+    'libglvnd'
+    'libpulse'
+    'libxkbcommon'
+    'vulkan-icd-loader'
+    'wayland'
+    'webkitgtk-6.0'
+    'xdg-utils'
+)
+makedepends=('cargo' 'git' 'pkgconf')
+optdepends=(
+    'gamemode: the GameMode setting'
+    'mangohud: the FPS overlay setting'
+    'vkbasalt: the vkBasalt setting'
+    'libnotify: desktop notifications (server location, break reminder)'
+)
+provides=('feline')
+conflicts=('feline')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$pkgname"
+    local version
+    version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+    printf '%s.r%s.g%s' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+    cd "$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p feline -p feline-runtime -p feline-login
+}
+
+check() {
+    cd "$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    # The launcher's logic. (The runtime's tests want a display and sound.)
+    cargo test --frozen --release -p feline-core
+}
+
+package() {
+    cd "$pkgname"
+    local id=io.github.TerrariaLoverForever.Feline
+    install -Dm755 -t "$pkgdir/usr/bin" \
+        target/release/feline target/release/feline-runtime target/release/feline-login
+    install -Dm644 "assets/$id.desktop" "$pkgdir/usr/share/applications/$id.desktop"
+    local size
+    for size in 16 32 48 64 128 256 512; do
+        install -Dm644 "assets/icons/hicolor/${size}x${size}/apps/feline.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$id.png"
+    done
+    install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.exception TRADEMARKS.md
+    install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md docs/LEGAL.md
+}

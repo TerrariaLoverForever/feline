@@ -218,6 +218,20 @@ component ModCard inherits Rectangle {
                 }
             }
         }
+        // Where an enabled mod goes: the player, Studio, or both.
+        if root.entry.enabled: VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+            ComboBox {
+                width: 118px;
+                model: ["Roblox", "Studio only", "Both"];
+                current-index: root.entry.target;
+                accessible-label: "Where this mod goes";
+                selected => {
+                    ModTools.set-target(root.entry.name, self.current-index);
+                }
+            }
+        }
         VerticalLayout {
             alignment: center;
             Toggle {

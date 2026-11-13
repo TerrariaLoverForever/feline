@@ -7,6 +7,7 @@
 // terminal they were typed in instead (see `main`).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod accounts_page;
 mod checkup;
 mod background;
 mod cli;

@@ -652,7 +652,7 @@ pub fn housekeeping(ui: &AppWindow, shared: &Shared, action: &str) {
     if let Some(status) = status {
         ui.set_housekeeping_status(status.into());
     }
-    ui.set_has_saved_login(hk::saved_login().is_some_and(|p| p.exists()));
+    crate::accounts_page::refresh(ui);
     refresh_sizes(ui);
 }
 

@@ -59,6 +59,7 @@ pub mod stubs;
 pub mod sysconf_table;
 pub mod text;
 pub mod trace;
+pub mod tuning;
 pub mod versions;
 pub mod voice;
 pub mod vkoverlay;

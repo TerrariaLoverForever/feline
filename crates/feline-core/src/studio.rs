@@ -242,18 +242,250 @@ pub fn place_from_title(title: &str) -> Option<String> {
     (!place.is_empty() && place != "Roblox Studio").then(|| place.chars().take(100).collect())
 }
 
-/// The Discord status while building.
-pub fn activity(place: Option<&str>, since: u64) -> Value {
+/// The script open in Studio's editor, as Feline's Studio plugin reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenScript {
+    pub name: String,
+    /// "Script", "LocalScript" or "ModuleScript".
+    pub class: String,
+    pub lines: u32,
+}
+
+/// What Feline's Studio plugin last said.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PluginReport {
+    /// The place's name (`game.Name`).
+    pub place: Option<String>,
+    pub script: Option<OpenScript>,
+}
+
+/// Plain, short text for a Discord status: no control characters.
+fn short_text(value: Option<&Value>, max: usize) -> Option<String> {
+    let text: String = value?.as_str()?.chars().filter(|c| !c.is_control()).take(max).collect();
+    let text = text.trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The plugin's message: `{"place": "Obby", "script": "Main", "class":
+/// "Script", "lines": 240}` (the script fields only with a script open).
+pub fn parse_report(body: &str) -> Option<PluginReport> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let v = v.as_object()?;
+    let script = short_text(v.get("script"), 60).map(|name| OpenScript {
+        name,
+        class: match v.get("class").and_then(Value::as_str) {
+            Some(c @ ("Script" | "LocalScript" | "ModuleScript")) => c.to_owned(),
+            _ => "Script".to_owned(),
+        },
+        lines: v.get("lines").and_then(Value::as_u64).map_or(0, |n| n.min(9_999_999) as u32),
+    });
+    Some(PluginReport {
+        place: short_text(v.get("place"), 100),
+        script,
+    })
+}
+
+/// The Discord status while building. With a script open (from Feline's
+/// Studio plugin): "Editing Main (Script, 240 lines)".
+pub fn activity(place: Option<&str>, script: Option<&OpenScript>, since: u64) -> Value {
+    let building = match place {
+        Some(p) => format!("Building {p}"),
+        None => "In Roblox Studio".to_owned(),
+    };
+    let (details, state) = match script {
+        Some(s) => {
+            let kind = match s.class.as_str() {
+                "LocalScript" => "local script",
+                "ModuleScript" => "module",
+                _ => "script",
+            };
+            let lines = match s.lines {
+                0 => String::new(),
+                1 => ", 1 line".to_owned(),
+                n => format!(", {n} lines"),
+            };
+            (format!("Editing {} ({kind}{lines})", s.name), building)
+        }
+        None => (building, "in Roblox Studio".to_owned()),
+    };
     serde_json::json!({
         "type": 0,
-        "details": match place {
-            Some(p) => format!("Building {p}"),
-            None => "In Roblox Studio".to_owned(),
-        },
-        "state": "in Roblox Studio",
+        "details": details,
+        "state": state,
         "timestamps": { "start": since },
         "assets": { "large_image": "feline", "large_text": crate::presence::FELINE_LABEL },
     })
+}
+
+/// The port Feline's Studio plugin talks to, on this computer only.
+pub const PLUGIN_PORT: u16 = 47821;
+/// The plugin's file in Studio's Plugins folder.
+pub const PLUGIN_FILE: &str = "FelineStudioStatus.rbxmx";
+
+/// The plugin's code: every few seconds it tells Feline (on this computer,
+/// nowhere else) the place's name and which script is open.
+const PLUGIN_SOURCE: &str = r#"-- Feline's Studio status plugin (GPL-3.0-or-later).
+-- Tells Feline, on this computer only, which place and script are open, for
+-- your Discord status. Switch it off in Feline: Studio -> "Show the script
+-- I'm editing". Studio asks once whether this plugin may talk to localhost.
+local HttpService = game:GetService("HttpService")
+local StudioService = game:GetService("StudioService")
+local RunService = game:GetService("RunService")
+local URL = "http://localhost:__PORT__/status"
+
+-- Only the editing session reports (not the copies made for play tests).
+if not RunService:IsEdit() then
+	return
+end
+
+local function report()
+	local info = { place = game.Name }
+	local open = StudioService.ActiveScript
+	if open then
+		info.script = open.Name
+		info.class = open.ClassName
+		local ok, source = pcall(function()
+			return open.Source
+		end)
+		if ok and type(source) == "string" then
+			local _, breaks = string.gsub(source, "\n", "\n")
+			info.lines = breaks + 1
+		end
+	end
+	return HttpService:JSONEncode(info)
+end
+
+while true do
+	pcall(function()
+		HttpService:RequestAsync({
+			Url = URL,
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = report(),
+		})
+	end)
+	task.wait(5)
+end
+"#;
+
+/// The plugin as a Roblox model file (`.rbxmx`, Roblox's XML format): one
+/// Script, which Studio runs as a plugin from its Plugins folder.
+pub fn plugin_file() -> String {
+    let source = PLUGIN_SOURCE.replace("__PORT__", &PLUGIN_PORT.to_string());
+    debug_assert!(!source.contains("]]>"));
+    format!(
+        "<roblox version=\"4\">\n\t<Item class=\"Script\" referent=\"RBX0\">\n\t\t<Properties>\n\
+         \t\t\t<string name=\"Name\">FelineStudioStatus</string>\n\
+         \t\t\t<ProtectedString name=\"Source\"><![CDATA[{source}]]></ProtectedString>\n\
+         \t\t</Properties>\n\t</Item>\n</roblox>\n"
+    )
+}
+
+/// Studio's Plugins folder (`%LOCALAPPDATA%\Roblox\Plugins`).
+pub fn plugins_dir(local_app_data: &Path) -> PathBuf {
+    local_app_data.join("Roblox").join("Plugins")
+}
+
+/// Puts Feline's plugin into Studio's Plugins folder (`on`), or takes it
+/// out again.
+pub fn set_plugin(plugins: &Path, on: bool) -> std::io::Result<()> {
+    let file = plugins.join(PLUGIN_FILE);
+    if on {
+        fs::create_dir_all(plugins)?;
+        let text = plugin_file();
+        if fs::read_to_string(&file).is_ok_and(|old| old == text) {
+            return Ok(());
+        }
+        fs::write(file, text)
+    } else {
+        match fs::remove_file(file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The body of one `POST /status` request read from `stream`, if that's
+/// what it is (at most 4 KiB; anything else is dropped).
+fn read_report(stream: &mut impl std::io::Read) -> Option<String> {
+    const MAX: usize = 4096;
+    let mut data = Vec::new();
+    let mut chunk = [0u8; 1024];
+    let (head_end, length) = loop {
+        let n = stream.read(&mut chunk).ok()?;
+        if n == 0 {
+            return None;
+        }
+        data.extend_from_slice(&chunk[..n]);
+        if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = std::str::from_utf8(&data[..end]).ok()?;
+            let mut lines = head.split("\r\n");
+            if !lines.next()?.starts_with("POST /status ") {
+                return None;
+            }
+            let length: usize = lines
+                .filter_map(|l| l.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .and_then(|(_, value)| value.trim().parse().ok())?;
+            break (end + 4, length);
+        }
+        if data.len() > MAX {
+            return None;
+        }
+    };
+    if length > MAX {
+        return None;
+    }
+    while data.len() < head_end + length {
+        let n = stream.read(&mut chunk).ok()?;
+        if n == 0 {
+            return None;
+        }
+        data.extend_from_slice(&chunk[..n]);
+    }
+    String::from_utf8(data[head_end..head_end + length].to_vec()).ok()
+}
+
+/// Listens for Feline's Studio plugin on this computer (127.0.0.1 only).
+pub struct PluginListener {
+    latest: std::sync::Arc<std::sync::Mutex<Option<(std::time::Instant, PluginReport)>>>,
+    port: u16,
+}
+
+impl PluginListener {
+    /// Starts listening on `port` (0: any free one, for tests).
+    pub fn start(port: u16) -> std::io::Result<Self> {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+        let port = listener.local_addr()?.port();
+        let latest = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let shared = std::sync::Arc::clone(&latest);
+        std::thread::Builder::new().name("feline-studio-plugin".into()).spawn(move || {
+            for mut stream in listener.incoming().filter_map(Result::ok) {
+                let local = stream.peer_addr().is_ok_and(|a| a.ip().is_loopback());
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+                let report = if local { read_report(&mut stream).and_then(|b| parse_report(&b)) } else { None };
+                let answer = if report.is_some() { "204 No Content" } else { "400 Bad Request" };
+                let _ = stream.write_all(format!("HTTP/1.1 {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
+                if let Some(report) = report {
+                    *shared.lock().unwrap_or_else(|p| p.into_inner()) = Some((std::time::Instant::now(), report));
+                }
+            }
+        })?;
+        Ok(Self { latest, port })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// What the plugin said, if it spoke in the last `fresh` (it reports
+    /// every 5 seconds while Studio is open).
+    pub fn latest(&self, fresh: std::time::Duration) -> Option<PluginReport> {
+        let latest = self.latest.lock().unwrap_or_else(|p| p.into_inner());
+        latest.as_ref().filter(|(at, _)| at.elapsed() <= fresh).map(|(_, r)| r.clone())
+    }
 }
 
 #[cfg(test)]
@@ -316,6 +548,65 @@ mod tests {
         assert_eq!(place_from_title("Obby World - Roblox Studio").as_deref(), Some("Obby World"));
         assert_eq!(place_from_title("Place1 @ 12 Nov 2026 20:55 - Roblox Studio").as_deref(), Some("Place1"));
         assert_eq!(place_from_title("Roblox Studio"), None);
-        assert_eq!(activity(Some("Obby"), 5)["details"], "Building Obby");
+        assert_eq!(activity(Some("Obby"), None, 5)["details"], "Building Obby");
+    }
+
+    #[test]
+    fn the_open_script_is_in_the_status() {
+        let report = parse_report(r#"{"place":"Obby World","script":"Main\nLoop","class":"ModuleScript","lines":240}"#).unwrap();
+        assert_eq!(report.place.as_deref(), Some("Obby World"));
+        let script = report.script.clone().unwrap();
+        assert_eq!(script, OpenScript { name: "MainLoop".into(), class: "ModuleScript".into(), lines: 240 });
+        let a = activity(Some("Obby World"), Some(&script), 5);
+        assert_eq!(a["details"], "Editing MainLoop (module, 240 lines)");
+        assert_eq!(a["state"], "Building Obby World");
+        // No script open, odd classes, junk.
+        assert_eq!(parse_report(r#"{"place":"Obby"}"#).unwrap().script, None);
+        assert_eq!(parse_report(r#"{"script":"X","class":"Weird"}"#).unwrap().script.unwrap().class, "Script");
+        assert_eq!(parse_report("[1]"), None);
+        assert_eq!(parse_report("nope"), None);
+        let one = OpenScript { name: "A".into(), class: "LocalScript".into(), lines: 1 };
+        assert_eq!(activity(None, Some(&one), 5)["details"], "Editing A (local script, 1 line)");
+    }
+
+    #[test]
+    fn the_plugin_file_is_a_roblox_model() {
+        let text = plugin_file();
+        assert!(text.starts_with("<roblox version=\"4\">"));
+        assert!(text.contains(&format!("http://localhost:{PLUGIN_PORT}/status")));
+        assert!(!text.contains("__PORT__"));
+        assert_eq!(text.matches("]]>").count(), 1);
+        let dir = std::env::temp_dir().join(format!("feline-plugin-{}", std::process::id()));
+        set_plugin(&dir, true).unwrap();
+        assert_eq!(fs::read_to_string(dir.join(PLUGIN_FILE)).unwrap(), text);
+        set_plugin(&dir, false).unwrap();
+        assert!(!dir.join(PLUGIN_FILE).exists());
+        set_plugin(&dir, false).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_plugin_is_heard_over_http() {
+        use std::io::{Read, Write};
+        let listener = PluginListener::start(0).unwrap();
+        let fresh = std::time::Duration::from_secs(30);
+        assert_eq!(listener.latest(fresh), None);
+        let send = |request: &str| {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", listener.port())).unwrap();
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut answer = String::new();
+            let _ = stream.read_to_string(&mut answer);
+            answer
+        };
+        let body = r#"{"place":"Obby","script":"Main","class":"Script","lines":3}"#;
+        let answer = send(&format!("POST /status HTTP/1.1\r\nHost: localhost\r\ncontent-length: {}\r\n\r\n{body}", body.len()));
+        assert!(answer.starts_with("HTTP/1.1 204"), "{answer}");
+        let heard = listener.latest(fresh).unwrap();
+        assert_eq!(heard.script.unwrap().lines, 3);
+        // Other requests are refused and change nothing.
+        assert!(send("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").starts_with("HTTP/1.1 400"));
+        assert!(send("POST /status HTTP/1.1\r\nContent-Length: 999999\r\n\r\n").starts_with("HTTP/1.1 400"));
+        assert_eq!(listener.latest(fresh).unwrap().place.as_deref(), Some("Obby"));
+        assert_eq!(listener.latest(std::time::Duration::ZERO), None);
     }
 }

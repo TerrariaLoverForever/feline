@@ -51,6 +51,8 @@ export global ModTools {
     // ---- Sharing
     // Packs a mod into a .zip in Downloads.
     callback share(string);
+    // Where an enabled mod goes: 0 Roblox, 1 Studio only, 2 both.
+    callback set-target(string, int);
     // Asks for a .zip and adds the mod in it.
     callback import-zip();
 }
