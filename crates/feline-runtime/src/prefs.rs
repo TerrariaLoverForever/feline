@@ -10,7 +10,9 @@
 //! | `theme` | `"dark"` or `"light"`: the app's theme |
 //! | `fpsLimit` | 0: Roblox's in-game Maximum Frame Rate decides; otherwise that frame rate (e.g. 600), set as Roblox's cap at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
-//! | `vsync` | wait for the monitor before showing a frame (less tearing; caps at the refresh rate) |
+//! | `presentMode` | `"mailbox"` (no tearing, no waiting), `"immediate"` (lowest latency, may tear) or `"fifo"` (VSync: waits for the monitor) |
+//! | `framePacing` | with an `fpsLimit`: Feline holds frames to an even rhythm at presentation (pacing.rs) |
+//! | `throttleUnfocused` | 30 FPS while the window isn't focused |
 //! | `renderer` | `"vulkan"` (when the desktop has a Vulkan driver) or `"opengl"` (OpenGL ES; see vulkan.rs) |
 //! | `graphicsQuality` | 0: Roblox decides; 1–10: Roblox's graphics quality, set at each start |
 //! | `microphone` | let voice chat use the microphone (off: others hear silence) |
@@ -33,7 +35,12 @@ pub struct Prefs {
     /// Frames per second to cap at; 0 leaves it to Roblox's own setting.
     pub fps_limit: u32,
     pub start_fullscreen: bool,
-    pub vsync: bool,
+    /// "mailbox", "immediate" or "fifo" (VSync).
+    pub present_mode: String,
+    /// Feline paces frames at presentation (with an FPS limit).
+    pub frame_pacing: bool,
+    /// 30 FPS while the window isn't focused.
+    pub throttle_unfocused: bool,
     /// "vulkan" or "opengl".
     pub renderer: String,
     /// Roblox's graphics quality 1–10; 0 leaves it to Roblox.
@@ -52,7 +59,9 @@ impl Default for Prefs {
             theme: "dark".into(),
             fps_limit: 0,
             start_fullscreen: false,
-            vsync: false,
+            present_mode: "mailbox".into(),
+            frame_pacing: true,
+            throttle_unfocused: false,
             renderer: "vulkan".into(),
             graphics_quality: 0,
             microphone: true,
@@ -90,6 +99,11 @@ pub fn path() -> Option<PathBuf> {
 const HEADER: &str = "// Feline runtime settings. Feline's launcher edits this file.\n";
 
 impl Prefs {
+    /// Waits for the monitor (present mode "fifo").
+    pub fn vsync(&self) -> bool {
+        self.present_mode == "fifo"
+    }
+
     /// Values from the file's JSON; missing or invalid ones keep the default.
     fn from_json(json: &Map<String, Value>) -> Self {
         let d = Self::default();
@@ -110,7 +124,17 @@ impl Prefs {
                 .get("startFullscreen")
                 .and_then(Value::as_bool)
                 .unwrap_or(d.start_fullscreen),
-            vsync: json.get("vsync").and_then(Value::as_bool).unwrap_or(d.vsync),
+            present_mode: match json.get("presentMode").and_then(Value::as_str) {
+                Some(m @ ("mailbox" | "immediate" | "fifo")) => m.to_owned(),
+                // The earlier VSync switch.
+                _ if json.get("vsync").and_then(Value::as_bool) == Some(true) => "fifo".into(),
+                _ => d.present_mode,
+            },
+            frame_pacing: json.get("framePacing").and_then(Value::as_bool).unwrap_or(d.frame_pacing),
+            throttle_unfocused: json
+                .get("throttleUnfocused")
+                .and_then(Value::as_bool)
+                .unwrap_or(d.throttle_unfocused),
             renderer: match json.get("renderer").and_then(Value::as_str) {
                 Some(r @ ("vulkan" | "opengl")) => r.to_owned(),
                 _ => d.renderer,
@@ -143,7 +167,9 @@ impl Prefs {
             "theme": self.theme,
             "fpsLimit": self.fps_limit,
             "startFullscreen": self.start_fullscreen,
-            "vsync": self.vsync,
+            "presentMode": self.present_mode,
+            "framePacing": self.frame_pacing,
+            "throttleUnfocused": self.throttle_unfocused,
             "renderer": self.renderer,
             "graphicsQuality": self.graphics_quality,
             "microphone": self.microphone,
@@ -241,7 +267,8 @@ pub fn write_graphics_quality(app_data: &std::path::Path, level: u32) {
 
 /// Settings earlier versions had, now Roblox's own in-game ones.
 /// (`graphicsQuality` and `renderer` were too, and are back as Feline's.)
-const OBSOLETE: [&str; 3] = ["maxFps", "mouseSensitivity", "unlimitedFps"];
+/// (`vsync` became `presentMode` "fifo".)
+const OBSOLETE: [&str; 4] = ["maxFps", "mouseSensitivity", "unlimitedFps", "vsync"];
 
 /// The settings for this start (read once; the file is created with the
 /// defaults if it's missing, and missing keys are added).

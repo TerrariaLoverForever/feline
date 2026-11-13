@@ -574,8 +574,9 @@ struct SwapchainCreateInfo {
 
 type CreateSwapchain = unsafe extern "C" fn(*mut c_void, *const SwapchainCreateInfo, *const c_void, *mut u64) -> i32;
 
-/// The swapchain, presenting without waiting for the monitor (MAILBOX if
-/// the driver has it for this surface, else IMMEDIATE, else as asked).
+/// The swapchain, in the present mode setting's mode: MAILBOX or
+/// IMMEDIATE (no waiting for the monitor; the other one if the driver lacks
+/// the chosen one for this surface), or FIFO (VSync, the engine's own).
 unsafe extern "C" fn create_swapchain(
     device: *mut c_void,
     info: *const SwapchainCreateInfo,
@@ -592,8 +593,9 @@ unsafe extern "C" fn create_swapchain(
     let mut copy = unsafe { std::ptr::read(info) };
     let asked = copy.present_mode;
     // VSync (runtime setting): keep the engine's FIFO.
-    if !crate::prefs::get().vsync
-        && let Some(mode) = no_wait_mode(copy.surface)
+    let prefs = crate::prefs::get();
+    if !prefs.vsync()
+        && let Some(mode) = no_wait_mode(copy.surface, prefs.present_mode == "immediate")
     {
         copy.present_mode = mode;
     }
@@ -694,8 +696,9 @@ unsafe extern "C" fn get_device_queue2(device: *mut c_void, info: *const DeviceQ
     crate::vkoverlay::queue_made(unsafe { *queue }, device as u64, unsafe { (*info).family });
 }
 
-/// MAILBOX or IMMEDIATE, if the surface supports one.
-fn no_wait_mode(surface: u64) -> Option<u32> {
+/// MAILBOX or IMMEDIATE (`immediate` first if wanted), if the surface
+/// supports one.
+fn no_wait_mode(surface: u64, immediate: bool) -> Option<u32> {
     type Modes = unsafe extern "C" fn(*mut c_void, u64, *mut u32, *mut u32) -> i32;
     let instance = instance();
     let physical = PHYSICAL.load(Ordering::Acquire) as *mut c_void;
@@ -711,7 +714,12 @@ fn no_wait_mode(surface: u64) -> Option<u32> {
     let mut modes = vec![0u32; n as usize];
     unsafe { f(physical, surface, &mut n, modes.as_mut_ptr()) };
     modes.truncate(n as usize);
-    [PRESENT_MODE_MAILBOX, PRESENT_MODE_IMMEDIATE]
+    let order = if immediate {
+        [PRESENT_MODE_IMMEDIATE, PRESENT_MODE_MAILBOX]
+    } else {
+        [PRESENT_MODE_MAILBOX, PRESENT_MODE_IMMEDIATE]
+    };
+    order
         .into_iter()
         .find(|m| modes.contains(m))
 }
@@ -734,6 +742,8 @@ unsafe extern "C" fn queue_present(queue: *mut c_void, info: *const c_void) -> i
     }
     // SAFETY: the host's vkQueuePresentKHR.
     let f: QueuePresent = unsafe { std::mem::transmute(f) };
+    // Feline's frame pacing (pacing.rs).
+    crate::pacing::before_present();
     // Typed text drawn into the image (vkoverlay.rs): then the present
     // waits on that instead of the engine's semaphores.
     // SAFETY: the engine's valid VkPresentInfoKHR.

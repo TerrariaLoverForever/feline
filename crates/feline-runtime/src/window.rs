@@ -333,6 +333,7 @@ impl ApplicationHandler for App {
             // background), which a desktop window shouldn't do. Only the
             // finger is lifted, so it isn't left "down".
             WindowEvent::Focused(false) => {
+                crate::pacing::set_focused(false);
                 if self.pressed {
                     self.pressed = false;
                     self.touch(TouchAction::Up);
@@ -349,7 +350,10 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::Focused(true) => self.changes.push(WindowChange::Focus(true)),
+            WindowEvent::Focused(true) => {
+                crate::pacing::set_focused(true);
+                self.changes.push(WindowChange::Focus(true));
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let dy = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,

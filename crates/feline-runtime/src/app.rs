@@ -460,11 +460,18 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                         quality,
                     );
                 }
-                let fps_limit = feline_runtime::prefs::get().fps_limit;
-                if fps_limit > 0 {
+                let prefs = feline_runtime::prefs::get();
+                if prefs.fps_limit > 0 {
+                    // Feline paces frames itself: the engine's limit opens
+                    // up so the two don't fight (see pacing.rs).
+                    let cap = if feline_runtime::pacing::paces(prefs) {
+                        feline_runtime::prefs::MAX_FPS_LIMIT
+                    } else {
+                        prefs.fps_limit
+                    };
                     feline_runtime::prefs::write_framerate_cap(
                         &data.join("feline/runtime/files/appData"),
-                        fps_limit,
+                        cap,
                     );
                 }
                 call_gl_native(&elf, image, "nativeGameGlobalInit", &[])?;

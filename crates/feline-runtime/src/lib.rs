@@ -50,6 +50,7 @@ pub mod manifest;
 pub mod net;
 pub mod overlay;
 pub mod packed;
+pub mod pacing;
 pub mod prefs;
 pub mod sem;
 pub mod sig;

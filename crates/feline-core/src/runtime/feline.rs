@@ -94,9 +94,62 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
-        key: "vsync",
-        label: "VSync",
-        help: "Waits for your monitor before showing each frame: no tearing, but the frame rate stops at your monitor's refresh rate and input lags a little.",
+        key: "presentMode",
+        label: "Present mode",
+        help: "How frames reach the screen. Mailbox is smooth without tearing; Immediate has the lowest latency but can tear; VSync waits for your monitor (no tearing, frame rate stops at its refresh rate, input lags a little).",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "mailbox",
+                label: "Mailbox",
+            },
+            Choice {
+                value: "immediate",
+                label: "Immediate",
+            },
+            Choice {
+                value: "fifo",
+                label: "VSync (FIFO)",
+            },
+        ]),
+        default: Val::Str("mailbox"),
+        link: None,
+    },
+    SettingDef {
+        key: "framePacing",
+        label: "Frame pacing",
+        help: "With an FPS limit, Feline holds each frame until its turn just before it's shown, so frames come at an even rhythm (smoother than Roblox's own limiter at the same frame rate).",
+        kind: Kind::Toggle,
+        default: Val::Bool(true),
+        link: None,
+    },
+    SettingDef {
+        key: "throttleUnfocused",
+        label: "Lower the frame rate in the background",
+        help: "30 FPS while the game window isn't focused, to save power.",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
+        key: "gamemode",
+        label: "GameMode",
+        help: "Asks Feral GameMode to boost performance while you play (needs gamemode installed).",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: Some(super::config::Link::GameMode),
+    },
+    SettingDef {
+        key: "mangohud",
+        label: "MangoHud overlay",
+        help: "Shows FPS and frame times over the game (needs MangoHud installed).",
+        kind: Kind::Toggle,
+        default: Val::Bool(false),
+        link: None,
+    },
+    SettingDef {
+        key: "vkbasalt",
+        label: "vkBasalt",
+        help: "Post-processing effects such as sharpening, set up in vkBasalt's own config (needs vkBasalt installed; Vulkan only).",
         kind: Kind::Toggle,
         default: Val::Bool(false),
         link: None,
@@ -183,6 +236,78 @@ static SETTINGS: &[SettingDef] = &[
     },
 ];
 
+/// GameMode, MangoHud and vkBasalt, as the runtime's settings ask.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Tools {
+    gamemode: bool,
+    mangohud: bool,
+    vkbasalt: bool,
+}
+
+impl FelineRuntime {
+    fn tool_settings(&self, installation: &Installation) -> Tools {
+        let ctx = DetectContext::host();
+        let file = self
+            .config_path(installation, &ctx)
+            .and_then(|p| super::config::ConfigFile::load(&p).ok());
+        let on = |key: &str| {
+            SETTINGS.iter().find(|d| d.key == key).is_some_and(|def| match &file {
+                Some(f) => f.get(def) == serde_json::Value::Bool(true),
+                None => def.default.to_json() == serde_json::Value::Bool(true),
+            })
+        };
+        Tools {
+            gamemode: on("gamemode"),
+            mangohud: on("mangohud"),
+            vkbasalt: on("vkbasalt"),
+        }
+    }
+}
+
+/// `command` with the tools: MangoHud and vkBasalt are Vulkan layers
+/// switched on by environment variables (MangoHud's `mangohud` wrapper
+/// also covers OpenGL); GameMode wraps the command in `gamemoderun`.
+/// A tool that isn't installed is skipped.
+fn with_tools(command: std::process::Command, tools: &Tools) -> std::process::Command {
+    let ctx = DetectContext::host();
+    let mut wrappers = Vec::new();
+    if tools.gamemode
+        && let Some(gm) = find_on_path(&ctx, "gamemoderun")
+    {
+        wrappers.push(gm);
+    }
+    if tools.mangohud
+        && let Some(mh) = find_on_path(&ctx, "mangohud")
+    {
+        wrappers.push(mh);
+    }
+    let mut out = match wrappers.first() {
+        None => command,
+        Some(first) => {
+            let mut wrapped = std::process::Command::new(first);
+            wrapped.args(wrappers.iter().skip(1));
+            wrapped.arg(command.get_program()).args(command.get_args());
+            for (key, value) in command.get_envs() {
+                match value {
+                    Some(v) => wrapped.env(key, v),
+                    None => wrapped.env_remove(key),
+                };
+            }
+            if let Some(dir) = command.get_current_dir() {
+                wrapped.current_dir(dir);
+            }
+            wrapped
+        }
+    };
+    if tools.mangohud {
+        out.env("MANGOHUD", "1");
+    }
+    if tools.vkbasalt {
+        out.env("ENABLE_VKBASALT", "1");
+    }
+    out
+}
+
 fn no_engine() -> RuntimeError {
     RuntimeError::Failed {
         what: "Finding Roblox's engine",
@@ -197,14 +322,25 @@ static TABS: &[super::SettingTab] = &[
         name: "Graphics",
         sections: &[
             super::SettingSection {
+                title: "Frame pacing",
+                keys: &["presentMode", "framePacing"],
+            },
+            super::SettingSection {
                 title: "Frame rate",
-                keys: &["fpsLimit", "vsync"],
+                keys: &["fpsLimit", "throttleUnfocused"],
             },
             super::SettingSection {
                 title: "Picture",
                 keys: &["renderer", "graphicsQuality", "startFullscreen"],
             },
         ],
+    },
+    super::SettingTab {
+        name: "Performance",
+        sections: &[super::SettingSection {
+            title: "Tools",
+            keys: &["gamemode", "mangohud", "vkbasalt"],
+        }],
     },
     super::SettingTab {
         name: "Audio & controls",
@@ -355,6 +491,7 @@ impl RuntimeBackend for FelineRuntime {
         let engine = engine(&DetectContext::host()).ok_or_else(no_engine)?;
         let mut command = installation.command();
         command.arg("--play").arg(engine);
+        let command = with_tools(command, &self.tool_settings(installation));
         let link_note = matches!(target, LaunchTarget::Game(_)).then(|| {
             "Feline's runtime can't join from a link yet, so it opens the Roblox app: \
              find the experience there."

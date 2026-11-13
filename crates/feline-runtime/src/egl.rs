@@ -328,6 +328,8 @@ pub unsafe extern "C" fn eglSwapBuffers(display: EglDisplay, surface: EglSurface
     if let Some(path) = SCREENSHOT.lock().unwrap_or_else(|p| p.into_inner()).take() {
         save_screenshot(&path);
     }
+    // Feline's frame pacing (pacing.rs).
+    crate::pacing::before_present();
     // SAFETY: forwarding the engine's own handles.
     let started = std::time::Instant::now();
     let ok = unsafe { (host.swap_buffers)(display, surface) };
@@ -374,7 +376,7 @@ fn swap_timing(spent: std::time::Duration) {
 
 /// 0 (no waiting for the compositor), or 1 with the VSync setting.
 fn swap_interval() -> EglInt {
-    EglInt::from(crate::prefs::get().vsync)
+    EglInt::from(crate::prefs::get().vsync())
 }
 
 /// The last surface the swap interval was set to 0 for.
