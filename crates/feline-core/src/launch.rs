@@ -441,7 +441,9 @@ mod tests {
     fn runtime_gets_its_own_session_with_the_same_pid() {
         let dir = temp_dir("launch-pgid");
         let mut cmd = Command::new("sh");
-        cmd.args(["-c", "sleep 1"]);
+        // The trailing `:` stops shells like bash from exec-ing `sleep`
+        // directly, which would rename the process.
+        cmd.args(["-c", "sleep 1; :"]);
         let game = spawn(cmd, &dir, "test").expect("starts");
         let pid = game.pid();
         // `setsid` hands over to the program a moment after starting, so

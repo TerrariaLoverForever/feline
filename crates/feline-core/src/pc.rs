@@ -235,11 +235,13 @@ pub fn parse_driver_date(text: &str) -> Option<(i64, i64, i64)> {
     ((1..=12).contains(&month) && (1..=31).contains(&day) && year > 1990).then_some((year, month, day))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 const MONTHS: [&str; 12] = [
     "January", "February", "March", "April", "May", "June", "July", "August", "September",
     "October", "November", "December",
 ];
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn vendor_link(vendor: GpuVendor) -> Option<&'static str> {
     match vendor {
         GpuVendor::Nvidia => Some("https://www.nvidia.com/en-us/drivers/"),
@@ -271,6 +273,7 @@ pub fn judge_age(date: (i64, i64, i64), today: i64) -> (CheckLevel, String) {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn today() -> i64 {
     (crate::history::now() as i64 + crate::history::local_offset_seconds()) / 86_400
 }

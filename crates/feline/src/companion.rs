@@ -176,6 +176,7 @@ struct Now {
 
 impl Now {
     /// "Server in Frankfurt am Main, Germany · up 2 h 13 min".
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn summary(&self) -> String {
         let mut parts = Vec::new();
         if !self.region.is_empty() {

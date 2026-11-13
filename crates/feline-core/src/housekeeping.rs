@@ -218,6 +218,7 @@ pub fn clear_roblox_cache() -> bool {
 
 /// Roblox Studio's own things in `%LOCALAPPDATA%\Roblox` (kept unless Studio
 /// is cleared too).
+#[cfg_attr(not(windows), allow(dead_code))]
 const STUDIO_ITEMS: &[&str] = &[
     "RobloxStudio",
     "RobloxStudioInstaller",
@@ -226,6 +227,7 @@ const STUDIO_ITEMS: &[&str] = &[
     "placeIDEState",
 ];
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_studio(name: &str) -> bool {
     STUDIO_ITEMS.contains(&name) || name.contains("_Studio")
 }

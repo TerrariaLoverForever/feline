@@ -143,7 +143,7 @@ pub fn open(arg: &str) -> ExitCode {
     let game = match link::parse(arg) {
         Ok(game) => game,
         Err(e) => {
-            splash.fail(&format!("That link didn't make sense to Feline: {e}"));
+            let _ = splash.fail(&format!("That link didn't make sense to Feline: {e}"));
             return ExitCode::from(2);
         }
     };
