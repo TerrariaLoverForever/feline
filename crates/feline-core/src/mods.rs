@@ -1590,6 +1590,20 @@ fn apply_with_state(target: &ModTarget, packs: &[ModPack], state: &Path) -> Resu
 
 /// [`apply_with_state`]; with `hide_cursor`, Roblox's arrow cursors are
 /// see-through (Feline draws an animated one over the game instead).
+/// Whether `dir` is the Android app's assets (`android/`, no
+/// `PlatformContent/`).
+fn is_android_layout(dir: &Path) -> bool {
+    dir.join("android").is_dir() && !dir.join("PlatformContent").exists()
+}
+
+/// A mod's Windows path as the Android app has it.
+fn android_path(rel: &str) -> String {
+    match rel.strip_prefix("PlatformContent/pc/") {
+        Some(rest) => format!("android/{rest}"),
+        None => rel.to_owned(),
+    }
+}
+
 fn apply_with_options(target: &ModTarget, packs: &[ModPack], state: &Path, hide_cursor: bool) -> Result<Applied, String> {
     let record_file = state.join("applied.json");
     let backups = state.join("backup");
@@ -1646,6 +1660,11 @@ fn apply_with_options(target: &ModTarget, packs: &[ModPack], state: &Path, hide_
                 wanted.insert((*rel).to_owned(), clear.clone());
             }
         }
+    }
+    // Roblox's Android app (Feline's runtime) keeps the PC client's
+    // `PlatformContent/pc/` files in `android/` (sky, terrain, …).
+    if !target.overlay && is_android_layout(&target.dir) {
+        wanted = wanted.into_iter().map(|(rel, file)| (android_path(&rel), file)).collect();
     }
     // A real install: only into folders Roblox has.
     if !target.overlay {
@@ -2262,4 +2281,23 @@ mod tests {
         assert_eq!(relative(root, Path::new("/mods/m/content/a.ogg")).as_deref(), Some("content/a.ogg"));
         assert_eq!(relative(root, Path::new("/other/a.ogg")), None);
     }
+
+    #[test]
+    fn platform_files_go_where_the_android_app_has_them() {
+        let dir = temp("android");
+        let roblox = dir.join("assets");
+        write(&roblox.join("android/textures/sky/sky512_bk.tex"), "original");
+        write(&roblox.join("content/textures/ui/x.png"), "original");
+        let pack = dir.join("mods/Sky");
+        write(&pack.join("PlatformContent/pc/textures/sky/sky512_bk.tex"), "mine");
+        let target = ModTarget { dir: roblox.clone(), overlay: false };
+        let packs = list_packs(&dir.join("mods"));
+        let applied = apply_with_options(&target, &packs, &dir.join("state"), false).unwrap();
+        assert_eq!(applied.files, 1, "{:?}", applied.skipped);
+        assert_eq!(fs::read_to_string(roblox.join("android/textures/sky/sky512_bk.tex")).unwrap(), "mine");
+        assert!(!roblox.join("PlatformContent").exists());
+        assert_eq!(android_path("content/a.png"), "content/a.png");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 }

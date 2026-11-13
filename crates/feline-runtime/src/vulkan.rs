@@ -17,9 +17,10 @@
 //!   IMMEDIATE), so Roblox's frame rate limit decides, as with OpenGL.
 //!
 //! On whenever the desktop has a Vulkan driver (it's much faster than
-//! OpenGL ES here). Without one, or with `FELINE_VULKAN=0` (for
+//! OpenGL ES here), unless the `renderer` setting is "opengl". Without a
+//! driver, with that setting, or with `FELINE_VULKAN=0` (for
 //! troubleshooting), `libvulkan.so` is unavailable and the engine uses
-//! OpenGL ES, as it did before.
+//! OpenGL ES. `FELINE_VULKAN=1` offers Vulkan whatever the setting.
 //!
 //! Unsafe: Vulkan's C API, called with the engine's own arguments.
 #![allow(unsafe_code)]
@@ -46,7 +47,17 @@ const PRESENT_MODE_MAILBOX: u32 = 1;
 /// Whether Vulkan is offered to the engine.
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("FELINE_VULKAN").map_or(true, |v| v != "0") && host().is_some())
+    *ON.get_or_init(|| {
+        let wanted = match std::env::var("FELINE_VULKAN").as_deref() {
+            Ok("0") => false,
+            Ok("1") => true,
+            _ => crate::prefs::get().renderer != "opengl",
+        };
+        if !wanted {
+            eprintln!("feline-runtime: OpenGL ES chosen: Vulkan isn't offered to the engine");
+        }
+        wanted && host().is_some()
+    })
 }
 
 struct Host {

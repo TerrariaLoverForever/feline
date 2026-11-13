@@ -265,15 +265,16 @@ impl Extra {
                 .replace("{runtime}", self.runtime.as_deref().unwrap_or("Roblox"))
                 .replace("{today}", today.or(self.today.as_deref()).unwrap_or("a bit"));
         }
+        // Kept short: creator, city and today's playtime. The runtime's
+        // name is in the game picture's hover text instead.
         let mut parts = Vec::new();
         if !game.creator.is_empty() {
             parts.push(format!("by {}", game.creator));
         }
         if let Some(region) = region {
-            parts.push(format!("📍 {region}"));
-        }
-        if let Some(runtime) = &self.runtime {
-            parts.push(format!("on {runtime}"));
+            // "Frankfurt am Main, Germany" → "Frankfurt am Main".
+            let city = region.split(',').next().unwrap_or(region).trim();
+            parts.push(format!("📍 {city}"));
         }
         if let Some(today) = today {
             parts.push(format!("{today} today"));
@@ -341,9 +342,13 @@ pub fn build_activity(
                     if !state.is_empty() {
                         value["state"] = Value::from(clamp(&state));
                     }
+                    let hover = match &extra.runtime {
+                        Some(runtime) => format!("{} · on {runtime}", game.name),
+                        None => game.name.clone(),
+                    };
                     value["assets"] = json!({
                         "large_image": game.icon_url.as_deref().unwrap_or("feline"),
-                        "large_text": clamp(&game.name),
+                        "large_text": clamp(&hover),
                     });
                 }
                 None => {
@@ -544,7 +549,16 @@ fn run(
         }
         if extra.settings.today && last_today.is_none_or(|t| t.elapsed() >= Duration::from_secs(60)) {
             last_today = Some(Instant::now());
-            let today = Some(crate::history::duration_label(crate::history::played_today(&log_roots)));
+            // The game in progress counts too: its log may not have been
+            // written out yet (Feline's runtime writes it in chunks).
+            let playing_since = match &activity {
+                Activity::Game { since, .. } => *since,
+                _ => None,
+            };
+            let today = Some(crate::history::duration_label(crate::history::played_today_live(
+                &log_roots,
+                playing_since,
+            )));
             if today != extra.today {
                 extra.today = today;
                 dirty = true;
@@ -708,7 +722,7 @@ mod tests {
         let v = build_activity(&in_game(), Some(&game()), None, &options, &extra).unwrap();
         assert_eq!(
             v["state"],
-            "by Fisching · 📍 Frankfurt am Main, Germany · on Sober · 1 h 5 min today"
+            "by Fisching · 📍 Frankfurt am Main · 1 h 5 min today"
         );
 
         extra.settings.text = "Fishing in {region} with {runtime}".into();

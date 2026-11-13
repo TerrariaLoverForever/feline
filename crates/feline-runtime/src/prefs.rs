@@ -11,6 +11,7 @@
 //! | `fpsLimit` | 0: Roblox's in-game Maximum Frame Rate decides; otherwise that frame rate (e.g. 600), set as Roblox's cap at each start |
 //! | `startFullscreen` | open the window in fullscreen (F11 switches either way) |
 //! | `vsync` | wait for the monitor before showing a frame (less tearing; caps at the refresh rate) |
+//! | `renderer` | `"vulkan"` (when the desktop has a Vulkan driver) or `"opengl"` (OpenGL ES; see vulkan.rs) |
 //! | `graphicsQuality` | 0: Roblox decides; 1–10: Roblox's graphics quality, set at each start |
 //! | `microphone` | let voice chat use the microphone (off: others hear silence) |
 //! | `controllers` | pass gamepads to Roblox |
@@ -33,6 +34,8 @@ pub struct Prefs {
     pub fps_limit: u32,
     pub start_fullscreen: bool,
     pub vsync: bool,
+    /// "vulkan" or "opengl".
+    pub renderer: String,
     /// Roblox's graphics quality 1–10; 0 leaves it to Roblox.
     pub graphics_quality: u32,
     pub microphone: bool,
@@ -50,6 +53,7 @@ impl Default for Prefs {
             fps_limit: 0,
             start_fullscreen: false,
             vsync: false,
+            renderer: "vulkan".into(),
             graphics_quality: 0,
             microphone: true,
             controllers: true,
@@ -107,6 +111,10 @@ impl Prefs {
                 .and_then(Value::as_bool)
                 .unwrap_or(d.start_fullscreen),
             vsync: json.get("vsync").and_then(Value::as_bool).unwrap_or(d.vsync),
+            renderer: match json.get("renderer").and_then(Value::as_str) {
+                Some(r @ ("vulkan" | "opengl")) => r.to_owned(),
+                _ => d.renderer,
+            },
             graphics_quality: json
                 .get("graphicsQuality")
                 .and_then(Value::as_u64)
@@ -136,6 +144,7 @@ impl Prefs {
             "fpsLimit": self.fps_limit,
             "startFullscreen": self.start_fullscreen,
             "vsync": self.vsync,
+            "renderer": self.renderer,
             "graphicsQuality": self.graphics_quality,
             "microphone": self.microphone,
             "controllers": self.controllers,
@@ -231,7 +240,8 @@ pub fn write_graphics_quality(app_data: &std::path::Path, level: u32) {
 }
 
 /// Settings earlier versions had, now Roblox's own in-game ones.
-const OBSOLETE: [&str; 5] = ["maxFps", "mouseSensitivity", "graphicsQuality", "unlimitedFps", "renderer"];
+/// (`graphicsQuality` and `renderer` were too, and are back as Feline's.)
+const OBSOLETE: [&str; 3] = ["maxFps", "mouseSensitivity", "unlimitedFps"];
 
 /// The settings for this start (read once; the file is created with the
 /// defaults if it's missing, and missing keys are added).

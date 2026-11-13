@@ -102,6 +102,27 @@ static SETTINGS: &[SettingDef] = &[
         link: None,
     },
     SettingDef {
+        key: "renderer",
+        label: "Graphics API",
+        help: "How Roblox draws. Vulkan is usually faster; OpenGL (OpenGL ES) is the older way, worth trying if the picture looks glitched. Used from the next start.",
+        kind: Kind::Choice(&[
+            Choice {
+                value: "vulkan",
+                label: "Vulkan",
+            },
+            Choice {
+                value: "opengl",
+                label: "OpenGL",
+            },
+        ]),
+        default: Val::Str("vulkan"),
+        // Feline's own Graphics setting (Settings page) decides when set.
+        link: Some(super::config::Link::Renderer {
+            vulkan: Val::Str("vulkan"),
+            opengl: Some(Val::Str("opengl")),
+        }),
+    },
+    SettingDef {
         key: "graphicsQuality",
         label: "Graphics quality",
         help: "Roblox's own graphics quality, 1 (fastest) to 10 (best looking), set each time the game starts. 0 = Roblox decides (automatic, or what you set in the game).",
@@ -181,7 +202,7 @@ static TABS: &[super::SettingTab] = &[
             },
             super::SettingSection {
                 title: "Picture",
-                keys: &["graphicsQuality", "startFullscreen"],
+                keys: &["renderer", "graphicsQuality", "startFullscreen"],
             },
         ],
     },

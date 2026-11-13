@@ -51,3 +51,10 @@ feline-win = { path = "../feline-win" }
 [build-dependencies]
 # Compiles the .slint UI files into Rust code at build time.
 slint-build = "1.18.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The tray icon on Linux (KDE Plasma, XFCE, Cinnamon, LXQt, waybar, and
+# GNOME with the AppIndicator extension): the freedesktop
+# StatusNotifierItem protocol over D-Bus. Unlicense. async-io instead of
+# tokio, as zbus already uses for accessibility.
+ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }

@@ -512,6 +512,30 @@ pub fn played_today(roots: &[PathBuf]) -> u64 {
     history.played_since(today)
 }
 
+/// Like [`played_today`], with the game being played now counted up to
+/// this moment: `playing_since` is when it started. Its log may lag behind
+/// (or not have its session yet), so its sessions are replaced by the live
+/// time.
+pub fn played_today_live(roots: &[PathBuf], playing_since: Option<u64>) -> u64 {
+    let mut history = History::load();
+    history.scan(roots);
+    let now = now();
+    let (today, _) = day_and_week_start(now, local_offset_seconds());
+    live_total(&history, today, now, playing_since)
+}
+
+fn live_total(history: &History, today: u64, now: u64, playing_since: Option<u64>) -> u64 {
+    let Some(since) = playing_since.filter(|s| *s <= now) else {
+        return history.played_since(today);
+    };
+    let finished: u64 = history
+        .sessions()
+        .filter(|s| s.start < since)
+        .map(|s| s.end.min(since).saturating_sub(s.start.max(today)))
+        .sum();
+    finished + now.saturating_sub(since.max(today))
+}
+
 /// "2 h 5 min", "12 min", "40 s".
 pub fn duration_label(seconds: u64) -> String {
     match seconds {
@@ -638,4 +662,17 @@ mod tests {
             Some("Frankfurt am Main, Germany")
         );
     }
+    #[test]
+    fn the_game_in_progress_counts_today() {
+        let mut history = History::default();
+        let s = |start, end| Session { place_id: 1, universe_id: None, server: None, start, end };
+        // Earlier today: 10 min; yesterday's game doesn't count; the game
+        // now started at 1000 and its log only reached 1060.
+        history.logs.insert("a".into(), (1, vec![s(100, 700), s(1000, 1060)]));
+        history.logs.insert("b".into(), (1, vec![s(0, 50)]));
+        assert_eq!(live_total(&history, 60, 1600, Some(1000)), 600 + 600);
+        // Not playing: the log's sessions only.
+        assert_eq!(live_total(&history, 60, 1600, None), 600 + 60);
+    }
+
 }
