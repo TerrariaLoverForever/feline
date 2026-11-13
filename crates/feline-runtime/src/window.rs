@@ -100,6 +100,12 @@ pub enum WindowChange {
         dy: f32,
     },
     Key(Key),
+    /// The mouse moved while Feline holds it (see [`App::update_capture`]):
+    /// only the movement, in pixels.
+    Relative {
+        dx: f32,
+        dy: f32,
+    },
 }
 
 /// Android's MotionEvent actions.
@@ -155,6 +161,25 @@ struct App {
     /// Keys Roblox was told are down (code → the key-down event), so they
     /// can be released when the window system loses their release.
     held: std::collections::HashMap<i32, Key>,
+    focused: bool,
+    /// Roblox wants the mouse locked (first person, Shift Lock).
+    engine_lock: bool,
+    /// The pointer is held in place, and how.
+    grab: Option<Grab>,
+    /// Holding the pointer was refused (said once, until it's let go).
+    grab_refused: bool,
+    /// Where the pointer was when it was taken, to put it back.
+    anchor: (f32, f32),
+}
+
+/// How the pointer is held while the camera turns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Grab {
+    /// The window system keeps the pointer still (Wayland).
+    Locked,
+    /// The pointer is kept inside the window and put back after every
+    /// movement (X11).
+    Confined,
 }
 
 impl App {
@@ -191,6 +216,70 @@ fn handles(window: &Window) -> Result<NativeHandles, String> {
 }
 
 impl App {
+    /// Holds the pointer in place while the camera is being turned (the
+    /// right button is down) or Roblox locks the mouse (first person, Shift
+    /// Lock), and lets it go afterwards. While it's held, the mouse's own
+    /// movement is passed on ([`WindowChange::Relative`]) instead of the
+    /// pointer's position: the pointer stops at the screen's edge, and the
+    /// camera stopped turning with it.
+    fn update_capture(&mut self) {
+        use winit::window::CursorGrabMode;
+        let want = mouse_mode() && self.focused && (self.other_pressed[0] || self.engine_lock);
+        if !want {
+            self.grab_refused = false;
+        }
+        let Some(window) = &self.window else {
+            return;
+        };
+        if want == self.grab.is_some() || (want && self.grab_refused) {
+            return;
+        }
+        let anchor = winit::dpi::PhysicalPosition::new(self.anchor.0 as f64, self.anchor.1 as f64);
+        if want {
+            self.anchor = self.cursor;
+            self.grab = if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                Some(Grab::Locked)
+            } else if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                Some(Grab::Confined)
+            } else {
+                None
+            };
+            match self.grab {
+                Some(grab) => eprintln!("feline-runtime: mouse held for the camera ({grab:?})"),
+                None => {
+                    self.grab_refused = true;
+                    eprintln!("feline-runtime: the window system didn't let Feline hold the mouse");
+                }
+            }
+        } else {
+            // Back where it was taken (on Wayland, a hint for the unlock).
+            let _ = window.set_cursor_position(anchor);
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            self.grab = None;
+            self.cursor = self.anchor;
+            eprintln!("feline-runtime: mouse let go");
+        }
+    }
+
+    /// The mouse moved by (dx, dy) while it's held.
+    fn moved_while_held(&mut self, dx: f32, dy: f32) {
+        // One change per pump: a 1000 Hz mouse sends many small steps.
+        if let Some(WindowChange::Relative { dx: x, dy: y }) = self.changes.last_mut() {
+            *x += dx;
+            *y += dy;
+        } else {
+            self.changes.push(WindowChange::Relative { dx, dy });
+        }
+        if self.grab == Some(Grab::Confined)
+            && let Some(window) = &self.window
+        {
+            let _ = window.set_cursor_position(winit::dpi::PhysicalPosition::new(
+                self.anchor.0 as f64,
+                self.anchor.1 as f64,
+            ));
+        }
+    }
+
     fn touch(&mut self, action: TouchAction) {
         let (x, y) = self.cursor;
         self.changes
@@ -284,6 +373,19 @@ impl ApplicationHandler for App {
         self.window = Some(window);
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if let winit::event::DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && self.grab.is_some()
+        {
+            self.moved_while_held(dx as f32, dy as f32);
+        }
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if REFRESH_RATES.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
             self.note_refresh_rates(event_loop);
@@ -301,6 +403,9 @@ impl ApplicationHandler for App {
                 });
             }
             WindowEvent::CloseRequested => self.changes.push(WindowChange::CloseRequested),
+            // While the pointer is held, the movement comes from the mouse
+            // itself (`device_event`); the pointer stays where it was.
+            WindowEvent::CursorMoved { .. } if self.grab.is_some() => {}
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x as f32, position.y as f32);
                 if self.pressed {
@@ -327,6 +432,7 @@ impl ApplicationHandler for App {
                         button: index as i32 + 1,
                         down,
                     });
+                    self.update_capture();
                 }
             }
             WindowEvent::MouseInput {
@@ -350,6 +456,7 @@ impl ApplicationHandler for App {
             // finger is lifted, so it isn't left "down".
             WindowEvent::Focused(false) => {
                 crate::pacing::set_focused(false);
+                self.focused = false;
                 // Keys let go while another window has the focus (Alt
                 // after Alt-Tab) never send their release here: Roblox
                 // would keep them held (a stuck Alt turns Esc, L, Enter
@@ -373,9 +480,12 @@ impl ApplicationHandler for App {
                         });
                     }
                 }
+                self.update_capture();
             }
             WindowEvent::Focused(true) => {
                 crate::pacing::set_focused(true);
+                self.focused = true;
+                self.update_capture();
                 self.changes.push(WindowChange::Focus(true));
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -415,7 +525,7 @@ impl ApplicationHandler for App {
                 let key = crate::keys::android_key(&event, self.modifiers);
                 if let Some(key) = key {
                     if key.down {
-                        self.held.insert(key.code, key.clone());
+                        self.held.insert(key.code, key);
                     } else if self.held.remove(&key.code).is_none() {
                         // A release Roblox already got (see `release`).
                         return;
@@ -448,6 +558,11 @@ impl DesktopWindow {
                 other_pressed: [false; 2],
                 modifiers: Default::default(),
                 held: Default::default(),
+                focused: true,
+                engine_lock: false,
+                grab: None,
+                grab_refused: false,
+                anchor: (0.0, 0.0),
             },
         };
         // The window is created on the first `resumed` event.
@@ -470,6 +585,15 @@ impl DesktopWindow {
     pub fn request_size(&self, width: u32, height: u32) {
         if let Some(window) = &self.app.window {
             let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        }
+    }
+
+    /// Roblox locks the mouse or not (first person, Shift Lock): asked from
+    /// the main loop, see init.rs's `mouse_locked`.
+    pub fn set_mouse_lock(&mut self, locked: bool) {
+        if locked != self.app.engine_lock {
+            self.app.engine_lock = locked;
+            self.app.update_capture();
         }
     }
 

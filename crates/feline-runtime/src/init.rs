@@ -491,6 +491,7 @@ struct InputNatives {
     mouse_move: Option<usize>,
     mouse_button: Option<usize>,
     mouse_wheel: Option<usize>,
+    mouse_locked: Option<usize>,
     key: Option<usize>,
     sync_text: Option<usize>,
     pass_text: Option<usize>,
@@ -519,6 +520,7 @@ pub fn prepare_input_natives(elf: &Elf, image: &Image) -> Result<(), String> {
         mouse_move: find(INPUT, "nativePassMouseMove"),
         mouse_button: find(INPUT, "nativePassMouseButton"),
         mouse_wheel: find(INPUT, "nativePassMouseWheel"),
+        mouse_locked: find(INPUT, "nativeGetMainWindowIsMouseLockedCenter"),
         key: find(GL, "nativePassKeyEvent"),
         sync_text: find(GL, "syncTextboxTextAndCursorPosition2"),
         pass_text: find(GL, "nativePassText"),
@@ -530,12 +532,51 @@ pub fn prepare_input_natives(elf: &Elf, image: &Image) -> Result<(), String> {
     Ok(())
 }
 
+/// Where Roblox was last told the mouse is, and whether that came from a
+/// held mouse's movement (see [`roblox_mouse_relative`]).
+static MOUSE_AT: std::sync::Mutex<(Option<(f32, f32)>, bool)> = std::sync::Mutex::new((None, false));
+
+/// Whether Roblox locks the mouse to the middle of its window (first
+/// person, Shift Lock): `nativeGetMainWindowIsMouseLockedCenter ()Z`, as
+/// mocktail's pointer capture asks it (Apache-2.0).
+fn mouse_locked(env: *mut c_void) -> bool {
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return false;
+    };
+    let Some(address) = natives.mouse_locked else {
+        return false;
+    };
+    // SAFETY: a static JNI function with the DEX signature ()Z.
+    let locked: extern "C" fn(*mut c_void, *mut c_void) -> u8 =
+        unsafe { std::mem::transmute(address) };
+    locked(env, natives.input_class as *mut c_void) != 0
+}
+
+/// Passes on the movement of a held mouse (the camera turning). The
+/// position keeps counting past the window's edges, as Android's captured
+/// pointer does (mocktail's input router, Apache-2.0): Roblox turns the
+/// camera by the movement.
+fn roblox_mouse_relative(env: *mut c_void, dx: f32, dy: f32) {
+    let Some(natives) = INPUT_NATIVES.get() else {
+        return;
+    };
+    let Some(address) = natives.mouse_move else {
+        return;
+    };
+    let mut at = MOUSE_AT.lock().unwrap_or_else(|p| p.into_inner());
+    let (x, y) = at.0.unwrap_or((0.0, 0.0));
+    let (x, y) = (x + dx, y + dy);
+    *at = (Some((x, y)), true);
+    // SAFETY: nativePassMouseMove (FFFF)V: position, then movement.
+    let moved: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32, f32) =
+        unsafe { std::mem::transmute(address) };
+    moved(env, natives.input_class as *mut c_void, x, y, dx, dy);
+}
+
 /// Sends a pointer event through Roblox's mouse functions. False if they
 /// aren't available (then GameActivity's touch path is used).
 fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
     use crate::window::TouchAction;
-    use std::sync::Mutex;
-    static LAST: Mutex<Option<(f32, f32)>> = Mutex::new(None);
     let Some(natives) = INPUT_NATIVES.get() else {
         return false;
     };
@@ -562,9 +603,14 @@ fn roblox_mouse(env: *mut c_void, touch: crate::window::Touch) -> bool {
             let Some(address) = natives.mouse_move else {
                 return false;
             };
-            let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-            let (dx, dy) = last.map_or((0.0, 0.0), |(lx, ly)| (x - lx, y - ly));
-            *last = Some((x, y));
+            let mut at = MOUSE_AT.lock().unwrap_or_else(|p| p.into_inner());
+            // The first position after the mouse was held isn't a movement
+            // from where the counting ended.
+            let (dx, dy) = match *at {
+                (Some((lx, ly)), false) => (x - lx, y - ly),
+                _ => (0.0, 0.0),
+            };
+            *at = (Some((x, y)), false);
             // SAFETY: nativePassMouseMove (FFFF)V: position, then movement.
             let moved: extern "C" fn(*mut c_void, *mut c_void, f32, f32, f32, f32) =
                 unsafe { std::mem::transmute(address) };
@@ -612,8 +658,16 @@ fn log_key(key: crate::window::Key, to_text_box: bool) -> bool {
     // In a text box, a character key's code would give away what was
     // typed: only keys without a character (Enter, Esc, arrows) are logged.
     if !key.repeat && !(to_text_box && key.unicode != 0) {
+        // With the time since the last logged key, for "my key presses
+        // get lost" reports.
+        static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+        let since = LAST
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .replace(std::time::Instant::now())
+            .map_or(0, |t| t.elapsed().as_millis());
         eprintln!(
-            "feline-runtime: key {} code {} scan {} → {}",
+            "feline-runtime: key {} code {} scan {} → {} (+{since} ms)",
             if key.down { "down" } else { "up" },
             key.code,
             key.scan_code,
@@ -831,6 +885,7 @@ pub fn window_changed(handle: i64, change: crate::window::WindowChange) -> Resul
         }
         WindowChange::CloseRequested => {}
         WindowChange::Wheel { x, y, dy } => roblox_wheel(env, x, y, dy),
+        WindowChange::Relative { dx, dy } => roblox_mouse_relative(env, dx, dy),
         WindowChange::MouseButton { x, y, button, down } => {
             roblox_mouse_button(env, x, y, button, down);
         }
@@ -1112,6 +1167,8 @@ pub fn run_window_loop(
     // a press of W, to test input without anyone at the keyboard.
     let mut input_test = std::env::var_os("FELINE_INPUT_TEST").is_some();
     let mut script = input_script().into_iter().peekable();
+    let mut last_turn: Option<std::time::Instant> = None;
+    let mut slow_turns = 0;
     while std::time::Instant::now() < end {
         if let Some(env) = crate::jni::current_env() {
             finish_left_text_box(env);
@@ -1119,8 +1176,22 @@ pub fn run_window_loop(
             pass_refresh_rates(env);
             crate::gamepad::poll(env);
             crate::versions::tick();
+            window.set_mouse_lock(mouse_locked(env));
         }
-        let mut changes = window.pump(std::time::Duration::from_millis(1));
+        // Slow turns of this loop hold input back (keys and mouse reach
+        // Roblox late and in bunches): said in the log, a few times.
+        let turn = last_turn.replace(std::time::Instant::now()).map(|t| t.elapsed());
+        if let Some(turn) = turn
+            && turn.as_millis() >= 50
+            && slow_turns < 40
+        {
+            slow_turns += 1;
+            eprintln!("feline-runtime: the main loop took {} ms for one turn", turn.as_millis());
+        }
+        // No waiting here: the wait is the looper's, below, and short, so
+        // input reaches Roblox within a couple of milliseconds (it was up
+        // to 16 ms: a 60 Hz mouse in a 240 FPS game).
+        let mut changes = window.pump(std::time::Duration::ZERO);
         while let Some((at, _)) = script.peek()
             && start.elapsed().as_secs_f64() >= *at
         {
@@ -1165,7 +1236,7 @@ pub fn run_window_loop(
         // SAFETY: NULL out pointers are allowed.
         unsafe {
             crate::looper::ALooper_pollOnce(
-                15,
+                2,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
