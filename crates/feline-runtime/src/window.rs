@@ -245,7 +245,10 @@ impl App {
                 None
             };
             match self.grab {
-                Some(grab) => eprintln!("feline-runtime: mouse held for the camera ({grab:?})"),
+                Some(grab) => eprintln!(
+                    "feline-runtime: mouse held for the camera ({grab:?}, {})",
+                    if self.engine_lock { "Roblox's lock" } else { "right button" }
+                ),
                 None => {
                     self.grab_refused = true;
                     eprintln!("feline-runtime: the window system didn't let Feline hold the mouse");
@@ -280,8 +283,24 @@ impl App {
         }
     }
 
+    /// Where Roblox is told the pointer is for a click. While Roblox locks
+    /// the mouse (first person, Shift Lock) that's the middle of the
+    /// window, as on a PC, not where the hidden pointer was stopped: a
+    /// click there pressed whatever was under it (a text box that then
+    /// took the number keys, a button).
+    fn click_at(&self) -> (f32, f32) {
+        if self.engine_lock
+            && self.grab.is_some()
+            && let Some(window) = &self.window
+        {
+            let size = window.inner_size();
+            return (size.width as f32 / 2.0, size.height as f32 / 2.0);
+        }
+        self.cursor
+    }
+
     fn touch(&mut self, action: TouchAction) {
-        let (x, y) = self.cursor;
+        let (x, y) = self.click_at();
         self.changes
             .push(WindowChange::Touch(Touch { action, x, y }));
     }
@@ -425,7 +444,7 @@ impl ApplicationHandler for App {
                 let down = state == winit::event::ElementState::Pressed;
                 if down != self.other_pressed[index] {
                     self.other_pressed[index] = down;
-                    let (x, y) = self.cursor;
+                    let (x, y) = self.click_at();
                     self.changes.push(WindowChange::MouseButton {
                         x,
                         y,
