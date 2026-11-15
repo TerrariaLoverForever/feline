@@ -122,10 +122,13 @@ maintainer's decision and an entry in this list.
 ## Before sending a change
 
 ```sh
-cargo fmt --all
 cargo clippy --workspace --all-targets   # no warnings
 cargo test --workspace
 ```
+
+Don't run `cargo fmt` on the whole project: Feline's code isn't in rustfmt's
+default style (its lines run to about 120 columns), so that would rewrite
+most files. Write new code the way the code around it looks.
 
 New source files start with:
 
