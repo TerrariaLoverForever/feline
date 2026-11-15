@@ -164,9 +164,18 @@ fn player(rx: Receiver<Command>) {
     let mut level = 0.0f32;
     let mut quitting = false;
     let mut failures = 0usize;
+    // Silent with nothing to fade or play: wait for the next command
+    // instead of waking 25 times a second.
+    let mut resting = false;
 
     loop {
-        match rx.recv_timeout(TICK) {
+        let received = if resting {
+            rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            rx.recv_timeout(TICK)
+        };
+        resting = false;
+        match received {
             Ok(Command::Want(w)) => {
                 if w.tracks != want.tracks {
                     if let Some((_, p)) = &sink {
@@ -202,6 +211,7 @@ fn player(rx: Receiver<Command>) {
             } else if let Some((_, p)) = &sink {
                 p.pause();
             }
+            resting = true;
             continue;
         }
 

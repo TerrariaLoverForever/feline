@@ -24,6 +24,7 @@
 
 #![allow(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -111,11 +112,19 @@ pub fn new_instance(class: &str) -> Handle {
     add_object(Object::Instance(class.to_owned()))
 }
 
-#[derive(Default)]
+type Member = (&'static str, &'static str, &'static str, bool);
+
 struct World {
     objects: Vec<Object>,
-    /// (class, name, signature, static?) per method or field ID.
-    members: Vec<(String, String, String, bool)>,
+    /// The object index of each class, by name: one object per class.
+    classes: BTreeMap<String, usize>,
+    /// (class, name, signature, static?) per method or field ID. The texts
+    /// live as long as the process (one copy per member, see `member_ids`),
+    /// so looking a member up copies nothing.
+    members: Vec<Member>,
+    /// The ID of each member already asked for: asking again gives the
+    /// same ID instead of a new entry.
+    member_ids: BTreeMap<Member, usize>,
     /// (class, method name, signature) of each registered native.
     natives: Vec<(String, String, String)>,
     /// The function of each registered native, by method name.
@@ -124,7 +133,9 @@ struct World {
 
 static WORLD: Mutex<World> = Mutex::new(World {
     objects: Vec::new(),
+    classes: BTreeMap::new(),
     members: Vec::new(),
+    member_ids: BTreeMap::new(),
     natives: Vec::new(),
     native_functions: Vec::new(),
 });
@@ -144,8 +155,10 @@ fn add_object(object: Object) -> Handle {
     let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
     world.objects.push(object);
     let n = world.objects.len();
-    if n.is_power_of_two() && n >= 1024 {
-        log(format!("{n} Java objects so far"));
+    // Always logged (it's rare): objects are never freed, so this is how a
+    // long session's memory use shows up in a bug report.
+    if n.is_power_of_two() && n >= 4096 {
+        eprintln!("feline-runtime: jni: {n} Java objects so far");
     }
     handle(n - 1)
 }
@@ -168,13 +181,22 @@ unsafe fn text(s: *const c_char) -> String {
     unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned()
 }
 
-/// A line about the engine's Java calls, with the runtime setting
-/// "Detailed logs" only (they were most of every log).
-fn log(what: String) {
+/// Whether the runtime setting "Detailed logs" is on.
+fn detailed() -> bool {
     static DETAILED: OnceLock<bool> = OnceLock::new();
-    if *DETAILED.get_or_init(|| crate::prefs::get().detailed_logs) {
-        eprintln!("feline-runtime: jni: {what}");
-    }
+    *DETAILED.get_or_init(|| crate::prefs::get().detailed_logs)
+}
+
+/// A line about the engine's Java calls, with the runtime setting
+/// "Detailed logs" only (they were most of every log). The text is only
+/// put together when it's going to be written: the engine makes these
+/// calls all the time.
+macro_rules! log {
+    ($($arg:tt)*) => {
+        if detailed() {
+            eprintln!("feline-runtime: jni: {}", format_args!($($arg)*));
+        }
+    };
 }
 
 /// `FELINE_JNI_TRACE=1` logs every call to Feline's JNI functions (also
@@ -208,8 +230,8 @@ unsafe extern "C" fn find_class(_env: Handle, name: *const c_char) -> Handle {
     trace("FindClass");
     // SAFETY: the engine passes a valid class name.
     let name = unsafe { text(name) };
-    log(format!("FindClass {name}"));
-    add_object(Object::Class(name))
+    log!("FindClass {name}");
+    class_handle(&name)
 }
 
 fn member(
@@ -223,10 +245,17 @@ fn member(
     // SAFETY: the engine passes valid C strings for name and signature.
     let (name, sig) = unsafe { (text(name), text(sig)) };
     let label = if is_static { "static " } else { "" };
-    log(format!("Get{kind} {label}{class}.{name} {sig}"));
+    log!("Get{kind} {label}{class}.{name} {sig}");
     let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-    world.members.push((class, name, sig, is_static));
-    handle(world.members.len() - 1)
+    if let Some(&id) = world.member_ids.get(&(class.as_str(), name.as_str(), sig.as_str(), is_static)) {
+        return handle(id);
+    }
+    let keep = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+    let member: Member = (keep(class), keep(name), keep(sig), is_static);
+    let id = world.members.len();
+    world.members.push(member);
+    world.member_ids.insert(member, id);
+    handle(id)
 }
 
 unsafe extern "C" fn get_method_id(
@@ -284,13 +313,13 @@ unsafe extern "C" fn register_natives(
         let m = unsafe { &*methods.add(i) };
         // SAFETY: valid C strings in each entry.
         let (name, sig) = unsafe { (text(m.name), text(m.signature)) };
-        log(format!("  native {name} {sig}"));
+        log!("  native {name} {sig}");
         world
             .native_functions
             .push((name.clone(), m.function as usize));
         world.natives.push((class.clone(), name, sig));
     }
-    log(format!("RegisterNatives {class}: {count} natives"));
+    log!("RegisterNatives {class}: {count} natives");
     JNI_OK
 }
 
@@ -373,34 +402,38 @@ extern "C" fn get_object_ref_type(_env: Handle, _object: Handle) -> JInt {
 /// equal with IsSameObject).
 fn class_handle(name: &str) -> Handle {
     let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(i) = world
-        .objects
-        .iter()
-        .position(|o| matches!(o, Object::Class(n) if n == name))
-    {
+    class_handle_in(&mut world, name)
+}
+
+fn class_handle_in(world: &mut World, name: &str) -> Handle {
+    if let Some(&i) = world.classes.get(name) {
         return handle(i);
     }
     world.objects.push(Object::Class(name.to_owned()));
-    handle(world.objects.len() - 1)
+    let i = world.objects.len() - 1;
+    world.classes.insert(name.to_owned(), i);
+    handle(i)
 }
 
 /// `GetObjectClass`: Feline's objects are classes or strings.
 extern "C" fn get_object_class(_env: Handle, object: Handle) -> Handle {
     trace("GetObjectClass");
-    let name = {
-        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-        match index(object).and_then(|i| world.objects.get(i)) {
-            Some(Object::Class(_)) => "java/lang/Class".to_owned(),
-            Some(Object::Str(_)) => "java/lang/String".to_owned(),
-            Some(Object::Instance(class)) => class.clone(),
-            Some(Object::Buffer { .. }) => "java/nio/DirectByteBuffer".to_owned(),
-            Some(Object::Bytes { .. }) => "[B".to_owned(),
-            Some(Object::Floats { .. }) => "[F".to_owned(),
-            None => "java/lang/Object".to_owned(),
+    let mut world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+    let instance_class;
+    let name = match index(object).and_then(|i| world.objects.get(i)) {
+        Some(Object::Class(_)) => "java/lang/Class",
+        Some(Object::Str(_)) => "java/lang/String",
+        Some(Object::Instance(class)) => {
+            instance_class = class.clone();
+            instance_class.as_str()
         }
+        Some(Object::Buffer { .. }) => "java/nio/DirectByteBuffer",
+        Some(Object::Bytes { .. }) => "[B",
+        Some(Object::Floats { .. }) => "[F",
+        None => "java/lang/Object",
     };
-    log(format!("GetObjectClass {object:p} -> {name}"));
-    class_handle(&name)
+    log!("GetObjectClass {object:p} -> {name}");
+    class_handle_in(&mut world, name)
 }
 
 /// `GetSuperclass`: every Feline class extends java/lang/Object, which has
@@ -411,7 +444,7 @@ extern "C" fn get_superclass(_env: Handle, class: Handle) -> Handle {
     if name == "java/lang/Object" {
         return std::ptr::null_mut();
     }
-    log(format!("GetSuperclass {name} -> java/lang/Object"));
+    log!("GetSuperclass {name} -> java/lang/Object");
     class_handle("java/lang/Object")
 }
 
@@ -426,7 +459,7 @@ extern "C" fn is_instance_of(env: Handle, object: Handle, class: Handle) -> JBoo
     let actual = class_name(get_object_class(env, object));
     let wanted = class_name(class);
     let result = actual == wanted || wanted == "java/lang/Object";
-    log(format!("IsInstanceOf {actual} of {wanted} -> {result}"));
+    log!("IsInstanceOf {actual} of {wanted} -> {result}");
     JBoolean::from(result)
 }
 
@@ -479,9 +512,9 @@ fn construct(class: Handle, constructor: Handle, next: &mut dyn FnMut(u8) -> Arg
     let signature = member_of(constructor)
         .map(|(_, _, sig)| sig)
         .unwrap_or_default();
-    log(format!("new {name} {signature} (no Java constructor runs)"));
+    log!("new {name} {signature} (no Java constructor runs)");
     if name == "com/roblox/engine/jni/model/NativeTextBoxInfo" {
-        let args: Vec<Arg> = parameter_kinds(&signature)
+        let args: Vec<Arg> = parameter_kinds(signature)
             .into_iter()
             .map(&mut *next)
             .collect();
@@ -592,7 +625,7 @@ extern "C" fn get_direct_buffer_capacity(_env: Handle, object: Handle) -> i64 {
 extern "C" fn alloc_object(_env: Handle, class: Handle) -> Handle {
     trace("AllocObject");
     let name = class_name(class);
-    log(format!("alloc {name}"));
+    log!("alloc {name}");
     new_instance(&name)
 }
 
@@ -810,36 +843,29 @@ fn return_type(signature: &str) -> &str {
     signature.rsplit_once(')').map_or("V", |(_, r)| r)
 }
 
-/// Logs a placeholder answer (first 3 calls per method) and returns the
-/// method's return type.
-fn answer(method: Handle, kind: &str, value: &str) -> String {
+/// Logs a placeholder answer (first 3 calls per method), with "Detailed
+/// logs" only.
+fn answer(method: Handle, kind: &str, value: &dyn std::fmt::Display) {
     use std::collections::HashMap;
     static SEEN: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
-    let (description, ret) = {
-        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-        match index(method).and_then(|i| world.members.get(i)) {
-            Some((class, name, sig, is_static)) => (
-                format!(
-                    "{}{class}.{name} {sig}",
-                    if *is_static { "static " } else { "" }
-                ),
-                return_type(sig).to_owned(),
-            ),
-            None => (format!("<unknown method {method:p}>"), "V".to_owned()),
-        }
-    };
-    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
-    let count = seen
-        .get_or_insert_with(HashMap::new)
-        .entry(method as usize)
-        .or_insert(0);
-    *count += 1;
-    if *count <= 3 {
-        log(format!(
-            "{kind} {description} -> {value} (placeholder; no Java code runs)"
-        ));
+    if !detailed() {
+        return;
     }
-    ret
+    {
+        let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+        let count = seen.get_or_insert_with(HashMap::new).entry(method as usize).or_insert(0);
+        *count += 1;
+        if *count > 3 {
+            return;
+        }
+    }
+    match member_of_full(method) {
+        Some((class, name, sig, is_static)) => {
+            let label = if is_static { "static " } else { "" };
+            log!("{kind} {label}{class}.{name} {sig} -> {value} (placeholder; no Java code runs)");
+        }
+        None => log!("{kind} <unknown method {method:p}> -> {value} (placeholder; no Java code runs)"),
+    }
 }
 
 /// Real answers for a few methods whose results the engine depends on
@@ -886,11 +912,14 @@ fn known_string(class: &str, member: &str) -> Option<String> {
 }
 
 /// (class, member) of a method or field ID.
-pub(crate) fn member_of(id: Handle) -> Option<(String, String, String)> {
+pub(crate) fn member_of(id: Handle) -> Option<(&'static str, &'static str, &'static str)> {
+    member_of_full(id).map(|(c, n, s, _)| (c, n, s))
+}
+
+/// (class, member, signature, static?) of a method or field ID.
+fn member_of_full(id: Handle) -> Option<Member> {
     let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-    index(id)
-        .and_then(|i| world.members.get(i))
-        .map(|(c, n, s, _)| (c.clone(), n.clone(), s.clone()))
+    index(id).and_then(|i| world.members.get(i)).copied()
 }
 
 /// The placeholder for an object-returning method: an empty String for
@@ -898,42 +927,36 @@ pub(crate) fn member_of(id: Handle) -> Option<(String, String, String)> {
 /// objects (on Android, getters like `getResources()` never return null),
 /// and null for arrays.
 fn object_answer(method: Handle, kind: &str) -> Handle {
-    let ret = {
-        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-        index(method)
-            .and_then(|i| world.members.get(i))
-            .map(|(_, _, sig, _)| return_type(sig).to_owned())
-            .unwrap_or_default()
-    };
-    let (class, name, _) = member_of(method).unwrap_or_default();
-    if let Some(value) = known_string(&class, &name) {
-        answer(method, kind, &format!("\"{value}\""));
+    let (class, name, signature) = member_of(method).unwrap_or_default();
+    let ret = return_type(signature);
+    if let Some(value) = known_string(class, name) {
+        answer(method, kind, &format_args!("\"{value}\""));
         return new_string(&value);
     }
     // Objects that are null on a normal (non-VR) device.
     if matches!(
-        (class.as_str(), name.as_str()),
+        (class, name),
         (
             "com/roblox/engine/jni/autovalue/StartAppParams",
             "vrContext"
         )
     ) {
-        answer(method, kind, "null (not a VR device)");
+        answer(method, kind, &"null (not a VR device)");
         return std::ptr::null_mut();
     }
     // The window's Surface, wherever the engine asks for "the surface".
     if ret == "Landroid/view/Surface;" && crate::window::native_window().is_some() {
-        answer(method, kind, "the window's Surface");
+        answer(method, kind, &"the window's Surface");
         return crate::window::surface_object();
     }
     if ret == "Ljava/lang/String;" {
-        answer(method, kind, "\"\"");
+        answer(method, kind, &"\"\"");
         add_object(Object::Str(CString::default()))
     } else if let Some(class) = ret.strip_prefix('L').and_then(|r| r.strip_suffix(';')) {
-        answer(method, kind, &format!("a new {class}"));
+        answer(method, kind, &format_args!("a new {class}"));
         new_instance(class)
     } else {
-        answer(method, kind, "null");
+        answer(method, kind, &"null");
         std::ptr::null_mut()
     }
 }
@@ -1056,10 +1079,11 @@ fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -
     if object == MOTION_EVENT.load(Ordering::Relaxed) {
         let (_, name, _) = member_of(method)?;
         let (x, y) = *MOTION.lock().unwrap_or_else(|p| p.into_inner());
-        if std::env::var_os("FELINE_INPUT_LOG").is_some() {
-            log(format!("MotionEvent.{name} asked"));
+        static INPUT_LOG: OnceLock<bool> = OnceLock::new();
+        if *INPUT_LOG.get_or_init(|| std::env::var_os("FELINE_INPUT_LOG").is_some()) {
+            log!("MotionEvent.{name} asked");
         }
-        return Some(match name.as_str() {
+        return Some(match name {
             "getPointerId" => 0.0,
             // TOOL_TYPE_MOUSE or TOOL_TYPE_FINGER (see window::mouse_mode).
             "getToolType" => {
@@ -1083,7 +1107,7 @@ fn event_answer(object: Handle, method: Handle, read: &mut dyn FnMut() -> i64) -
     if object == KEY_EVENT.load(Ordering::Relaxed) {
         let (_, name, _) = member_of(method)?;
         let (key, event_time, down_time) = (*KEY.lock().unwrap_or_else(|p| p.into_inner()))?;
-        return Some(match name.as_str() {
+        return Some(match name {
             "getDeviceId" => 1.0,
             "getSource" => f64::from(0x101), // SOURCE_KEYBOARD
             "getAction" => f64::from(u8::from(!key.down)), // ACTION_DOWN 0 / UP 1
@@ -1140,7 +1164,7 @@ fn audio_call(method: Handle, read: &mut dyn FnMut() -> i64) -> Option<f64> {
     if class != "org/fmod/AudioDevice" {
         return None;
     }
-    match name.as_str() {
+    match name {
         "init" => {
             let (channels, rate, size, frames) =
                 (read() as i32, read() as i32, read() as i32, read() as i32);
@@ -1172,7 +1196,7 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
     let Some((_, name, _)) = member_of(method) else {
         return;
     };
-    match name.as_str() {
+    match name {
         "showKeyboard" | "gameActivity_showKeyboard" => {
             let text_box = read();
             // showNativeInput (not "multiline", as Feline first assumed).
@@ -1284,10 +1308,10 @@ macro_rules! calls {
             return FromAnswer::from_answer(value);
         }
         if let Some(value) = known_number($method) {
-            answer($method, "call", &value.to_string());
+            answer($method, "call", &value);
             return FromAnswer::from_answer(value);
         }
-        answer($method, "call", &format!("{:?}", $zero));
+        answer($method, "call", &format_args!("{:?}", $zero));
         $zero
     }};
 }
@@ -1673,27 +1697,24 @@ fn window_mm(width: bool) -> f64 {
 fn field_value(field: Handle, kind: &str) -> f64 {
     use std::collections::HashMap;
     static SEEN: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
-    let (description, value) = {
-        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-        match index(field).and_then(|i| world.members.get(i)) {
-            Some((class, name, sig, _)) => {
-                (format!("{class}.{name} {sig}"), known_field(class, name))
+    let member = member_of_full(field);
+    let value = member.and_then(|(class, name, _, _)| known_field(class, name));
+    if detailed() {
+        let first_few = {
+            let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+            let count = seen.get_or_insert_with(HashMap::new).entry(field as usize).or_insert(0);
+            *count += 1;
+            *count <= 3
+        };
+        if first_few {
+            let description = match member {
+                Some((class, name, sig, _)) => format!("{class}.{name} {sig}"),
+                None => format!("<unknown field {field:p}>"),
+            };
+            match value {
+                Some(v) => log!("{kind} {description} -> {v}"),
+                None => log!("{kind} {description} -> 0 (placeholder; no Java data)"),
             }
-            None => (format!("<unknown field {field:p}>"), None),
-        }
-    };
-    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
-    let count = seen
-        .get_or_insert_with(HashMap::new)
-        .entry(field as usize)
-        .or_insert(0);
-    *count += 1;
-    if *count <= 3 {
-        match value {
-            Some(v) => log(format!("{kind} {description} -> {v}")),
-            None => log(format!(
-                "{kind} {description} -> 0 (placeholder; no Java data)"
-            )),
         }
     }
     value.unwrap_or(0.0)
@@ -1731,16 +1752,9 @@ field_getters! {
 extern "C" fn get_object_field(_env: Handle, _object: Handle, field: Handle) -> Handle {
     trace("GetObjectField");
     field_value(field, "get");
-    let ty = {
-        let world = WORLD.lock().unwrap_or_else(|p| p.into_inner());
-        index(field)
-            .and_then(|i| world.members.get(i))
-            .map(|(_, _, sig, _)| sig.clone())
-            .unwrap_or_default()
-    };
-    let (class, name, _) = member_of(field).unwrap_or_default();
-    if let Some(value) = known_string(&class, &name) {
-        log(format!("get {class}.{name} -> \"{value}\""));
+    let (class, name, ty) = member_of(field).unwrap_or_default();
+    if let Some(value) = known_string(class, name) {
+        log!("get {class}.{name} -> \"{value}\"");
         return new_string(&value);
     }
     if ty == "Ljava/lang/String;" {

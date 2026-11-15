@@ -115,12 +115,18 @@ pub unsafe extern "C" fn sigaction(
     let new = (!act.is_null()).then(|| {
         // SAFETY: the caller's structure.
         let a = unsafe { &*act };
-        let what = match a.sa_handler {
-            libc::SIG_DFL => "the default action".to_owned(),
-            libc::SIG_IGN => "ignore".to_owned(),
-            _ => "a handler".to_owned(),
+        let (kind, what) = match a.sa_handler {
+            libc::SIG_DFL => (0, "the default action"),
+            libc::SIG_IGN => (1, "ignore"),
+            _ => (2, "a handler"),
         };
-        eprintln!("feline-runtime: the engine set signal {signum} to {what}");
+        // Said once per signal and kind: the engine sets some of them again
+        // on every connection (SIGPIPE to ignore filled the log).
+        static SAID: [std::sync::atomic::AtomicU8; 65] = [const { std::sync::atomic::AtomicU8::new(0) }; 65];
+        let said = usize::try_from(signum).ok().and_then(|n| SAID.get(n));
+        if said.is_none_or(|s| s.fetch_or(1 << kind, std::sync::atomic::Ordering::Relaxed) & (1 << kind) == 0) {
+            eprintln!("feline-runtime: the engine set signal {signum} to {what}");
+        }
         // SAFETY: zeroed is a valid glibc sigaction to fill in.
         let mut g: libc::sigaction = unsafe { std::mem::zeroed() };
         g.sa_sigaction = a.sa_handler;

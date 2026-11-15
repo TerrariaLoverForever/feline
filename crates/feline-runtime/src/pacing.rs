@@ -6,8 +6,9 @@
 //! its turn, just before it's presented (Vulkan's vkQueuePresentKHR,
 //! OpenGL's eglSwapBuffers), and the engine's own limiter is opened up.
 //! Frames then leave at an even rhythm instead of the engine's coarser
-//! sleeps, which feels smoother at the same frame rate. A short sleep
-//! followed by a spin of at most a millisecond gets the timing exact.
+//! sleeps, which feels smoother at the same frame rate. A sleep to just
+//! before the frame's turn and a very short spin get the timing exact
+//! without keeping a CPU core busy.
 //!
 //! `throttleUnfocused`: 30 FPS while the window isn't focused, to save
 //! power (Roblox's own Android code would do that for a phone app in the
@@ -73,6 +74,12 @@ pub fn before_present() {
     });
 }
 
+/// How long before a frame's turn the sleep ends and the spin begins.
+/// Linux wakes a sleeping thread within about 60 microseconds (its default
+/// timer slack is 50); spinning for a whole millisecond, as this did, kept
+/// a core a quarter busy at 240 FPS for no gain in accuracy.
+const SPIN: Duration = Duration::from_micros(150);
+
 fn wait_until(at: Instant) {
     loop {
         let now = Instant::now();
@@ -80,8 +87,8 @@ fn wait_until(at: Instant) {
             return;
         }
         let left = at - now;
-        if left > Duration::from_micros(1500) {
-            std::thread::sleep(left - Duration::from_millis(1));
+        if left > SPIN {
+            std::thread::sleep(left - SPIN);
         } else {
             std::hint::spin_loop();
         }
@@ -93,9 +100,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn waiting_ends_on_time() {
+        // A 4 ms wait (a frame at 240 FPS) ends at its time, not early, and
+        // not late by more than a busy machine's scheduling.
+        let at = Instant::now() + Duration::from_millis(4);
+        wait_until(at);
+        let late = Instant::now().duration_since(at);
+        assert!(late < Duration::from_millis(3), "woke {late:?} late");
+        wait_until(Instant::now() - Duration::from_millis(1)); // already past: returns at once
+    }
+
+    #[test]
     fn pacing_needs_a_limit() {
-        let mut p = crate::prefs::Prefs::default();
-        p.frame_pacing = true;
+        let mut p = crate::prefs::Prefs { frame_pacing: true, ..Default::default() };
         assert!(!paces(&p), "no limit: nothing to pace");
         p.fps_limit = 144;
         assert!(paces(&p));
@@ -105,8 +122,7 @@ mod tests {
 
     #[test]
     fn unfocused_throttle() {
-        let mut p = crate::prefs::Prefs::default();
-        p.throttle_unfocused = true;
+        let mut p = crate::prefs::Prefs { throttle_unfocused: true, ..Default::default() };
         set_focused(false);
         assert_eq!(target(&p), Some(UNFOCUSED_FPS));
         p.frame_pacing = true;

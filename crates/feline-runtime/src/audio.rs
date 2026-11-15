@@ -167,14 +167,16 @@ pub fn write(data: &[u8]) {
     let Some(pulse) = pulse() else {
         return;
     };
-    let stream = *STREAM.lock().unwrap_or_else(|p| p.into_inner());
-    if stream == 0 || data.is_empty() {
+    // Held for the whole write, so `close` (or a new `init`) on another
+    // thread can't free the stream under it.
+    let stream = STREAM.lock().unwrap_or_else(|p| p.into_inner());
+    if *stream == 0 || data.is_empty() {
         return;
     }
     let mut error = 0;
-    // SAFETY: a live stream (only freed by `close`, which FMOD calls after
-    // its last write) and `data.len()` readable bytes.
-    unsafe { (pulse.write)(stream as *mut c_void, data.as_ptr().cast(), data.len(), &mut error) };
+    // SAFETY: a live stream (freeing it needs the lock held here) and
+    // `data.len()` readable bytes.
+    unsafe { (pulse.write)(*stream as *mut c_void, data.as_ptr().cast(), data.len(), &mut error) };
 }
 
 /// `AudioDevice.close`.

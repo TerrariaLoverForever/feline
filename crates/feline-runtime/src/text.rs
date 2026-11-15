@@ -77,7 +77,11 @@ pub fn set_info(args: &[crate::jni::Arg]) {
         text_color: int(8) as u32,
         input_type: int(10),
     };
-    eprintln!("feline-runtime: text box info {info:?} (all: {args:?})");
+    // With "Detailed logs" only: Roblox sends this on every frame of a text
+    // box's opening animation (it was more than half of a short log).
+    if crate::prefs::get().detailed_logs {
+        eprintln!("feline-runtime: text box info {info:?} (all: {args:?})");
+    }
     *INFO.lock().unwrap_or_else(|p| p.into_inner()) = Some(info);
 }
 
