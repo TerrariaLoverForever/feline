@@ -7,9 +7,11 @@
 //! window, graphics, input, sound and files. See `docs/ARCHITECTURE.md`,
 //! and `docs/runtime/M2-RESEARCH.md` for the research it started from.
 //!
-//! Clean-room rule: no code from Sober, Cordial, Stud or other Roblox
-//! runtimes is used (see CONTRIBUTING.md). Roblox's library is only inspected
-//! through its ELF interface, never disassembled.
+//! Rules for this crate (see CONTRIBUTING.md): no code from Sober, Cordial,
+//! Stud or any other Roblox runtime is used; Mocktail and Nightcap were read
+//! as a reference, and each place that follows them says so. Roblox's
+//! library is inspected through its ELF interface, not disassembled; the one
+//! exception is the allocator address in `alloc.rs`.
 
 // `unsafe` is denied everywhere (workspace lint) except where a module opts
 // in explicitly: `load` (mapping the engine), `host` (dlopen/dlsym),

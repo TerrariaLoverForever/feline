@@ -11,5 +11,6 @@ this Program grant you additional permission to convey the resulting work.
 This permission does not give anyone a right to the Roblox client itself.
 Feline does not include or distribute it; users obtain it themselves.
 
-Status: draft, chosen in milestone M2 (docs/runtime/M2-RESEARCH.md). It should
-be reviewed before the first release. This file is not legal advice.
+Status: in force for Feline's runtime. Chosen in milestone M2
+(docs/runtime/M2-RESEARCH.md). It was written by the Feline project and has
+not been reviewed by a lawyer. This file is not legal advice.

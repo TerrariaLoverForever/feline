@@ -1,7 +1,13 @@
 # Pushing a tag like v0.2.0 builds Feline for Linux and Windows and
-# publishes a GitHub release with the programs and their SHA-256 checksums
-# (`feline` + `feline.sha256`, `feline.exe` + `feline.exe.sha256`): what
-# Feline's own "Check for updates" downloads and verifies.
+# publishes a GitHub release with the programs and their SHA-256 checksums:
+#
+#   Linux:    feline, feline-runtime, feline-login (each with a .sha256),
+#             and feline-linux-x86_64.tar.gz with all three for a first
+#             install
+#   Windows:  feline.exe + feline.exe.sha256
+#
+# The single programs are what Feline's own "Check for updates" downloads
+# and verifies (crates/feline-core/src/selfupdate.rs).
 #
 # The tag must match the version in Cargo.toml (without the v), or Feline
 # won't see the release as newer.
@@ -16,20 +22,27 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-22.04
+    # 24.04: the oldest Ubuntu with WebKitGTK 6.0, which the login window uses.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev pkg-config
-      - run: cargo build --release -p feline
-      - name: Program and checksum
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+      - run: cargo build --release -p feline -p feline-runtime -p feline-login
+      - name: Programs, archive and checksums
         run: |
-          mkdir out
-          cp target/release/feline out/feline
-          cd out && sha256sum feline > feline.sha256
+          mkdir -p out feline-linux-x86_64
+          cp target/release/feline target/release/feline-runtime target/release/feline-login out/
+          cp out/feline out/feline-runtime out/feline-login COPYING LICENSE.exception TRADEMARKS.md README.md docs/LEGAL.md feline-linux-x86_64/
+          cp -r LICENSES feline-linux-x86_64/
+          tar -czf out/feline-linux-x86_64.tar.gz feline-linux-x86_64
+          cd out
+          for f in feline feline-runtime feline-login feline-linux-x86_64.tar.gz; do
+            sha256sum "$f" > "$f.sha256"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: linux

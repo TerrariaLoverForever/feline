@@ -43,8 +43,8 @@ Usage: feline-runtime --play <libroblox.so>
 --save-cookie  saves a Roblox session cookie (.ROBLOSECURITY) so the app
          starts logged in; readable only by you. --logout forgets it.
 
-Only --init runs any of the library's code. Roblox's code isn't disassembled;
-only its ELF interface is read.
+Only --play and --init run any of the library's code. The other commands
+read just its ELF interface; none of them disassembles Roblox's code.
 ";
 
 pub fn main() -> ExitCode {

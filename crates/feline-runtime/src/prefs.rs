@@ -18,7 +18,7 @@
 //! | `graphicsQuality` | 0: Roblox decides; 1–10: Roblox's graphics quality, set at each start |
 //! | `microphone` | let voice chat use the microphone (off: others hear silence) |
 //! | `controllers` | pass gamepads to Roblox |
-//! | `blockTracking` | Roblox's analytics/telemetry hosts look nonexistent to it (see net.rs) |
+//! | `blockTracking` | Roblox's analytics/telemetry hosts look nonexistent to it (see net.rs); off unless turned on |
 //! | `proxy` | "" or an `http://`, `https://`, `socks5://` or `socks5h://` address for Roblox's web traffic |
 //! | `detailedLogs` | log every Java call the engine makes (for bug reports) |
 //! | `cpuThreads` | 0: every CPU thread; otherwise Roblox runs on that many (see tuning.rs) |
@@ -83,7 +83,7 @@ impl Default for Prefs {
             graphics_quality: 0,
             microphone: true,
             controllers: true,
-            block_tracking: true,
+            block_tracking: false,
             proxy: String::new(),
             detailed_logs: false,
             cpu_threads: 0,
@@ -460,7 +460,9 @@ mod tests {
         assert_eq!(p.proxy, "socks5://127.0.0.1:9050");
         assert_eq!(p.graphics_quality, 10);
         assert!(!p.microphone);
-        assert!(p.block_tracking, "tracking is blocked unless turned off");
+        assert!(!p.block_tracking, "tracking is blocked only when turned on");
+        let on = Prefs::from_json(json!({"blockTracking": true}).as_object().unwrap());
+        assert!(on.block_tracking);
         let bad = Prefs::from_json(json!({"proxy": "not a url"}).as_object().unwrap());
         assert_eq!(bad.proxy, "", "an invalid proxy isn't used");
         assert!(valid_proxy("") && valid_proxy("http://proxy:8080") && !valid_proxy("ftp://x"));

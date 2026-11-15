@@ -22,9 +22,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev pkg-config
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
       - uses: Swatinem/rust-cache@v2
       - name: Tests (feline-core, feline-win)
         run: cargo test -p feline-core -p feline-win
       - name: Clippy (the app)
         run: cargo clippy -p feline -p feline-core -p feline-win -- -D warnings
+      # Feline's runtime and its login window are Linux programs. Their tests
+      # that need a display or sound aren't run here; the build and the rest are.
+      - name: Build (runtime, login window)
+        if: runner.os == 'Linux'
+        run: cargo build -p feline-runtime -p feline-login

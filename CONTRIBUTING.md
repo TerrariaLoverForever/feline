@@ -27,16 +27,26 @@ Signed-off-by: Your Name <you@example.com>
 
 Commits without a sign-off can't be merged.
 
-## Clean-room rule for runtime work
+## Rules for runtime work
 
-Feline's runtime is developed **independently**.
+Feline's runtime is the project's **own code**.
 
-- **Do not copy, port, translate or adapt code from Cordial, Sober, Stud** or
-  any other Roblox runtime, even where its license would allow it.
-- **Do not consult their source code** while working on Feline's runtime.
-  Public, high-level documentation (READMEs, user docs) may be read, but
-  implementations must be your own.
-- Pull requests containing code derived from those projects are rejected.
+- **Do not copy, port, translate or adapt code from another Roblox runtime**,
+  even where its license would allow it. Implementations must be your own.
+- **Cordial, Sober and Stud: do not consult their source code** while working
+  on Feline's runtime. Their public, high-level documentation (READMEs, user
+  docs) may be read.
+- **Permissively licensed runtimes (today: Mocktail and Nightcap, both
+  Apache-2.0) may be read as a reference** for facts about how Roblox's app
+  expects to be driven: key and button numbers, which of Roblox's functions
+  to call and in what order, setting names. When you do:
+  - write the code yourself;
+  - say so in a comment at that place, naming the project, its license and
+    the file you followed;
+  - make sure the project is listed under "Runtime component policy" in
+    [docs/LEGAL.md](docs/LEGAL.md).
+- Pull requests containing code copied or adapted from another runtime are
+  rejected.
 - Third-party code from other projects may only be added after its license
   has been verified file by file and recorded in [docs/LEGAL.md](docs/LEGAL.md).
 
@@ -44,7 +54,12 @@ Feline's runtime is developed **independently**.
 documentation files (`docs/architecture.md`, `docs/nvidia.md`,
 `docs/runtime-spec.md`) were read. No Cordial source code was read during
 planning (later, limited reads for the launcher are listed below), and no
-Cordial code is in Feline. The optional Cordial adapter
+Cordial code is in Feline. Mocktail's and Nightcap's sources were read as a
+reference for the runtime's input, text, voice, message-bus, desktop-layout
+and frame-rate work; the files that follow them are listed in
+[docs/LEGAL.md](docs/LEGAL.md). An earlier version of this file forbade
+consulting any runtime's source; the rule above replaced it so that it
+matches how the runtime was actually written. The optional Cordial adapter
 (`crates/feline-core/src/runtime/cordial.rs`) only starts Cordial through its
 public command line.
 
@@ -83,6 +98,26 @@ The runtime has to talk to Roblox's engine, so it reads what the engine
   be read: it's what the program reports about itself.
 - **Assets** in the APK are unpacked for the engine at run time on the user's
   machine; they're never committed or redistributed.
+
+#### Exceptions
+
+One piece of Feline came from looking at the engine's machine code, against
+the rule above. It was kept by the maintainer's decision, and is written
+down here so nobody has to find it by surprise:
+
+- **`crates/feline-runtime/src/alloc.rs`:** the engine crashed when it freed
+  buffers that came from the system's allocator. The fix calls the engine's
+  own internal `malloc`, which the engine doesn't export, so its address
+  (for Roblox 2.742.0.1059) and its first bytes were read from a disassembly
+  of that function and of the place that calls it. Nothing else was read,
+  and none of Roblox's code is reproduced beyond the 20 bytes Feline
+  compares before calling. On any other engine version the check fails and
+  Feline doesn't call it.
+- The finding that the engine reads `osVersion` as an Android API level
+  (`"33"`) came from the same work.
+
+This is not a precedent. New work follows the rule; an exception needs the
+maintainer's decision and an entry in this list.
 
 ## Before sending a change
 

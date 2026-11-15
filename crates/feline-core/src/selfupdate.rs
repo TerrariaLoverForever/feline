@@ -6,6 +6,12 @@
 //! `<program>.sha256` file next to it, or `SHA256: <hex>` in the release
 //! notes). The download must match it, or nothing is changed.
 //!
+//! On Linux a release also carries Feline's runtime and login window
+//! (`feline-runtime`, `feline-login`), each with its `.sha256` file. They
+//! belong to the same version as the launcher, so those of them that are
+//! installed next to the launcher are updated with it. Everything is
+//! downloaded and checked before the first file is replaced.
+//!
 //! Installing renames the running program to `feline.old.exe` (Windows lets
 //! a running program be renamed, not overwritten) and puts the new one in
 //! its place; it's used from the next start.
@@ -22,6 +28,19 @@ pub const REPO: &str = "TerrariaLoverForever/feline";
 /// The program's file name in releases.
 pub const PROGRAM: &str = if cfg!(windows) { "feline.exe" } else { "feline" };
 
+/// Programs released together with the launcher, updated with it when they
+/// sit next to it.
+pub const COMPANIONS: &[&str] = if cfg!(target_os = "linux") { &["feline-runtime", "feline-login"] } else { &[] };
+
+/// One file of a release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Download {
+    pub name: String,
+    pub url: String,
+    pub sha256: String,
+    pub size: u64,
+}
+
 /// A newer Feline, ready to download.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
@@ -30,6 +49,8 @@ pub struct Release {
     pub url: String,
     pub sha256: String,
     pub size: u64,
+    /// The [`COMPANIONS`] this release carries with a checksum.
+    pub companions: Vec<Download>,
 }
 
 fn agent(timeout: u64) -> ureq::Agent {
@@ -85,10 +106,21 @@ pub fn parse_release(v: &Value, checksum_file: impl Fn(&str) -> Option<String>) 
     let size = program.get("size").and_then(Value::as_u64).unwrap_or(0);
     let sha256 = asset(&format!("{PROGRAM}.sha256"))
         .and_then(|a| a.get("browser_download_url")?.as_str())
-        .and_then(checksum_file)
+        .and_then(&checksum_file)
         .and_then(|t| find_sha256(&t))
         .or_else(|| find_sha256(&notes))?;
-    url.starts_with("https://").then_some(Release { version, notes, url, sha256, size })
+    let companions = COMPANIONS
+        .iter()
+        .filter_map(|name| {
+            let program = asset(name)?;
+            let url = program.get("browser_download_url")?.as_str()?;
+            let sum = asset(&format!("{name}.sha256"))?.get("browser_download_url")?.as_str()?;
+            let sha256 = find_sha256(&checksum_file(sum)?)?;
+            let size = program.get("size").and_then(Value::as_u64).unwrap_or(0);
+            url.starts_with("https://").then(|| Download { name: (*name).to_owned(), url: url.to_owned(), sha256, size })
+        })
+        .collect();
+    url.starts_with("https://").then_some(Release { version, notes, url, sha256, size, companions })
 }
 
 /// The newest release, if it's newer than this Feline.
@@ -109,13 +141,12 @@ pub fn check() -> Result<Option<Release>, String> {
     Ok(parse_release(&v, fetch).filter(|r| newer(&r.version, crate::VERSION)))
 }
 
-/// Downloads `release`, checks it, and puts it in place of the running
-/// program (`exe`). The old one stays as `feline.old(.exe)`.
-pub fn install(release: &Release, exe: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<PathBuf, String> {
+/// Downloads `url` and checks it against `sha256`. `progress(bytes)` is
+/// called as it arrives.
+fn fetch(url: &str, sha256: &str, progress: &mut dyn FnMut(u64)) -> Result<Vec<u8>, String> {
     use std::io::Read as _;
-    let dir = exe.parent().ok_or("Feline's folder wasn't found")?;
     let mut reader = agent(600)
-        .get(&release.url)
+        .get(url)
         .call()
         .map_err(|e| format!("the download didn't start ({e})"))?
         .into_body()
@@ -131,19 +162,64 @@ pub fn install(release: &Release, exe: &Path, progress: &mut dyn FnMut(u64, u64)
         if data.len() > 512 * 1024 * 1024 {
             return Err("the download is far too big; not using it".to_owned());
         }
-        progress(data.len() as u64, release.size);
+        progress(data.len() as u64);
     }
-    let hash = ring::digest::digest(&ring::digest::SHA256, &data);
-    let hex: String = hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
-    if hex != release.sha256 {
+    if sha256_hex(&data) != sha256 {
         return Err("the download doesn't match the release's checksum, so Feline didn't use it".to_owned());
     }
-    let new = dir.join(format!("{PROGRAM}.new"));
-    fs::write(&new, &data).map_err(|e| format!("couldn't save it next to Feline ({e})"))?;
+    Ok(data)
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let hash = ring::digest::digest(&ring::digest::SHA256, data);
+    hash.as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Saves `data` as a program next to `target`, ready to be renamed onto it.
+fn stage(target: &Path, data: &[u8]) -> Result<PathBuf, String> {
+    let mut name = target.file_name().ok_or("Feline's folder wasn't found")?.to_owned();
+    name.push(".new");
+    let new = target.with_file_name(name);
+    fs::write(&new, data).map_err(|e| format!("couldn't save it next to Feline ({e})"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&new, fs::Permissions::from_mode(0o755));
+    }
+    Ok(new)
+}
+
+/// The release's companions that are installed next to `exe`: the ones an
+/// update has to replace.
+fn installed_companions<'a>(release: &'a Release, exe: &Path) -> Vec<(&'a Download, PathBuf)> {
+    release.companions.iter().map(|c| (c, exe.with_file_name(&c.name))).filter(|(_, path)| path.is_file()).collect()
+}
+
+/// Downloads `release`, checks it, and puts it in place of the running
+/// program (`exe`). The old one stays as `feline.old(.exe)`. Feline's
+/// runtime and login window next to it are replaced too (Linux).
+pub fn install(release: &Release, exe: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<PathBuf, String> {
+    let dir = exe.parent().ok_or("Feline's folder wasn't found")?;
+    let companions = installed_companions(release, exe);
+    let total = release.size + companions.iter().map(|(c, _)| c.size).sum::<u64>();
+
+    // Everything is downloaded and checked first: a broken download leaves
+    // the installed Feline as it was.
+    let data = fetch(&release.url, &release.sha256, &mut |n| progress(n, total))?;
+    let mut done = data.len() as u64;
+    let mut staged = Vec::new();
+    for (companion, path) in &companions {
+        let bytes = fetch(&companion.url, &companion.sha256, &mut |n| progress(done + n, total))
+            .map_err(|e| format!("{}: {e}", companion.name))?;
+        done += bytes.len() as u64;
+        staged.push((stage(path, &bytes)?, path));
+    }
+    let new = stage(exe, &data)?;
+
+    // A program that's running can be renamed over on Linux; it keeps
+    // running from the old file.
+    for (from, to) in &staged {
+        fs::rename(from, to).map_err(|e| format!("couldn't put the new {} in place ({e})", to.display()))?;
     }
     let old = dir.join(if cfg!(windows) { "feline.old.exe" } else { "feline.old" });
     let _ = fs::remove_file(&old);
@@ -194,5 +270,39 @@ mod tests {
         ))
         .unwrap();
         assert!(parse_release(&v3, |_| None).is_none());
+    }
+
+    /// Linux releases carry the runtime and the login window; only those
+    /// with a checksum count, and only installed ones are replaced.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn companions_come_with_the_launcher() {
+        let sum = "ab".repeat(32);
+        let v: Value = serde_json::from_str(
+            r#"{"tag_name": "v0.2.0", "assets": [
+                {"name": "feline", "size": 10, "browser_download_url": "https://github.com/x/feline"},
+                {"name": "feline.sha256", "browser_download_url": "https://github.com/x/feline.sha256"},
+                {"name": "feline-runtime", "size": 20, "browser_download_url": "https://github.com/x/feline-runtime"},
+                {"name": "feline-runtime.sha256", "browser_download_url": "https://github.com/x/feline-runtime.sha256"},
+                {"name": "feline-login", "size": 5, "browser_download_url": "https://github.com/x/feline-login"}]}"#,
+        )
+        .unwrap();
+        let r = parse_release(&v, |_| Some(format!("{sum}  file\n"))).unwrap();
+        let names: Vec<&str> = r.companions.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["feline-runtime"], "feline-login has no checksum, so it isn't used");
+        assert_eq!((r.companions[0].size, r.companions[0].sha256.as_str()), (20, sum.as_str()));
+
+        let dir = std::env::temp_dir().join(format!("feline-selfupdate-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("feline");
+        assert!(installed_companions(&r, &exe).is_empty(), "no runtime next to the launcher: left alone");
+        fs::write(dir.join("feline-runtime"), b"old").unwrap();
+        let found = installed_companions(&r, &exe);
+        assert_eq!(found.len(), 1);
+        let new = stage(&found[0].1, b"new").unwrap();
+        assert_eq!(new, dir.join("feline-runtime.new"));
+        assert_eq!(fs::read(&new).unwrap(), b"new");
+        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

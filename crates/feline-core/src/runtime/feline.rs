@@ -227,9 +227,9 @@ static SETTINGS: &[SettingDef] = &[
     SettingDef {
         key: "blockTracking",
         label: "Block Roblox tracking",
-        help: "Roblox's analytics and telemetry servers (usage events, performance metrics, crash and log reports) look unreachable to the app. Games, login, chat and voice don't use them.",
+        help: "Roblox's analytics and telemetry servers (usage events, performance metrics, crash and log reports) look unreachable to the app. Games, login, chat and voice don't use them. Off by default: an app that sends no telemetry may stand out to Roblox, and nobody has measured whether that adds to the account risk.",
         kind: Kind::Toggle,
-        default: Val::Bool(true),
+        default: Val::Bool(false),
         link: None,
     },
     SettingDef {

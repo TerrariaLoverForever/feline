@@ -18,7 +18,7 @@ your password or Robux.
 
 ## Contents
 
-- [Install](#install): [Arch Linux](#arch-linux), [other Linux](#other-linux-distributions), [Windows](#windows)
+- [Install](#install): [Linux](#linux), [Windows](#windows)
 - [What the launcher does](#what-the-launcher-does)
 - [Feline's own runtime](#felines-own-runtime-linux)
 - [Not tested yet](#not-tested-yet)
@@ -28,45 +28,20 @@ your password or Robux.
 
 ## Install
 
-There are no ready-made downloads yet, so Feline is built from its source on
-every system. Pick yours:
+There are no ready-made downloads and no distribution packages yet: for now
+Feline is built from its source. Packages will come later.
 
-- [Arch Linux](#arch-linux) (also CachyOS, EndeavourOS, Manjaro)
-- [Other Linux distributions](#other-linux-distributions)
+- [Linux](#linux)
 - [Windows](#windows)
 
-While this repository is private, `git clone` asks for a GitHub login that
-has access to it (`gh auth login`, then `gh auth setup-git`, sets that up
-once).
-
-### Arch Linux
-
-Feline is installed as a normal package, `feline-git`: the launcher, Feline's
-runtime and its login window. pacman installs what it needs.
-
-1. Get the build tools:
-
-   ```sh
-   sudo pacman -S --needed base-devel git
-   ```
-
-2. Build and install the package:
-
-   ```sh
-   git clone https://github.com/TerrariaLoverForever/feline
-   cd feline/packaging/aur
-   makepkg -si
-   ```
-
-3. Open **Feline** from your app menu and follow [First start](#first-start-on-linux).
-
-- **Update:** `git pull` in the `feline` folder, then `makepkg -si` again.
-- **Remove:** `sudo pacman -R feline-git`.
-
-### Other Linux distributions
+### Linux
 
 Feline is built with cargo and installed into your home folder. It needs a
 64-bit Intel/AMD PC and working Vulkan (or OpenGL ES) graphics drivers.
+
+So far Feline has been built and used on **Arch Linux** only (KDE Plasma on
+Wayland, an NVIDIA card). It should build on other distributions, but
+nobody has tried yet; if you do, please say how it went.
 
 1. Install Rust **1.99 or newer**. If your distribution's Rust is older, use
    [rustup](https://rustup.rs).
@@ -74,12 +49,16 @@ Feline is built with cargo and installed into your home folder. It needs a
 2. Install what Feline builds against and uses:
 
    ```sh
-   # Debian, Ubuntu, Linux Mint
+   # Arch Linux, CachyOS, EndeavourOS, Manjaro
+   sudo pacman -S --needed base-devel git alsa-lib fontconfig freetype2 \
+     libxkbcommon wayland gtk4 webkitgtk-6.0 libpulse vulkan-icd-loader xdg-utils
+
+   # Debian, Ubuntu, Linux Mint (not tried yet)
    sudo apt install build-essential git pkg-config libasound2-dev \
      libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev \
      libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev libpulse0 libvulkan1 xdg-utils
 
-   # Fedora
+   # Fedora (not tried yet)
    sudo dnf install gcc git pkgconf-pkg-config alsa-lib-devel fontconfig-devel \
      freetype-devel libxkbcommon-devel wayland-devel systemd-devel gtk4-devel \
      webkitgtk6.0-devel pulseaudio-libs vulkan-loader xdg-utils
@@ -109,6 +88,10 @@ Feline is built with cargo and installed into your home folder. It needs a
   it running), `git pull` in the `feline` folder, then repeat step 3.
 - **Remove:** `~/.local/bin/feline --uninstall-desktop-entry`, then delete the
   three programs from `~/.local/bin`.
+
+A recipe for an Arch package (`feline-git`) is in
+[packaging/aur](packaging/aur). It hasn't been built from start to finish
+yet and isn't on the AUR, so the steps above are the way to install for now.
 
 ### First start on Linux
 
@@ -250,9 +233,9 @@ top of ordinary Linux libraries.
 - **Roblox updates:** downloaded automatically, the signature checked
   against Roblox's own key, with the previous version kept to fall back on.
 - **Mods**, the same ones as everywhere else.
-- **Privacy:** Roblox's usage-statistics servers are blocked (can be turned
-  off), a proxy can be set, Roblox's own screenshots and recordings can be
-  blocked.
+- **Privacy:** Roblox's usage-statistics servers can be blocked (off unless
+  you turn it on; read the note in [docs/LEGAL.md](docs/LEGAL.md) first), a
+  proxy can be set, Roblox's own screenshots and recordings can be blocked.
 - **Tuning:** graphics quality, how many CPU threads and what priority
   Roblox gets, giving unused memory back, GameMode, MangoHud, vkBasalt.
 
@@ -287,7 +270,7 @@ Expect rough edges, and please say what you find.
 | The release build (GitHub Actions) | Never run: no version has been tagged |
 | The Arch package | The recipe is written; a full `makepkg` build hasn't been run |
 | Studio's script status plugin (Windows) | Not tried in Studio |
-| Install steps for Debian/Ubuntu and Fedora | The package lists were written from each distribution's package names, not run there; only Arch has been used |
+| Building on anything but Arch Linux | The Debian/Ubuntu and Fedora package lists were written from each distribution's package names, not run there |
 | Everything Windows-only | Built and unit-tested automatically on every change, but not confirmed by hand on a Windows PC |
 
 ## Known problems
@@ -305,8 +288,8 @@ Expect rough edges, and please say what you find.
 
 How to update Feline itself is at the end of each [install](#install)
 section. Once releases are published, Feline will also be able to update
-itself (About → Updates), checking each download against its published
-SHA-256 checksum.
+itself (About → Updates), together with its runtime and login window on
+Linux, checking each download against its published SHA-256 checksum.
 
 Roblox, for Feline's runtime: Feline looks for a new version when it opens.
 `feline --update-roblox` does it by hand.
@@ -335,13 +318,17 @@ Feline's official group on Roblox:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Legal notes and account risk](docs/LEGAL.md)
-- [Contributing](CONTRIBUTING.md) (DCO sign-off, rules for runtime work)
+- [Contributing](CONTRIBUTING.md) (DCO sign-off, rules for runtime work and their one exception)
 - [Name and logo policy](TRADEMARKS.md)
 
 ## Credits
 
-Key and gamepad mappings and the order of some of Roblox's input calls
-follow [Mocktail](https://github.com/komaruworld/mocktail) (Apache-2.0).
+Feline's runtime was written with [Mocktail](https://github.com/komaruworld/mocktail)
+and [Nightcap](https://github.com/CoderDayton/nightcap) (both Apache-2.0) as a
+reference: key, mouse and gamepad mappings, the order of some of Roblox's
+input, text and voice calls, and where Roblox keeps its frame-rate limit
+follow them. The code is Feline's own; the details are in
+[docs/LEGAL.md](docs/LEGAL.md#runtime-component-policy).
 The interface is built with [Slint](https://slint.dev).
 
 ## License

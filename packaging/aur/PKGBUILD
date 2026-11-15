@@ -7,8 +7,7 @@
 # Build and install it from this folder:
 #     makepkg -si
 #
-# While the repository is private, git asks for your GitHub login when it
-# fetches the source (`gh auth setup-git` makes that automatic).
+# Not built from start to finish yet, and not on the AUR: see README.md here.
 pkgname=feline-git
 pkgver=0.1.0.r0.g0000000
 pkgrel=1
@@ -83,6 +82,6 @@ package() {
         install -Dm644 "assets/icons/hicolor/${size}x${size}/apps/feline.png" \
             "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$id.png"
     done
-    install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.exception TRADEMARKS.md
+    install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.exception TRADEMARKS.md LICENSES/Apache-2.0.txt
     install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md docs/LEGAL.md
 }

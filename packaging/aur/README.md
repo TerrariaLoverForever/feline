@@ -12,8 +12,8 @@ Remove it again with `sudo pacman -R feline-git`.
 
 Notes:
 
-- While the repository is private, git needs your GitHub login to fetch the
-  source; `gh auth setup-git` sets that up once.
+- This recipe hasn't been built from start to finish yet. Until it has,
+  the README's from-source steps are the way to install Feline.
 - A packaged Feline is updated by building the package again, not by
   About → Updates (that replaces a `feline` you installed yourself).
 - If you used `feline --install-desktop-entry` before, run
@@ -21,8 +21,8 @@ Notes:
 
 ## Publishing to the AUR
 
-The AUR only takes packages whose source anyone can fetch, so this waits
-until the repository is public. Then, with an AUR account and SSH key:
+Not done yet. Once the recipe has been built and tried, with an AUR account
+and SSH key:
 
 ```sh
 git clone ssh://aur@aur.archlinux.org/feline-git.git aur-feline
