@@ -155,12 +155,14 @@ Feline's runtime is written by the Feline project.
   sources were read to learn how Roblox's app expects to be driven, instead
   of guessing. What Feline takes from them is facts: key, mouse-button and
   gamepad numbers, the order of some of Roblox's input, text, voice and
-  message-bus calls, the app policy that gives the desktop layout, and which
-  of Roblox's settings holds the frame-rate limit. The code is Feline's own;
+  message-bus calls, the app policy that gives the desktop layout, which
+  of Roblox's settings holds the frame-rate limit, and which values a game
+  link carries and how they're handed to the app to join that game. The code is Feline's own;
   no file of theirs is in Feline. Each Feline file that follows them says so
   at the place and names the file it followed (`desktop.rs`, `gamepad.rs`,
-  `init.rs`, `login.rs`, `messagebus.rs`, `overlay.rs`, `prefs.rs`,
-  `text.rs`, `voice.rs`, `window.rs` in `crates/feline-runtime/src/`).
+  `init.rs`, `join.rs`, `login.rs`, `messagebus.rs`, `overlay.rs`,
+  `prefs.rs`, `text.rs`, `voice.rs`, `window.rs` in
+  `crates/feline-runtime/src/`).
   Neither project ships a NOTICE file. A copy of their license is in
   [`LICENSES/Apache-2.0.txt`](../LICENSES/Apache-2.0.txt).
   - Mocktail: <https://github.com/komaruworld/mocktail>

@@ -189,6 +189,9 @@ pub struct Settings {
     /// The desktop entry that handled `roblox://` links before Feline took
     /// over, e.g. `froststrap.desktop`, so it can be given back.
     pub previous_link_handler: Option<String>,
+    /// [`Installation::key`](crate::runtime::Installation::key) of the
+    /// runtime that opens those links. `None`: the chosen [`Self::runtime`].
+    pub link_runtime: Option<String>,
     /// Keep Roblox's app up to date for Feline's runtime (on by default).
     pub roblox_updates: bool,
     /// Delete Roblox's and Feline's logs older than this many days (0 =
@@ -504,6 +507,7 @@ impl Default for Settings {
             presence: PresenceOptions::default(),
             link_handler: false,
             previous_link_handler: None,
+            link_runtime: None,
             roblox_updates: true,
             log_days: 0,
             after_launch: AfterLaunch::Stay,
@@ -638,6 +642,7 @@ impl Settings {
                 "previous_link_handler" if !value.is_empty() => {
                     settings.previous_link_handler = Some(value.to_owned())
                 }
+                "link_runtime" if !value.is_empty() => settings.link_runtime = Some(value.to_owned()),
                 // These two default to on, so only "off" changes them.
                 "discord_game_button" => settings.presence.game_button = value != "off",
                 "discord_in_menus" => settings.presence.in_menus = value != "off",
@@ -780,6 +785,9 @@ impl Settings {
         }
         if let Some(previous) = &self.previous_link_handler {
             text.push_str(&format!("previous_link_handler = {previous}\n"));
+        }
+        if let Some(key) = &self.link_runtime {
+            text.push_str(&format!("link_runtime = {key}\n"));
         }
         if !self.roblox_updates {
             text.push_str("roblox_updates = off\n");
@@ -1157,6 +1165,7 @@ mod tests {
             },
             link_handler: true,
             previous_link_handler: Some("froststrap.desktop".into()),
+            link_runtime: Some("sober:flatpak-user".into()),
             roblox_updates: false,
             log_days: 14,
             ..Settings::default()

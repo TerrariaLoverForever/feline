@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The desk cat's life: a background thread that owns the cat's own
-//! see-through window (Windows), moves the cat toward the pointer every
-//! tick and draws it. Started and stopped from the settings, and from games
+//! see-through window, moves the cat toward the pointer every tick and
+//! draws it. Started and stopped from the settings, and from games
 //! starting and ending ("only while playing").
 //!
-//! Elsewhere the cat can't follow the pointer yet (Wayland doesn't tell
-//! programs where it is, nor let them place windows), so [`SUPPORTED`] is
-//! false and nothing starts.
+//! On Windows the window is a layered window. On Linux it's a Wayland
+//! layer-shell surface (see [`wayland`]); where the desktop doesn't tell
+//! Feline where the pointer is, the cat wanders around on its own. X11
+//! sessions and GNOME (no layer-shell) have no cat yet: [`supported`] is
+//! false there and nothing starts.
+
+#[cfg(target_os = "linux")]
+mod wayland;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -15,11 +20,38 @@ use feline_core::cat::Coat;
 use feline_core::settings::DeskCat;
 
 /// Whether the desk cat can live on this system.
-pub const SUPPORTED: bool = cfg!(windows);
+pub fn supported() -> bool {
+    #[cfg(target_os = "linux")]
+    return wayland::supported();
+    #[cfg(not(target_os = "linux"))]
+    return cfg!(windows);
+}
+
+/// A word about the cat on this system for its settings ("" for none).
+pub fn note() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        if !wayland::supported() {
+            return if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+                "Not in X11 sessions yet: the cat needs a Wayland session."
+            } else {
+                "Not on this desktop: the cat needs layer-shell windows, which KDE Plasma, Hyprland, Sway and most Wayland desktops have, but GNOME doesn't."
+            };
+        }
+        if !wayland::follows_pointer() {
+            return "This desktop doesn't tell Feline where the pointer is, so here the cat wanders around the screen on its own. (On KDE Plasma and Hyprland it follows the pointer.)";
+        }
+        ""
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if cfg!(windows) { "" } else { "Not on this system yet." }
+    }
+}
 
 /// How the cat looks (can change while it runs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub struct Look {
     pub coat: Coat,
     pub scale: u32,
@@ -72,7 +104,7 @@ pub fn shutdown() {
 }
 
 fn sync(c: &mut Control) {
-    let wanted = SUPPORTED
+    let wanted = supported()
         && c.settings
             .is_some_and(|s| s.on && (!s.only_playing || c.playing));
     match (wanted, c.running.is_some()) {
@@ -104,7 +136,7 @@ fn sync(c: &mut Control) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn start(look: Look) -> Option<Running> {
     let stop = Arc::new(AtomicBool::new(false));
     let shared_look = Arc::new(Mutex::new(look));
@@ -113,7 +145,12 @@ fn start(look: Look) -> Option<Running> {
         let shared_look = shared_look.clone();
         std::thread::Builder::new()
             .name("feline-desk-cat".into())
-            .spawn(move || live(&stop, &shared_look))
+            .spawn(move || {
+                #[cfg(windows)]
+                live(&stop, &shared_look);
+                #[cfg(target_os = "linux")]
+                wayland::live(&stop, &shared_look);
+            })
             .ok()?
     };
     Some(Running {
@@ -123,7 +160,7 @@ fn start(look: Look) -> Option<Running> {
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn start(_look: Look) -> Option<Running> {
     None
 }

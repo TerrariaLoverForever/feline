@@ -242,6 +242,8 @@ export component AppWindow inherits Window {
     in property <bool> discord-menus;
     in property <bool> link-handler;
     in property <string> link-status;
+    in property <[string]> link-runtimes;
+    in property <int> link-runtime-index;
     in property <string> presence-status;
     // Updates, privacy and storage
     in property <bool> roblox-updates;
@@ -259,6 +261,7 @@ export component AppWindow inherits Window {
     in property <string> size-roblox-versions;
     in property <string> housekeeping-status;
     callback set-link-handler(bool);
+    callback set-link-runtime(int);
     callback set-presence(string, bool);
     callback settings-opened();
     callback set-override(string, int);
@@ -735,6 +738,8 @@ export component AppWindow inherits Window {
             discord-menus: root.discord-menus;
             link-handler: root.link-handler;
             link-status: root.link-status;
+            link-runtimes: root.link-runtimes;
+            link-runtime-index: root.link-runtime-index;
             presence-status: root.presence-status;
             roblox-updates: root.roblox-updates;
             roblox-status: root.roblox-status;
@@ -751,6 +756,9 @@ export component AppWindow inherits Window {
             size-feline-logs: root.size-feline-logs;
             size-roblox-versions: root.size-roblox-versions;
             housekeeping-status: root.housekeeping-status;
+            set-link-runtime(i) => {
+                root.set-link-runtime(i);
+            }
             set-link-handler(on) => {
                 root.set-link-handler(on);
             }

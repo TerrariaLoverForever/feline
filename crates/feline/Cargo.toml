@@ -58,3 +58,8 @@ slint-build = "1.18.1"
 # StatusNotifierItem protocol over D-Bus. Unlicense. async-io instead of
 # tokio, as zbus already uses for accessibility.
 ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }
+# The desk cat on Wayland: its see-through layer-shell window (MIT), and
+# D-Bus for asking KDE's KWin where the pointer is (MIT). Both are already
+# in the build through Slint's winit backend and the tray icon.
+smithay-client-toolkit = { version = "0.19", default-features = false, features = ["calloop"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }

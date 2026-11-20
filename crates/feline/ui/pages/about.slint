@@ -454,9 +454,9 @@ export component AboutPage inherits PageBase {
                         BodyText {
                             text: "A little pixel cat for your desktop. It chases your pointer, sits down next to it, washes, and naps when you stop moving. It lives in its own see-through window on top of everything: clicks go straight through it, and it never goes near Roblox.";
                         }
-                        if !Extras.cat-supported: BodyText {
-                            text: "Not on Linux yet: Wayland doesn't let apps follow the pointer or place their own windows, so for now the cat is Windows-only.";
-                            color: Theme.warning;
+                        if Extras.cat-note != "": BodyText {
+                            text: Extras.cat-note;
+                            color: Extras.cat-supported ? Theme.text-muted : Theme.warning;
                         }
                     }
                 }

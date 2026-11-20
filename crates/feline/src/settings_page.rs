@@ -56,6 +56,7 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
     ui.set_discord_region(state.settings.discord.region);
     ui.set_discord_today(state.settings.discord.today);
     ui.set_link_handler(state.settings.link_handler);
+    show_link_runtimes(ui, &state);
     ui.set_after_launch_index(match state.settings.after_launch {
         AfterLaunch::Stay => 0,
         AfterLaunch::Minimize => 1,
@@ -464,6 +465,52 @@ pub fn set_presence(ui: &AppWindow, shared: &Shared, which: &str, value: bool) {
             "today" => settings.discord.today = value,
             _ => return,
         }
+    }
+    save_and_apply(ui, shared);
+}
+
+/// The choices for "Open them with" (links): the runtime in use, then each
+/// installed runtime; and the index of the saved choice.
+pub fn link_runtime_choices(state: &State) -> (Vec<SharedString>, i32) {
+    let in_use = crate::gui::selected(state)
+        .map(|f| format!("The runtime you use ({})", f.installation.backend.name()))
+        .unwrap_or_else(|| "The runtime you use".to_owned());
+    let mut names = vec![SharedString::from(in_use)];
+    for f in &state.found {
+        let name = f.installation.backend.name();
+        let twins = state.found.iter().filter(|o| o.installation.backend.name() == name).count();
+        names.push(if twins > 1 {
+            format!("{name} ({})", crate::gui::short_kind(&f.installation.kind)).into()
+        } else {
+            name.into()
+        });
+    }
+    let index = state
+        .settings
+        .link_runtime
+        .as_deref()
+        .and_then(|key| state.found.iter().position(|f| f.installation.key() == key))
+        .map_or(0, |i| i as i32 + 1);
+    (names, index)
+}
+
+/// Shows the "Open them with" choices.
+pub fn show_link_runtimes(ui: &AppWindow, state: &State) {
+    let (names, index) = link_runtime_choices(state);
+    ui.set_link_runtimes(ModelRc::new(VecModel::from(names)));
+    ui.set_link_runtime_index(index);
+}
+
+/// "Open them with": 0 is the runtime in use, then the installed runtimes.
+pub fn set_link_runtime(ui: &AppWindow, shared: &Shared, index: i32) {
+    {
+        let mut state = lock(shared);
+        let key = usize::try_from(index - 1)
+            .ok()
+            .and_then(|i| state.found.get(i))
+            .map(|f| f.installation.key());
+        state.settings.link_runtime = key;
+        show_link_runtimes(ui, &state);
     }
     save_and_apply(ui, shared);
 }

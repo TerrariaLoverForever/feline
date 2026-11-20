@@ -33,8 +33,10 @@ export global Extras {
     in property <color> sprinkle: #ffffff;
 
     // ---- Desk cat
-    // False where the cat can't follow the pointer (Linux, for now).
+    // False where the cat can't live (X11, GNOME).
     in property <bool> cat-supported;
+    // A word about the cat on this system ("" for none).
+    in property <string> cat-note;
     in property <bool> cat-on;
     in property <int> cat-coat-index;
     in property <int> cat-size-index;

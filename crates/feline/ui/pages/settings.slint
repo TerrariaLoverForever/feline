@@ -98,6 +98,9 @@ export component SettingsPage inherits PageBase {
     in property <string> presence-status;
     in property <bool> link-handler;
     in property <string> link-status;
+    // "The runtime you use", then each installed runtime.
+    in property <[string]> link-runtimes;
+    in property <int> link-runtime-index;
 
     // Updates, privacy and storage.
     in property <bool> roblox-updates;
@@ -119,6 +122,7 @@ export component SettingsPage inherits PageBase {
     in property <string> housekeeping-status;
 
     callback set-link-handler(bool);
+    callback set-link-runtime(int);
     callback set-presence(string, bool);
     callback set-override(string, int);
     callback set-roblox-updates(bool);
@@ -483,6 +487,18 @@ export component SettingsPage inherits PageBase {
                         checked: root.link-handler;
                         toggled(on) => {
                             root.set-link-handler(on);
+                        }
+                    }
+                }
+                if root.link-handler: SettingRow {
+                    label: "Open them with";
+                    help: "The runtime that joins the game from a link. Feline's own runtime opens Roblox's app and goes straight into the game.";
+                    ComboBox {
+                        width: 240px;
+                        model: root.link-runtimes;
+                        current-index: root.link-runtime-index;
+                        selected => {
+                            root.set-link-runtime(self.current-index);
                         }
                     }
                 }

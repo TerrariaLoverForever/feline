@@ -40,6 +40,7 @@ pub mod host;
 pub mod imports;
 pub mod init;
 pub mod jni;
+pub mod join;
 pub mod jni_names;
 pub mod keys;
 pub mod liblog;

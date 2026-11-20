@@ -11,7 +11,7 @@ use std::process::ExitCode;
 const HELP: &str = "\
 feline-runtime: Feline's own runtime for Roblox's Android client
 
-Usage: feline-runtime --play <libroblox.so>
+Usage: feline-runtime --play <libroblox.so> [--join <roblox link>]
        feline-runtime --check <libroblox.so>
        feline-runtime --load <libroblox.so>
        feline-runtime --imports <libroblox.so>
@@ -24,6 +24,8 @@ Usage: feline-runtime --play <libroblox.so>
 
 --play   starts Roblox's app in a window, until you close it (what the
          Feline launcher runs). base.apk must be next to libroblox.so.
+         With --join, it then joins the game in the link (roblox:// or
+         roblox-player:) once the app has reached Home.
 --check  reads the engine library and reports what loading it would involve.
 --load   also puts it into memory: binds every import (forwarded to glibc
          or OpenGL ES, Feline data, or a stub), applies all relocations and
@@ -48,7 +50,17 @@ read just its ELF interface; none of them disassembles Roblox's code.
 ";
 
 pub fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `--join <link>` (with --play): the game to join once the app is up.
+    if let Some(at) = args.iter().position(|a| a == "--join") {
+        let link = args.get(at + 1).cloned().unwrap_or_default();
+        args.drain(at..(at + 2).min(args.len()));
+        match feline_runtime::join::parse(&link) {
+            Ok(request) => feline_runtime::join::set(request),
+            // The app still opens; the game can be picked there.
+            Err(e) => eprintln!("feline-runtime: can't join from that link ({e}); opening the app"),
+        }
+    }
     match args.as_slice() {
         [flag, path] if flag == "--check" => {
             let data = match std::fs::read(path) {
@@ -524,6 +536,9 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                 session_step(&elf, image, "started")?;
                 feline_runtime::init::remember_app_surface_update(&elf, image)?;
                 feline_runtime::init::remember_refresh_natives(&elf, image)?;
+                if let Err(e) = feline_runtime::join::remember_native(&elf, image) {
+                    eprintln!("feline-runtime: can't join from the link: {e}");
+                }
                 if let Err(e) = feline_runtime::gamepad::remember_natives(&elf, image) {
                     eprintln!("feline-runtime: no controllers: {e}");
                 }
@@ -743,6 +758,7 @@ fn session_step(
                     let _ = USER_ID.set(account.id);
                     set_known_string(USER, "getUsername", &account.name);
                     set_known_string(USER, "getDisplayName", &account.display_name);
+                    feline_runtime::join::logged_in(&account.name);
                     set_known_string(REPORTER, "getLastLoggedInUserId", &account.id.to_string());
                     set_known_string(REPORTER, "getLastLoggedInUser", &account.name);
                     // The engine's own record of the current user.

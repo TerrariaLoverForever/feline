@@ -16,6 +16,10 @@ support third-party clients; read [docs/LEGAL.md](docs/LEGAL.md) for the
 account risks before using it. Feline ships no Roblox files and never asks for
 your password or Robux.
 
+**Feline is new, so expect bugs.** Much of it has only been tried on one
+PC so far (see [Not tested yet](#not-tested-yet)). If something breaks,
+please say what happened: a bug report from the Diagnostics page helps a lot.
+
 ## Contents
 
 - [Install](#install): [Linux](#linux), [Windows](#windows)
@@ -156,7 +160,9 @@ installed first, from [roblox.com](https://www.roblox.com/download).
   invite**; a server picker with location and uptime.
 - Desktop shortcuts that start one game straight away.
 - "Play" on roblox.com can open through Feline (opt-in; switching it off
-  gives the links back to the app that had them).
+  gives the links back to the app that had them), with the runtime you
+  pick for links. Feline's own runtime opens Roblox's app and goes
+  straight into that game.
 - Several Roblox accounts, and switching between them (Feline's runtime).
 
 **Making it yours**
@@ -188,6 +194,11 @@ installed first, from [roblox.com](https://www.roblox.com/download).
 - CPU and memory of the game, a break reminder, and a tray icon that keeps
   Feline running in the background.
 - Nothing animates while idle, so Feline uses no GPU time while you play.
+- **Desk cat:** a little pixel cat that follows your pointer around the
+  desktop. On Linux it needs a Wayland desktop with layer-shell windows
+  (KDE Plasma, Hyprland, Sway and most others; not GNOME, not X11). It
+  follows the pointer on KDE Plasma and Hyprland; elsewhere it wanders
+  around the screen on its own.
 
 **When something breaks**
 
@@ -206,7 +217,6 @@ installed first, from [roblox.com](https://www.roblox.com/download).
   status while you build.
 - More than one Roblox at once, the game window's icon and title bar colour,
   which graphics card and priority the game gets.
-- **Desk cat:** a little pixel cat that follows your pointer.
 
 <p>
   <img src="docs/screenshots/settings.png" alt="Settings page" width="49%">
@@ -230,6 +240,9 @@ top of ordinary Linux libraries.
 - **Sound** through PulseAudio or PipeWire.
 - **Signing in** on Roblox's own website in a separate window; the session
   is kept between runs.
+- **Joining from a link:** the website's Play button (with Feline opening
+  Roblox links), Rejoin and the server picker open the app and go straight
+  into that game, once the app has reached its Home screen.
 - **Roblox updates:** downloaded automatically, the signature checked
   against Roblox's own key, with the previous version kept to fall back on.
 - **Mods**, the same ones as everywhere else.
@@ -256,6 +269,7 @@ Expect rough edges, and please say what you find.
 | Proxy | Never used with a real proxy |
 | vkBasalt, MangoHud, GameMode | Not checked in a game |
 | Adding and switching a second account | Not done with a real second login |
+| Joining a game from a link (website Play button, Rejoin, server picker) | Written and unit-tested, but not yet run into a real game |
 | Falling back to the previous Roblox version | Never needed, so never run for real |
 | X11 sessions | Only Wayland (KDE Plasma) has been used |
 | AMD and Intel graphics | Only an NVIDIA card has been used |
@@ -265,6 +279,7 @@ Expect rough edges, and please say what you find.
 | Feature | What's missing |
 |---|---|
 | Stud, Tipsy, Mocktail, Nightcap | Finding and starting them was only tried with stand-in installs, not the real programs |
+| Desk cat on Linux | Tried on KDE Plasma (Wayland) only; following the pointer on Hyprland and wandering on other desktops haven't been tried |
 | Mods with Sober | Written from Sober's documentation, not tried on a real install |
 | Feline updating itself | No release has been published yet, so there was nothing to update to |
 | The release build (GitHub Actions) | Never run: no version has been tagged |
@@ -276,13 +291,11 @@ Expect rough edges, and please say what you find.
 ## Known problems
 
 - Some games kick Feline's runtime with "Client out of sync" (error 267).
-- Feline's runtime can't join a game from a link yet: it opens the app, and
-  you pick the game there.
 - No webcam (face tracking) in Feline's runtime.
 - Games see Feline's runtime as an Android device, since that's the app it
   runs.
-- The desk cat doesn't work on Linux (Wayland doesn't let a program follow
-  the pointer).
+- The desk cat doesn't come out in X11 sessions or on GNOME (no
+  layer-shell windows there).
 
 ## Updating
 

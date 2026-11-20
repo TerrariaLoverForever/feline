@@ -894,11 +894,16 @@ pub fn set_known_number(class: &str, method: &str, value: f64) {
 
 fn known_number(method: Handle) -> Option<f64> {
     let (class, name, _) = member_of(method)?;
+    known_number_named(class, name)
+}
+
+/// A known number by (class, method or field) name.
+fn known_number_named(class: &str, name: &str) -> Option<f64> {
     KNOWN_NUMBERS
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .iter()
-        .find(|(c, m, _)| *c == class && *m == name)
+        .find(|(c, m, _)| c == class && m == name)
         .map(|(_, _, v)| *v)
 }
 
@@ -934,13 +939,14 @@ fn object_answer(method: Handle, kind: &str) -> Handle {
         return new_string(&value);
     }
     // Objects that are null on a normal (non-VR) device.
-    if matches!(
-        (class, name),
-        (
-            "com/roblox/engine/jni/autovalue/StartAppParams",
-            "vrContext"
+    if name == "vrContext"
+        && matches!(
+            class,
+            "com/roblox/engine/jni/autovalue/StartAppParams"
+                | "com/roblox/engine/jni/autovalue/StartGameParams"
+                | "com/roblox/engine/jni/autovalue/AutoValue_StartGameParams"
         )
-    ) {
+    {
         answer(method, kind, &"null (not a VR device)");
         return std::ptr::null_mut();
     }
@@ -1228,6 +1234,7 @@ fn keyboard_call(method: Handle, read: &mut dyn FnMut() -> i64) {
             eprintln!("feline-runtime: jni: app screen: {screen:?}");
             crate::versions::app_shown(&screen);
             crate::login::screen_shown(&screen);
+            crate::join::app_shown(&screen);
         }
         _ => {}
     }
@@ -1698,7 +1705,9 @@ fn field_value(field: Handle, kind: &str) -> f64 {
     use std::collections::HashMap;
     static SEEN: Mutex<Option<HashMap<usize, u32>>> = Mutex::new(None);
     let member = member_of_full(field);
-    let value = member.and_then(|(class, name, _, _)| known_field(class, name));
+    let value = member.and_then(|(class, name, _, _)| {
+        known_field(class, name).or_else(|| known_number_named(class, name))
+    });
     if detailed() {
         let first_few = {
             let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());

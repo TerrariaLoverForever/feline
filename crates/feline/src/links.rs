@@ -5,8 +5,9 @@
 //! handler for `roblox://` and `roblox-player:` links through `xdg-mime`,
 //! after remembering which app handled them before; switching it off gives
 //! them back to that app. A link then arrives as `feline <link>`: Feline
-//! starts the chosen runtime with it (and the Discord status helper, if the
-//! status is on) and exits, without opening its window.
+//! starts the runtime picked for links (Settings; by default the one in
+//! use) with it, and the Discord status helper if the status is on, and
+//! exits without opening its window.
 
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
@@ -128,10 +129,9 @@ pub fn open(arg: &str) -> ExitCode {
         .and_then(|p| Settings::load_from(&p).ok())
         .unwrap_or_default();
     let found = detect_all(&DetectContext::host());
-    let chosen = settings
-        .runtime
-        .as_deref()
-        .and_then(|key| found.iter().find(|i| i.key() == key));
+    let find = |key: Option<&str>| key.and_then(|key| found.iter().find(|i| i.key() == key));
+    // The runtime picked for links, else (or if it's gone) the one in use.
+    let chosen = find(settings.link_runtime.as_deref()).or_else(|| find(settings.runtime.as_deref()));
     let Some(installation) = chosen else {
         eprintln!("feline: no runtime chosen yet; opening Feline so you can pick one");
         return match crate::gui::run() {

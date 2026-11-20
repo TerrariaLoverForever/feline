@@ -393,6 +393,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
             }
         }
     });
+    ui.on_set_link_runtime({
+        let weak = ui.as_weak();
+        let shared = shared.clone();
+        move |index| {
+            if let Some(ui) = weak.upgrade() {
+                settings_page::set_link_runtime(&ui, &shared, index);
+            }
+        }
+    });
     ui.on_set_link_handler({
         let weak = ui.as_weak();
         let shared = shared.clone();
@@ -1412,6 +1421,7 @@ fn refresh_runtimes(ui: &AppWindow, shared: &Shared) {
     let external: Vec<RuntimeRow> = external.iter().map(row).collect();
     ui.set_feline_runtimes(ModelRc::new(VecModel::from(feline)));
     ui.set_runtimes(ModelRc::new(VecModel::from(external)));
+    settings_page::show_link_runtimes(ui, &state);
 
     match selected(&state) {
         Some(f) => {
@@ -1484,7 +1494,7 @@ fn kind_label(kind: &InstallKind) -> String {
     }
 }
 
-fn short_kind(kind: &InstallKind) -> &'static str {
+pub(crate) fn short_kind(kind: &InstallKind) -> &'static str {
     match kind {
         InstallKind::Flatpak { .. } => "Flatpak",
         InstallKind::AppImage(_) => "AppImage",

@@ -113,7 +113,8 @@ pub fn refresh(ui: &AppWindow, shared: &Shared) {
 
     // Desk cat.
     let cat = settings.cat;
-    extras.set_cat_supported(crate::desk_cat::SUPPORTED);
+    extras.set_cat_supported(crate::desk_cat::supported());
+    extras.set_cat_note(crate::desk_cat::note().into());
     extras.set_cat_on(cat.on);
     extras.set_cat_coat_index(
         feline_core::cat::Coat::ALL.iter().position(|c| *c == cat.coat).unwrap_or(0) as i32,
@@ -231,7 +232,7 @@ pub fn show_achievements(ui: &AppWindow, settings: &Settings, announce: bool) {
     let history = History::load();
     let mut facts = Facts::from_history(&history, local_offset_seconds());
     facts.mods_on = !settings.mods.is_empty();
-    facts.desk_cat = settings.cat.on && crate::desk_cat::SUPPORTED;
+    facts.desk_cat = settings.cat.on && crate::desk_cat::supported();
     facts.tidied = feline_core::housekeeping::last_tidy().is_some();
     facts.own_colour = settings.accent != "violet";
     let (new, unlocked) = achievements::update(&facts);

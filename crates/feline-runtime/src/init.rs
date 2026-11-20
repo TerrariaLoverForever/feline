@@ -1176,6 +1176,7 @@ pub fn run_window_loop(
             pass_refresh_rates(env);
             crate::gamepad::poll(env);
             crate::versions::tick();
+            crate::join::tick(env);
             window.set_mouse_lock(mouse_locked(env));
         }
         // Slow turns of this loop hold input back (keys and mouse reach

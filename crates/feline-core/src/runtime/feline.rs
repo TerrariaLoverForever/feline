@@ -10,13 +10,14 @@
 //! - the engine: `~/.local/share/feline/engine/` or `~/feline-engine/`.
 //!
 //! ```text
-//! feline-runtime --play <libroblox.so>    Roblox's app, until the window closes
+//! feline-runtime --play <libroblox.so> [--join <link>]
+//!                                         Roblox's app, until the window closes
 //! feline-runtime --check <libroblox.so>   self-check: can the engine be loaded?
 //! feline-runtime --version
 //! ```
 //!
-//! It can't join an experience from a link yet: it opens the app, where you
-//! pick the game.
+//! A game link goes along as `--join <link>`: the runtime opens the app and
+//! joins that game once the app has reached Home.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -567,17 +568,12 @@ impl RuntimeBackend for FelineRuntime {
         let engine = engine(&DetectContext::host()).ok_or_else(no_engine)?;
         let mut command = installation.command();
         command.arg("--play").arg(engine);
+        // A game: the runtime joins it once the app has reached Home.
+        if let LaunchTarget::Game(game) = target {
+            command.arg("--join").arg(game.launch_uri());
+        }
         let command = with_tools(command, &self.tool_settings(installation));
-        let link_note = matches!(target, LaunchTarget::Game(_)).then(|| {
-            "Feline's runtime can't join from a link yet, so it opens the Roblox app: \
-             find the experience there."
-                .to_owned()
-        });
-        let note = match (rolled_back, link_note) {
-            (Some(a), Some(b)) => Some(format!("{a} {b}")),
-            (a, b) => a.or(b),
-        };
-        Ok(LaunchPlan { command, note })
+        Ok(LaunchPlan { command, note: rolled_back })
     }
 }
 
