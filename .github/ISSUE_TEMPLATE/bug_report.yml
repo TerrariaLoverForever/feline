@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in Feline broke or doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us! Feline is new, so bugs are expected, and reports like this are how they get fixed.
+
+        **Never paste your Roblox password or a `.ROBLOSECURITY` cookie here.** Feline's bug report hides those for you.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        I pressed Play on a game on roblox.com, Feline's runtime opened, but it stayed on Home instead of joining.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The steps, if you know them. "It happens every time" or "only once" helps too.
+      placeholder: |
+        1. Settings → Roblox links → on, open them with Feline Runtime
+        2. Press Play on any game on roblox.com
+        3. …
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Which runtime?
+      options:
+        - Feline Runtime (Feline's own, Linux)
+        - Roblox's official client (Windows)
+        - Sober
+        - Cordial
+        - Stud
+        - Tipsy
+        - Mocktail
+        - Nightcap
+        - None / not about playing
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Your OS and, on Linux, your desktop and whether it's Wayland or X11.
+      placeholder: Arch Linux, KDE Plasma 6 on Wayland, NVIDIA RTX 3060
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Feline's bug report
+      description: |
+        In Feline, open **Diagnostics** and press **Make a bug report**, then paste it here. Personal details (your user name in paths, anything that looks like a login) are already hidden.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots and files
+      description: Optional. Drag screenshots here, or the zip from Diagnostics → **Save as zip** if someone asked for it.
+
+  - type: input
+    id: version
+    attributes:
+      label: Feline version
+      description: Shown at the bottom left of Feline's window and on the About page.
+      placeholder: "0.1.0"
