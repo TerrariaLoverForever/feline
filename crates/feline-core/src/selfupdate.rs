@@ -279,10 +279,12 @@ mod tests {
 
     #[test]
     fn releases_need_the_program_and_its_checksum() {
+        // The release's file name for this PC (plain on x86-64, -aarch64 on ARM).
+        let program = this_pc(PROGRAM);
         let sum = "ab".repeat(32);
         let v: Value = serde_json::from_str(&format!(
             r#"{{"tag_name": "v0.2.0", "body": "Cats.\nSHA256: {sum}", "assets": [
-                {{"name": "{PROGRAM}", "size": 10, "browser_download_url": "https://github.com/x/{PROGRAM}"}}]}}"#
+                {{"name": "{program}", "size": 10, "browser_download_url": "https://github.com/x/{program}"}}]}}"#
         ))
         .unwrap();
         let r = parse_release(&v, |_| None).unwrap();
@@ -291,48 +293,54 @@ mod tests {
         let other = "cd".repeat(32);
         let v2: Value = serde_json::from_str(&format!(
             r#"{{"tag_name": "0.3.0", "assets": [
-                {{"name": "{PROGRAM}", "browser_download_url": "https://github.com/x/p"}},
-                {{"name": "{PROGRAM}.sha256", "browser_download_url": "https://github.com/x/s"}}]}}"#
+                {{"name": "{program}", "browser_download_url": "https://github.com/x/p"}},
+                {{"name": "{program}.sha256", "browser_download_url": "https://github.com/x/s"}}]}}"#
         ))
         .unwrap();
-        assert_eq!(parse_release(&v2, |_| Some(format!("{other}  {PROGRAM}\n"))).unwrap().sha256, other);
+        assert_eq!(parse_release(&v2, |_| Some(format!("{other}  {program}\n"))).unwrap().sha256, other);
         // No checksum anywhere: not used.
         let v3: Value = serde_json::from_str(&format!(
-            r#"{{"tag_name": "0.3.0", "assets": [{{"name": "{PROGRAM}", "browser_download_url": "https://github.com/x/p"}}]}}"#
+            r#"{{"tag_name": "0.3.0", "assets": [{{"name": "{program}", "browser_download_url": "https://github.com/x/p"}}]}}"#
         ))
         .unwrap();
         assert!(parse_release(&v3, |_| None).is_none());
     }
 
-    /// Linux releases carry the runtime and the login window; only those
-    /// with a checksum count, and only installed ones are replaced.
+    /// Linux releases carry companions (the runtime on x86-64, the login
+    /// window); only those with a checksum count, and only installed ones
+    /// are replaced. Uses this PC's release names and companions.
     #[cfg(target_os = "linux")]
     #[test]
     fn companions_come_with_the_launcher() {
         let sum = "ab".repeat(32);
-        let v: Value = serde_json::from_str(
-            r#"{"tag_name": "v0.2.0", "assets": [
-                {"name": "feline", "size": 10, "browser_download_url": "https://github.com/x/feline"},
-                {"name": "feline.sha256", "browser_download_url": "https://github.com/x/feline.sha256"},
-                {"name": "feline-runtime", "size": 20, "browser_download_url": "https://github.com/x/feline-runtime"},
-                {"name": "feline-runtime.sha256", "browser_download_url": "https://github.com/x/feline-runtime.sha256"},
-                {"name": "feline-login", "size": 5, "browser_download_url": "https://github.com/x/feline-login"}]}"#,
-        )
+        let program = this_pc(PROGRAM);
+        let companion = COMPANIONS[0];
+        let released = this_pc(companion);
+        let unsummed = this_pc("feline-unsummed");
+        let v: Value = serde_json::from_str(&format!(
+            r#"{{"tag_name": "v0.2.0", "assets": [
+                {{"name": "{program}", "size": 10, "browser_download_url": "https://github.com/x/{program}"}},
+                {{"name": "{program}.sha256", "browser_download_url": "https://github.com/x/{program}.sha256"}},
+                {{"name": "{released}", "size": 20, "browser_download_url": "https://github.com/x/{released}"}},
+                {{"name": "{released}.sha256", "browser_download_url": "https://github.com/x/{released}.sha256"}},
+                {{"name": "{unsummed}", "size": 5, "browser_download_url": "https://github.com/x/{unsummed}"}}]}}"#,
+        ))
         .unwrap();
         let r = parse_release(&v, |_| Some(format!("{sum}  file\n"))).unwrap();
         let names: Vec<&str> = r.companions.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["feline-runtime"], "feline-login has no checksum, so it isn't used");
+        assert_eq!(names, [companion], "only companions with a checksum are used");
         assert_eq!((r.companions[0].size, r.companions[0].sha256.as_str()), (20, sum.as_str()));
 
         let dir = std::env::temp_dir().join(format!("feline-selfupdate-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("feline");
-        assert!(installed_companions(&r, &exe).is_empty(), "no runtime next to the launcher: left alone");
-        fs::write(dir.join("feline-runtime"), b"old").unwrap();
+        assert!(installed_companions(&r, &exe).is_empty(), "not next to the launcher: left alone");
+        // Installed under its plain name, whatever the release calls it.
+        fs::write(dir.join(companion), b"old").unwrap();
         let found = installed_companions(&r, &exe);
         assert_eq!(found.len(), 1);
         let new = stage(&found[0].1, b"new").unwrap();
-        assert_eq!(new, dir.join("feline-runtime.new"));
+        assert_eq!(new, dir.join(format!("{companion}.new")));
         assert_eq!(fs::read(&new).unwrap(), b"new");
         assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         let _ = fs::remove_dir_all(&dir);
