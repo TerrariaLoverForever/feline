@@ -269,7 +269,6 @@ Expect rough edges, and please say what you find.
 | Proxy | Never used with a real proxy |
 | vkBasalt, MangoHud, GameMode | Not checked in a game |
 | Adding and switching a second account | Not done with a real second login |
-| Joining a game from a link (website Play button, Rejoin, server picker) | Written and unit-tested, but not yet run into a real game |
 | Falling back to the previous Roblox version | Never needed, so never run for real |
 | X11 sessions | Only Wayland (KDE Plasma) has been used |
 | AMD and Intel graphics | Only an NVIDIA card has been used |
