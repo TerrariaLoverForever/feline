@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "feline"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "feline-core",
  "feline-win",
@@ -1347,8 +1347,9 @@ dependencies = [
 
 [[package]]
 name = "feline-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "feline-png",
  "feline-win",
  "miniz_oxide 0.9.1",
  "ring",
@@ -1359,19 +1360,27 @@ dependencies = [
 
 [[package]]
 name = "feline-login"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gtk4",
  "webkit6",
 ]
 
 [[package]]
+name = "feline-png"
+version = "0.1.1"
+dependencies = [
+ "miniz_oxide 0.9.1",
+]
+
+[[package]]
 name = "feline-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ab_glyph",
  "arboard",
  "ash",
+ "feline-png",
  "gilrs",
  "libc",
  "miniz_oxide 0.9.1",
@@ -1383,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "feline-win"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "windows-sys 0.61.2",
 ]

@@ -3,6 +3,9 @@
 //!
 //! Accepted:
 //! - `roblox://…` and `roblox-player:…` links, passed on unchanged
+//! - `robloxmobile://…` links (what the Roblox website opens on Linux,
+//!   which it treats like a phone), turned into the same `roblox://…` link:
+//!   the two schemes take the same `placeId=…&…` forms
 //! - experience pages on the Roblox website, `https://www.roblox.com/games/<id>/…`,
 //!   turned into `roblox://experiences/start?placeId=<id>`
 //!
@@ -15,6 +18,9 @@
 //! for an option like `--something`.
 
 use std::fmt;
+
+/// The Roblox mobile app's link scheme.
+const MOBILE_SCHEME: &str = "robloxmobile://";
 
 /// Longest link we accept. Real links are far shorter.
 const MAX_LEN: usize = 2048;
@@ -111,6 +117,11 @@ pub fn parse(input: &str) -> Result<GameLink, LinkError> {
             place_id: query_number(&lower, "placeid"),
         });
     }
+    if lower.starts_with(MOBILE_SCHEME) {
+        let uri = format!("roblox://{}", &link[MOBILE_SCHEME.len()..]);
+        let place_id = query_number(&uri.to_ascii_lowercase(), "placeid");
+        return Ok(GameLink::Uri { uri, place_id });
+    }
 
     // Website link, with or without the scheme.
     let rest = lower
@@ -140,7 +151,8 @@ pub fn parse(input: &str) -> Result<GameLink, LinkError> {
 
 /// Finds `key=<digits>` in a lowercased query string.
 fn query_number(lower: &str, key: &str) -> Option<u64> {
-    let (_, query) = lower.split_once('?')?;
+    // `scheme://path?key=…` or `scheme://key=…&…` (no path).
+    let query = lower.split_once('?').map_or_else(|| lower.split_once("://").map(|(_, q)| q), |(_, q)| Some(q))?;
     query.split('&').find_map(|pair| {
         let (k, v) = pair.split_once('=')?;
         (k == key).then(|| v.parse().ok())?
@@ -159,6 +171,19 @@ fn is_language_code(segment: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobile_links_become_roblox_links() {
+        let game = parse("robloxmobile://placeID=920587237&gameInstanceId=abc-123").unwrap();
+        assert_eq!(game.launch_uri(), "roblox://placeID=920587237&gameInstanceId=abc-123");
+        assert_eq!(game.place_id(), Some(920587237));
+        let game = parse("robloxmobile://experiences/start?placeId=1818").unwrap();
+        assert_eq!(game.launch_uri(), "roblox://experiences/start?placeId=1818");
+        assert_eq!(game.place_id(), Some(1818));
+        // The scheme's case doesn't matter; the rest is kept as it was.
+        let game = parse("RobloxMobile://placeId=5").unwrap();
+        assert_eq!(game.launch_uri(), "roblox://placeId=5");
+    }
 
     #[test]
     fn website_links_become_experience_links() {

@@ -1,0 +1,16 @@
+[package]
+name = "feline-png"
+description = "A small PNG reader and writer, shared by Feline's launcher and runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Deflate for PNG image data. MIT OR Zlib OR Apache-2.0. Already in the
+# build (the launcher and the runtime use it).
+miniz_oxide = "0.9"

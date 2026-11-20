@@ -29,6 +29,7 @@ pub mod assets;
 pub mod bionic;
 pub mod desktop;
 pub mod check;
+pub mod clientsettings;
 pub mod dex;
 pub mod dl;
 pub mod egl;

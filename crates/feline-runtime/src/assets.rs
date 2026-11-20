@@ -30,6 +30,8 @@ pub struct ZipEntry {
     pub data_offset: u64,
     pub compressed: u64,
     pub size: u64,
+    /// CRC-32 of the unpacked data, as the zip records it.
+    pub crc32: u32,
 }
 
 fn u16_at(d: &[u8], at: usize) -> Option<u16> {
@@ -59,6 +61,7 @@ pub fn read_zip(data: &[u8]) -> Option<HashMap<String, ZipEntry>> {
             return None;
         }
         let method = u16_at(data, at + 10)?;
+        let crc32 = u32_at(data, at + 16)?;
         let compressed = u64::from(u32_at(data, at + 20)?);
         let size = u64::from(u32_at(data, at + 24)?);
         let (name_len, extra_len, comment_len) = (
@@ -84,6 +87,7 @@ pub fn read_zip(data: &[u8]) -> Option<HashMap<String, ZipEntry>> {
                     data_offset,
                     compressed,
                     size,
+                    crc32,
                 },
             );
         }
@@ -138,15 +142,29 @@ pub fn apk_bytes() -> Option<&'static [u8]> {
     MANAGER.get().map(|m| m.map)
 }
 
-/// Unpacks the APK's `assets/` folder into `dest` (once: skipped when
-/// `dest/.complete` exists), for engine code that reads assets as plain
-/// files (`PlatformParams.assetFolderPath`). Returns `dest`.
+/// Unpacks the APK's `assets/` folder into `dest`, for engine code that
+/// reads assets as plain files (`PlatformParams.assetFolderPath`). Returns
+/// `dest`.
+///
+/// `dest/.complete` lists what was unpacked, one file per line: the zip's
+/// CRC-32 and size of it, and its path. At each start, files whose CRC-32 or
+/// size changed in the APK (a Roblox update) are written again, new ones
+/// added and removed ones deleted; the rest are left alone, so a mod's copy
+/// of a file Roblox didn't change stays in place (Feline's launcher puts mods
+/// here, see feline-core's `mods`). A missing or old-style (empty) list
+/// unpacks everything.
+///
+/// The folder used to be unpacked once and never again: after Roblox
+/// updates, the engine kept reading the first APK's files. Its in-game UI
+/// (`InExperience.rbxm`, with the chat) stayed months old, and Roblox's
+/// in-game updates for it are only made for older app versions, so new chat
+/// features (the emoji tray, the friends tab) never showed.
 pub fn unpack_assets(dest: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let marker = dest.join(".complete");
-    if marker.exists() {
-        return Ok(dest.to_owned());
-    }
     let manager = MANAGER.get().ok_or("no APK opened")?;
+    let marker = dest.join(".complete");
+    let old = parse_manifest(&std::fs::read_to_string(&marker).unwrap_or_default());
+    let mut new = std::collections::BTreeMap::new();
+    let mut written = 0;
     for (name, entry) in &manager.entries {
         let Some(relative) = name.strip_prefix("assets/") else {
             continue;
@@ -154,8 +172,15 @@ pub fn unpack_assets(dest: &std::path::Path) -> Result<std::path::PathBuf, Strin
         // Never write outside `dest` (a zip entry name could contain "..").
         if relative.is_empty()
             || relative.ends_with('/')
+            || relative.contains('\n')
             || relative.split('/').any(|p| p == ".." || p.is_empty())
         {
+            continue;
+        }
+        let stamp = (entry.crc32, entry.size);
+        new.insert(relative.to_owned(), stamp);
+        let path = dest.join(relative);
+        if old.get(relative) == Some(&stamp) && path.exists() {
             continue;
         }
         let raw = manager
@@ -168,15 +193,50 @@ pub fn unpack_assets(dest: &std::path::Path) -> Result<std::path::PathBuf, Strin
         } else {
             raw.to_vec()
         };
-        let path = dest.join(relative);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(&path, data)
             .map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+        written += 1;
     }
-    std::fs::write(&marker, b"").map_err(|e| e.to_string())?;
+    // Files this APK no longer has (only ones the list says were unpacked).
+    let mut removed = 0;
+    for relative in old.keys().filter(|r| !new.contains_key(*r)) {
+        if std::fs::remove_file(dest.join(relative)).is_ok() {
+            removed += 1;
+        }
+    }
+    if written > 0 || removed > 0 || old != new {
+        let text: String = new
+            .iter()
+            .map(|(path, (crc, size))| format!("{crc:08x} {size} {path}\n"))
+            .collect();
+        let temporary = dest.join(".complete.new");
+        std::fs::write(&temporary, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&temporary, &marker).map_err(|e| e.to_string())?;
+    }
+    if written > 0 || removed > 0 {
+        eprintln!(
+            "feline-runtime: Roblox's files: {written} of {} unpacked from the APK, {removed} removed",
+            new.len()
+        );
+    }
     Ok(dest.to_owned())
+}
+
+/// `.complete`'s lines (`<crc32 hex> <size> <path>`): path → (CRC-32, size).
+/// Lines that don't parse (the old empty marker) are ignored.
+fn parse_manifest(text: &str) -> std::collections::BTreeMap<String, (u32, u64)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, ' ');
+            let crc = u32::from_str_radix(parts.next()?, 16).ok()?;
+            let size = parts.next()?.parse().ok()?;
+            let path = parts.next().filter(|p| !p.is_empty())?;
+            Some((path.to_owned(), (crc, size)))
+        })
+        .collect()
 }
 
 /// An open asset.
@@ -419,6 +479,17 @@ pub fn implementation(name: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_lines() {
+        let text = "0000abcd 12 content/fonts/A.otf\n1234ffff 0 a b/c d.json\n";
+        let m = parse_manifest(text);
+        assert_eq!(m.get("content/fonts/A.otf"), Some(&(0xabcd, 12)));
+        assert_eq!(m.get("a b/c d.json"), Some(&(0x1234_ffff, 0)));
+        // The old marker was an empty file; garbage is ignored.
+        assert!(parse_manifest("").is_empty());
+        assert!(parse_manifest("not a line\nzz 1 x\n").is_empty());
+    }
 
     /// A zip with one stored and one deflated file, built by hand.
     fn tiny_zip() -> Vec<u8> {

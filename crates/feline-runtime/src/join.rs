@@ -325,6 +325,13 @@ pub fn tick(env: *mut c_void) {
 mod tests {
     use super::*;
 
+    /// What the launcher makes of a `robloxmobile://` link joins the game.
+    #[test]
+    fn mobile_links_as_the_launcher_passes_them() {
+        let request = parse("roblox://placeID=920587237&gameInstanceId=abc-123").unwrap();
+        assert_eq!(request.place_id, 920587237);
+    }
+
     #[test]
     fn experience_links() {
         let r = parse("roblox://experiences/start?placeId=920587237").unwrap();

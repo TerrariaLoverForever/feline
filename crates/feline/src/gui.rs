@@ -164,6 +164,12 @@ pub fn run() -> Result<(), slint::PlatformError> {
         None => {}
     }
     ui.set_show_notice(state.settings.needs_account_notice());
+    // Roblox links another launcher took over since (in the background:
+    // xdg-mime is a shell script).
+    {
+        let settings = state.settings.clone();
+        std::thread::spawn(move || crate::links::keep_claimed(&settings));
+    }
     let shared: Shared = Arc::new(Mutex::new(state));
 
     // The fun extras: colours, season, desk cat, achievements, clear on exit.

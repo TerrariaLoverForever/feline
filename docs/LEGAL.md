@@ -157,9 +157,10 @@ Feline's runtime is written by the Feline project.
   gamepad numbers, the order of some of Roblox's input, text, voice and
   message-bus calls, the app policy that gives the desktop layout, which
   of Roblox's settings holds the frame-rate limit, and which values a game
-  link carries and how they're handed to the app to join that game. The code is Feline's own;
+  link carries and how they're handed to the app to join that game, and
+  the arguments of the app bridge's start call. The code is Feline's own;
   no file of theirs is in Feline. Each Feline file that follows them says so
-  at the place and names the file it followed (`desktop.rs`, `gamepad.rs`,
+  at the place and names the file it followed (`app.rs`, `desktop.rs`, `gamepad.rs`,
   `init.rs`, `join.rs`, `login.rs`, `messagebus.rs`, `overlay.rs`,
   `prefs.rs`, `text.rs`, `voice.rs`, `window.rs` in
   `crates/feline-runtime/src/`).

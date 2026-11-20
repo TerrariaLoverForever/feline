@@ -354,9 +354,70 @@ pub fn decode_area(kind: Kind, src: &[u8], row_blocks: usize, width: usize, heig
     }
 }
 
+/// Textures with fewer pixels than this are decoded on one thread
+/// (starting threads costs more than it saves).
+const PARALLEL_PIXELS: usize = 256 * 256;
+/// The fewest block rows one thread gets.
+const ROWS_PER_THREAD: usize = 16;
+
+/// [`decode_area`], on several CPU threads for large textures: each thread
+/// decodes a band of block rows, which is a contiguous range of `dst`.
+///
+/// The engine records texture uploads on its render thread; decoding a big
+/// texture there on one core held up that frame (the hitch when a game's
+/// effects first load their textures).
+pub fn decode_area_parallel(kind: Kind, src: &[u8], row_blocks: usize, width: usize, height: usize, dst: &mut [u8]) {
+    let block_rows = height.div_ceil(4);
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(8)
+        .min(block_rows / ROWS_PER_THREAD);
+    if width * height < PARALLEL_PIXELS || threads < 2 {
+        decode_area(kind, src, row_blocks, width, height, dst);
+        return;
+    }
+    let band_rows = block_rows.div_ceil(threads);
+    let src_band = band_rows * row_blocks * kind.block_bytes();
+    let dst_band = band_rows * 4 * width * kind.pixel_bytes();
+    std::thread::scope(|scope| {
+        let mut rest = dst;
+        for band in 0..threads {
+            let first_row = band * band_rows * 4;
+            if first_row >= height {
+                break;
+            }
+            let rows = (height - first_row).min(band_rows * 4);
+            let (out, after) = rest.split_at_mut(dst_band.min(rest.len()));
+            rest = after;
+            let Some(input) = src.get(band * src_band..) else {
+                break;
+            };
+            scope.spawn(move || decode_area(kind, input, row_blocks, width, rows, out));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The parallel decoder gives the same pixels as the plain one, for
+    /// sizes that don't divide evenly into blocks or bands.
+    #[test]
+    fn parallel_matches_plain() {
+        for (w, h) in [(300usize, 517usize), (1024, 1024), (257, 1030)] {
+            let row_blocks = w.div_ceil(4);
+            let blocks = row_blocks * h.div_ceil(4);
+            let src: Vec<u8> = (0..blocks * 16).map(|i| ((i * 2654435761usize) >> 7) as u8).collect();
+            for kind in [Kind::Rgb, Kind::Rgba, Kind::R11 { signed: false }] {
+                let size = w * h * kind.pixel_bytes();
+                let (mut a, mut b) = (vec![0u8; size], vec![0u8; size]);
+                decode_area(kind, &src, row_blocks, w, h, &mut a);
+                decode_area_parallel(kind, &src, row_blocks, w, h, &mut b);
+                assert!(a == b, "{kind:?} {w}x{h}");
+            }
+        }
+    }
 
     /// Encodes a differential-mode block of one flat colour (5-bit) with
     /// table 0 and every pixel at index `k`.

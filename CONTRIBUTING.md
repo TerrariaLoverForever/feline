@@ -56,7 +56,7 @@ documentation files (`docs/architecture.md`, `docs/nvidia.md`,
 planning (later, limited reads for the launcher are listed below), and no
 Cordial code is in Feline. Mocktail's and Nightcap's sources were read as a
 reference for the runtime's input, text, voice, message-bus, desktop-layout,
-frame-rate and join-from-a-link work; the files that follow them are listed in
+frame-rate, join-from-a-link and app-start work; the files that follow them are listed in
 [docs/LEGAL.md](docs/LEGAL.md). An earlier version of this file forbade
 consulting any runtime's source; the rule above replaced it so that it
 matches how the runtime was actually written. The optional Cordial adapter

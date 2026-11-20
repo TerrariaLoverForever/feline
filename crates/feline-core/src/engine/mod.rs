@@ -67,6 +67,11 @@ pub fn update(progress: &mut dyn FnMut(Progress)) -> Result<Outcome, String> {
     if !cfg!(target_os = "linux") {
         return Err("Feline's own runtime and its Roblox updates are Linux-only".to_owned());
     }
+    // The runtime runs Roblox's x86-64 engine; there's no runtime for ARM
+    // PCs (yet), so its 240 MB download would be of no use there.
+    if !cfg!(target_arch = "x86_64") {
+        return Err("Feline's own runtime needs an x86-64 PC; on ARM, use another runtime".to_owned());
+    }
     let engine = engine_dir().ok_or("no home folder")?;
     progress(Progress::Checking);
     let current = current_in(&engine);

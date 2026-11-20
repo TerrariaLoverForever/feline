@@ -1283,10 +1283,15 @@ pub fn call_java_native(
 ) -> Result<usize, String> {
     let name = jni_symbol(class, method);
     let symbols = elf.symbols().map_err(|e| e.to_string())?;
-    let entry = symbols
-        .iter()
-        .find(|s| s.defined && s.name == name)
-        .ok_or_else(|| format!("no {name}"))?;
+    // The short name, else the long one (`<short>__<argument types>`, which
+    // JNI uses for overloaded methods) when there's exactly one.
+    let long = format!("{name}__");
+    let entry = symbols.iter().find(|s| s.defined && s.name == name).or_else(|| {
+        let mut overloads = symbols.iter().filter(|s| s.defined && s.name.starts_with(&long));
+        let first = overloads.next()?;
+        overloads.next().is_none().then_some(first)
+    });
+    let entry = entry.ok_or_else(|| format!("no {name}"))?;
     let env = crate::jni::current_env().ok_or("no JNIEnv for the main thread")? as usize;
     let receiver = if is_static {
         crate::jni::new_class(class)
@@ -1315,6 +1320,18 @@ pub fn call_java_native(
                 usize,
                 extern "C" fn(usize, usize, usize, usize, usize) -> usize,
             >(address)(env, receiver, *a, *b, *c),
+            [a, b, c, d] => std::mem::transmute::<
+                usize,
+                extern "C" fn(usize, usize, usize, usize, usize, usize) -> usize,
+            >(address)(env, receiver, *a, *b, *c, *d),
+            [a, b, c, d, e] => std::mem::transmute::<
+                usize,
+                extern "C" fn(usize, usize, usize, usize, usize, usize, usize) -> usize,
+            >(address)(env, receiver, *a, *b, *c, *d, *e),
+            [a, b, c, d, e, f] => std::mem::transmute::<
+                usize,
+                extern "C" fn(usize, usize, usize, usize, usize, usize, usize, usize) -> usize,
+            >(address)(env, receiver, *a, *b, *c, *d, *e, *f),
             _ => return Err("too many arguments".into()),
         }
     };

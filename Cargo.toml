@@ -6,11 +6,13 @@
 #   crates/feline-core  library: everything that isn't GUI (testable on its own)
 #   crates/feline       the application binary (GUI + `feline --info`)
 #   crates/feline-runtime  Feline's own runtime (in development, M3)
+#   crates/feline-png   PNG reading/writing shared by feline-core and the runtime
 
 [workspace]
 resolver = "3"
 members = [
     "crates/feline-core",
+    "crates/feline-png",
     "crates/feline",
     "crates/feline-runtime",
     "crates/feline-login",
@@ -19,7 +21,7 @@ members = [
 
 # Shared metadata. Each crate opts in with `field.workspace = true`.
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # Minimum supported Rust version. We use Void's packaged toolchain (no rustup),
 # so this documents what we need instead of a rust-toolchain.toml file.

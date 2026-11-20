@@ -1,5 +1,5 @@
-# Builds and tests Feline on Linux and Windows on every push, so code for
-# one system is checked even when it's written on the other.
+# Builds and tests Feline on Linux (x86-64 and ARM64) and Windows on every
+# push, so code for one system is checked even when it's written on another.
 name: CI
 
 on:
@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,12 +24,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
       - uses: Swatinem/rust-cache@v2
-      - name: Tests (feline-core, feline-win)
-        run: cargo test -p feline-core -p feline-win
+      - name: Tests (feline-core, feline-png, feline-win)
+        run: cargo test -p feline-core -p feline-png -p feline-win
       - name: Clippy (the app)
         run: cargo clippy -p feline -p feline-core -p feline-win -- -D warnings
       # Feline's runtime and its login window are Linux programs. Their tests
       # that need a display or sound aren't run here; the build and the rest are.
+      # The runtime runs Roblox's x86-64 engine, so it's only built on x86-64.
       - name: Build (runtime, login window)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: cargo build -p feline-runtime -p feline-login
+      - name: Build (login window)
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: cargo build -p feline-login

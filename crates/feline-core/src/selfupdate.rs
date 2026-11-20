@@ -29,8 +29,31 @@ pub const REPO: &str = "TerrariaLoverForever/feline";
 pub const PROGRAM: &str = if cfg!(windows) { "feline.exe" } else { "feline" };
 
 /// Programs released together with the launcher, updated with it when they
-/// sit next to it.
-pub const COMPANIONS: &[&str] = if cfg!(target_os = "linux") { &["feline-runtime", "feline-login"] } else { &[] };
+/// sit next to it. Feline's runtime runs Roblox's x86-64 engine, so it's
+/// only built for x86-64 PCs.
+pub const COMPANIONS: &[&str] = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    &["feline-runtime", "feline-login"]
+} else if cfg!(target_os = "linux") {
+    &["feline-login"]
+} else {
+    &[]
+};
+
+/// A program's file name in releases for a PC with the CPU `arch`
+/// (`std::env::consts::ARCH`): x86-64 builds keep the plain names they've
+/// always had (older Feline versions look for those), ARM64 Linux builds
+/// end in `-aarch64`. The program keeps its plain name once installed.
+pub fn release_name(name: &str, arch: &str) -> String {
+    if arch == "aarch64" && !name.ends_with(".exe") {
+        format!("{name}-aarch64")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn this_pc(name: &str) -> String {
+    release_name(name, std::env::consts::ARCH)
+}
 
 /// One file of a release.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,10 +124,10 @@ pub fn parse_release(v: &Value, checksum_file: impl Fn(&str) -> Option<String>) 
     let notes = v.get("body").and_then(Value::as_str).unwrap_or_default().to_owned();
     let assets = v.get("assets")?.as_array()?;
     let asset = |name: &str| assets.iter().find(|a| a.get("name").and_then(Value::as_str) == Some(name));
-    let program = asset(PROGRAM)?;
+    let program = asset(&this_pc(PROGRAM))?;
     let url = program.get("browser_download_url")?.as_str()?.to_owned();
     let size = program.get("size").and_then(Value::as_u64).unwrap_or(0);
-    let sha256 = asset(&format!("{PROGRAM}.sha256"))
+    let sha256 = asset(&format!("{}.sha256", this_pc(PROGRAM)))
         .and_then(|a| a.get("browser_download_url")?.as_str())
         .and_then(&checksum_file)
         .and_then(|t| find_sha256(&t))
@@ -112,9 +135,9 @@ pub fn parse_release(v: &Value, checksum_file: impl Fn(&str) -> Option<String>) 
     let companions = COMPANIONS
         .iter()
         .filter_map(|name| {
-            let program = asset(name)?;
+            let program = asset(&this_pc(name))?;
             let url = program.get("browser_download_url")?.as_str()?;
-            let sum = asset(&format!("{name}.sha256"))?.get("browser_download_url")?.as_str()?;
+            let sum = asset(&format!("{}.sha256", this_pc(name)))?.get("browser_download_url")?.as_str()?;
             let sha256 = find_sha256(&checksum_file(sum)?)?;
             let size = program.get("size").and_then(Value::as_u64).unwrap_or(0);
             url.starts_with("https://").then(|| Download { name: (*name).to_owned(), url: url.to_owned(), sha256, size })
@@ -234,6 +257,15 @@ pub fn install(release: &Release, exe: &Path, progress: &mut dyn FnMut(u64, u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_names_by_cpu() {
+        assert_eq!(release_name("feline", "x86_64"), "feline");
+        assert_eq!(release_name("feline-login", "x86_64"), "feline-login");
+        assert_eq!(release_name("feline", "aarch64"), "feline-aarch64");
+        assert_eq!(release_name("feline-login", "aarch64"), "feline-login-aarch64");
+        assert_eq!(release_name("feline.exe", "aarch64"), "feline.exe");
+    }
 
     #[test]
     fn versions_compare() {

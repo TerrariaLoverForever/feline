@@ -122,9 +122,16 @@ fn with_dev<T>(f: impl FnOnce(&mut Dev) -> T) -> Option<T> {
 /// Frames presented (for reusing staging memory).
 static FRAMES: AtomicU64 = AtomicU64::new(0);
 
-/// After each present.
+/// After each present. Now and then, staging memory that has sat unused
+/// for a while goes back to the driver.
 pub fn frame_presented() {
-    FRAMES.fetch_add(1, Ordering::Relaxed);
+    let frame = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+    if frame.is_multiple_of(RELEASE_CHECK_FRAMES)
+        && let Ok(mut guard) = STATE.try_lock()
+        && let Some(dev) = guard.as_mut()
+    {
+        dev.release_idle();
+    }
 }
 
 /// The engine made `device` on `physical`.
@@ -577,6 +584,13 @@ const CHUNK: u64 = 32 << 20;
 /// Frames and time after which the GPU has surely read a chunk.
 const SAFE_FRAMES: u64 = 16;
 const SAFE_TIME: Duration = Duration::from_secs(2);
+/// Chunks unused for this long are freed, except the one being filled.
+/// Loading a game decodes hundreds of MB of textures in a burst; keeping
+/// every chunk that burst needed held that much system memory (pinned by
+/// the driver) for the rest of the session: 576 MB in one Fisch session.
+const IDLE_TIME: Duration = Duration::from_secs(8);
+/// How often (in frames) presenting checks for idle chunks.
+const RELEASE_CHECK_FRAMES: u64 = 240;
 
 impl Dev {
     /// Room for `bytes` in staging memory: (buffer, offset, address).
@@ -592,6 +606,7 @@ impl Dev {
                 return Some((c.buffer, at, c.address + at as usize));
             }
         }
+        self.release_idle();
         // A chunk the GPU is done with, or a new one.
         let free = self.staging.iter().position(|c| {
             c.size >= bytes && frame >= c.last.0 + SAFE_FRAMES && now.duration_since(c.last.1) >= SAFE_TIME
@@ -609,6 +624,42 @@ impl Dev {
         c.used = bytes;
         c.last = (frame, now);
         Some((c.buffer, 0, c.address))
+    }
+
+    /// Frees the chunks (other than the one being filled) that the GPU is
+    /// done with and that haven't been written for [`IDLE_TIME`].
+    fn release_idle(&mut self) {
+        let frame = FRAMES.load(Ordering::Relaxed);
+        let now = Instant::now();
+        let mut i = 0;
+        while i < self.staging.len() {
+            let c = &self.staging[i];
+            let idle = Some(i) != self.active
+                && frame >= c.last.0 + SAFE_FRAMES
+                && now.duration_since(c.last.1) >= IDLE_TIME;
+            if !idle {
+                i += 1;
+                continue;
+            }
+            let c = self.staging.swap_remove(i);
+            // swap_remove moved the last chunk to `i`.
+            if self.active == Some(self.staging.len()) {
+                self.active = Some(i);
+            }
+            // SAFETY: Feline's own objects; nothing has been recorded from
+            // this chunk for SAFE_FRAMES frames and IDLE_TIME, so the GPU
+            // is done with it.
+            unsafe {
+                self.table.unmap_memory(c.memory);
+                self.table.destroy_buffer(c.buffer, None);
+                self.table.free_memory(c.memory, None);
+            }
+            eprintln!(
+                "feline-runtime: vulkan: freed {} MB of idle ETC2 staging memory ({} MB kept)",
+                c.size >> 20,
+                self.staging.iter().map(|c| c.size).sum::<u64>() >> 20
+            );
+        }
     }
 
     fn new_chunk(&self, size: u64) -> Option<Chunk> {
@@ -672,14 +723,10 @@ impl Dev {
         Some((address + at as usize) as *const u8)
     }
 
-    /// One region of an upload into an ETC2 image, decoded into staging
-    /// memory: the region to copy from Feline's buffer instead.
-    fn decode_region(
-        &mut self,
-        kind: Kind,
-        src: vk::Buffer,
-        region: &vk::BufferImageCopy,
-    ) -> Option<(vk::Buffer, vk::BufferImageCopy)> {
+    /// One region of an upload into an ETC2 image: room for its decoded
+    /// pixels in staging memory, and where its blocks are. The decoding
+    /// itself ([`Job::run`]) happens after STATE's lock is released.
+    fn plan_region(&mut self, kind: Kind, src: vk::Buffer, region: &vk::BufferImageCopy) -> Option<Job> {
         let e = region.image_extent;
         let (w, h) = (e.width as usize, e.height as usize);
         let layers = match region.image_subresource.layer_count {
@@ -700,30 +747,67 @@ impl Dev {
         };
         let out_slice = w * h * kind.pixel_bytes();
         let (buffer, offset, address) = self.stage((out_slice * slices) as u64)?;
-        // SAFETY: the engine's mapped staging memory holds the upload's
-        // blocks (it wrote them before recording the copy), and Feline's
-        // chunk has room for the decoded pixels.
-        let (input, output) = unsafe {
-            (
-                std::slice::from_raw_parts(from, slice_bytes * slices),
-                std::slice::from_raw_parts_mut(address as *mut u8, out_slice * slices),
-            )
-        };
-        for s in 0..slices {
-            crate::etc2::decode_area(
-                kind,
-                &input[s * slice_bytes..],
-                row_blocks,
-                w,
-                h,
-                &mut output[s * out_slice..(s + 1) * out_slice],
-            );
-        }
         let mut changed = *region;
         changed.buffer_offset = offset;
         changed.buffer_row_length = 0;
         changed.buffer_image_height = 0;
-        Some((buffer, changed))
+        Some(Job {
+            kind,
+            from,
+            to: address as *mut u8,
+            slices,
+            slice_bytes,
+            out_slice,
+            row_blocks,
+            width: w,
+            height: h,
+            buffer,
+            region: changed,
+        })
+    }
+}
+
+/// One region to decode, then copy from Feline's staging buffer.
+struct Job {
+    kind: Kind,
+    /// The engine's blocks (its mapped staging memory).
+    from: *const u8,
+    /// Feline's staging memory for the pixels.
+    to: *mut u8,
+    slices: usize,
+    slice_bytes: usize,
+    out_slice: usize,
+    row_blocks: usize,
+    width: usize,
+    height: usize,
+    buffer: vk::Buffer,
+    region: vk::BufferImageCopy,
+}
+
+impl Job {
+    /// Decodes the blocks; then the region can be copied.
+    fn run(&self) {
+        // SAFETY: the engine's mapped staging memory holds the upload's
+        // blocks (it wrote them before recording the copy, and keeps the
+        // memory until the GPU has used it), and Feline's chunk has room
+        // for the decoded pixels (reserved by `stage`, and not freed for
+        // IDLE_TIME after that).
+        let (input, output) = unsafe {
+            (
+                std::slice::from_raw_parts(self.from, self.slice_bytes * self.slices),
+                std::slice::from_raw_parts_mut(self.to, self.out_slice * self.slices),
+            )
+        };
+        for s in 0..self.slices {
+            crate::etc2::decode_area_parallel(
+                self.kind,
+                &input[s * self.slice_bytes..],
+                self.row_blocks,
+                self.width,
+                self.height,
+                &mut output[s * self.out_slice..(s + 1) * self.out_slice],
+            );
+        }
     }
 }
 
@@ -754,14 +838,15 @@ unsafe extern "system" fn cmd_copy_buffer_to_image(
     };
     // SAFETY: `count` valid regions.
     let regions = unsafe { std::slice::from_raw_parts(regions, count as usize) };
-    let decoded: Vec<_> = regions.iter().filter_map(|r| dev.decode_region(kind, src, r)).collect();
+    let jobs: Vec<Job> = regions.iter().filter_map(|r| dev.plan_region(kind, src, r)).collect();
     drop(guard);
-    if !decoded.is_empty() {
+    if !jobs.is_empty() {
         told_first_upload();
     }
-    for (buffer, region) in decoded {
+    for job in jobs {
+        job.run();
         // SAFETY: Feline's buffer and the engine's image and command buffer.
-        unsafe { copy(commands, buffer, image, layout, 1, &region) };
+        unsafe { copy(commands, job.buffer, image, layout, 1, &job.region) };
     }
 }
 
@@ -780,7 +865,7 @@ unsafe extern "system" fn cmd_copy_buffer_to_image2(commands: vk::CommandBuffer,
     };
     // SAFETY: `region_count` valid regions.
     let regions = unsafe { std::slice::from_raw_parts(i.p_regions, i.region_count as usize) };
-    let decoded: Vec<_> = regions
+    let jobs: Vec<Job> = regions
         .iter()
         .filter_map(|r| {
             let plain = vk::BufferImageCopy {
@@ -791,15 +876,16 @@ unsafe extern "system" fn cmd_copy_buffer_to_image2(commands: vk::CommandBuffer,
                 image_offset: r.image_offset,
                 image_extent: r.image_extent,
             };
-            dev.decode_region(kind, i.src_buffer, &plain)
+            dev.plan_region(kind, i.src_buffer, &plain)
         })
         .collect();
     drop(guard);
-    if !decoded.is_empty() {
+    if !jobs.is_empty() {
         told_first_upload();
     }
-    for (buffer, region) in decoded {
+    for job in jobs {
+        job.run();
         // SAFETY: Feline's buffer and the engine's image and command buffer.
-        unsafe { copy(commands, buffer, i.dst_image, i.dst_image_layout, 1, &region) };
+        unsafe { copy(commands, job.buffer, i.dst_image, i.dst_image_layout, 1, &job.region) };
     }
 }

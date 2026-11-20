@@ -118,6 +118,10 @@ pub fn main() -> ExitCode {
             }
             if flag == "--play" {
                 feline_runtime::versions::started(std::path::Path::new(path));
+                // Roblox's current settings, downloaded while the engine loads.
+                if let Ok(runtime) = runtime_data() {
+                    feline_runtime::clientsettings::start_refresh(runtime);
+                }
             }
             let data = match feline_runtime::load::map_file(std::path::Path::new(path)) {
                 Ok(data) => data,
@@ -503,9 +507,11 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                 let empty = || new_string("") as usize;
                 // Client settings ("FastFlags") as JSON. The engine accepts an
                 // empty `applicationSettings` object (returns 0; "" or "{}"
-                // return 1) and keeps its built-in defaults. Fetching Roblox's
-                // real settings comes later. FELINE_SETTINGS overrides it.
+                // return 1) and keeps its built-in defaults. Roblox's current
+                // settings are downloaded at start (clientsettings.rs).
+                // FELINE_SETTINGS overrides it.
                 let runtime = data.join("feline/runtime");
+                feline_runtime::clientsettings::wait(std::time::Duration::from_secs(4));
                 let settings = client_settings(&runtime);
                 // Roblox's desktop layout instead of the tablet one.
                 let settings = match feline_runtime::desktop::apply(&runtime, USER_ID.get().copied()) {
@@ -528,9 +534,54 @@ fn run_init(data: &'static [u8]) -> ExitCode {
                     "feline-runtime: nativeInitClientSettings returned {}",
                     r as i32
                 );
+                // The app bridge's own start,
+                // `NativeAppBridgeInterface.nativeAppBridgeAppStart`, as Roblox's
+                // app does first: it runs the engine's StartupController, which
+                // gets the browser tracker ID (BTID) Roblox's experiments are
+                // keyed on. Without it every experiment came back empty and the
+                // app got the defaults: the chat's lightning (preset) button
+                // instead of the emoji button, small emoji in a speech bubble
+                // instead of big ones, no friends tab. Arguments as in mocktail's
+                // src/legacy/legacy_runtime.cc (Apache-2.0): base URL, user agent,
+                // false, Android ID, launch source, "". FELINE_APP_START=0 skips it.
+                if std::env::var("FELINE_APP_START").as_deref() != Ok("0") {
+                    let version = feline_runtime::assets::apk_bytes()
+                        .and_then(feline_runtime::manifest::apk_version_name)
+                        .unwrap_or_default();
+                    let user_agent = format!(
+                        "Mozilla/5.0 (Linux; Android 13; Linux) Roblox/Android RobloxApp/{version} (GlobalDist; AndroidApp)"
+                    );
+                    let result = feline_runtime::init::call_java_native(
+                        &elf,
+                        image,
+                        "com/roblox/engine/jni/NativeAppBridgeInterface",
+                        "nativeAppBridgeAppStart",
+                        true,
+                        &[
+                            new_string("https://www.roblox.com/") as usize,
+                            new_string(&user_agent) as usize,
+                            0,
+                            new_string("0000000000000000") as usize,
+                            new_string("AppAndroidV") as usize,
+                            empty(),
+                        ],
+                    );
+                    eprintln!("feline-runtime: nativeAppBridgeAppStart: {result:?}");
+                }
                 let init = new_instance("com/roblox/engine/jni/autovalue/InitParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2InitWithParams", &[init])?;
                 session_step(&elf, image, "starting")?;
+                // With a saved login, Roblox's app starts its Lua app for that
+                // user before the app itself ("initializeLuaAppWithLoggedInUser"
+                // in the engine's log), as the engine's log under Roblox's own
+                // app shows. (The experiments come from nativeAppBridgeAppStart
+                // above, not from this.) FELINE_LUA_APP_DM=0 skips it.
+                if USER_ID.get().is_some() && std::env::var("FELINE_LUA_APP_DM").as_deref() != Ok("0") {
+                    match call_gl_native(&elf, image, "nativeAppBridgeStartLuaAppDM", &[]) {
+                        Ok(_) => eprintln!("feline-runtime: started the Lua app for the logged-in user"),
+                        Err(e) => eprintln!("feline-runtime: couldn't start the Lua app early: {e}"),
+                    }
+                }
                 let start = new_instance("com/roblox/engine/jni/autovalue/StartAppParams") as usize;
                 call_gl_native(&elf, image, "nativeAppBridgeV2StartAppWithParams", &[start])?;
                 session_step(&elf, image, "started")?;

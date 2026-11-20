@@ -130,7 +130,8 @@ fn link_entry_path() -> Result<PathBuf, String> {
     Ok(data.join("applications").join(LINK_ENTRY))
 }
 
-/// Adds the hidden entry that opens `roblox://` and `roblox-player:` links
+/// Adds the hidden entry that opens `roblox://`, `roblox-player:` and
+/// `robloxmobile://` links
 /// with this Feline binary.
 pub fn install_link_entry() -> Result<(), String> {
     let exe = exec_path()?;
@@ -143,7 +144,7 @@ pub fn install_link_entry() -> Result<(), String> {
          Icon={APP_ID}\n\
          NoDisplay=true\n\
          Terminal=false\n\
-         MimeType=x-scheme-handler/roblox;x-scheme-handler/roblox-player;\n",
+         MimeType=x-scheme-handler/roblox;x-scheme-handler/roblox-player;x-scheme-handler/robloxmobile;\n",
         quote_exec(&exe)?
     );
     let path = link_entry_path()?;

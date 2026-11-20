@@ -1,13 +1,17 @@
 # Pushing a tag like v0.2.0 builds Feline for Linux and Windows and
 # publishes a GitHub release with the programs and their SHA-256 checksums:
 #
-#   Linux:    feline, feline-runtime, feline-login (each with a .sha256),
-#             and feline-linux-x86_64.tar.gz with all three for a first
-#             install
+#   Linux x86-64: feline, feline-runtime, feline-login (each with a
+#             .sha256), and feline-linux-x86_64.tar.gz with all three for a
+#             first install
+#   Linux ARM64: feline-aarch64, feline-login-aarch64 (each with a .sha256)
+#             and feline-linux-aarch64.tar.gz. No runtime: Feline's runtime
+#             runs Roblox's x86-64 engine. The x86-64 files keep their plain
+#             names because older Feline versions update from those
 #   Windows:  feline.exe + feline.exe.sha256
 #
 # The single programs are what Feline's own "Check for updates" downloads
-# and verifies (crates/feline-core/src/selfupdate.rs).
+# and verifies (crates/feline-core/src/selfupdate.rs, `release_name`).
 #
 # The tag must match the version in Cargo.toml (without the v), or Feline
 # won't see the release as newer.
@@ -48,6 +52,35 @@ jobs:
           name: linux
           path: out/*
 
+  linux-arm:
+    # GitHub's ARM64 runner, same Ubuntu as the x86-64 build.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libudev-dev libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
+      - run: cargo build --release -p feline -p feline-login
+      - name: Programs, archive and checksums
+        run: |
+          mkdir -p out feline-linux-aarch64
+          cp target/release/feline out/feline-aarch64
+          cp target/release/feline-login out/feline-login-aarch64
+          # Plain names inside the archive: that's how they're installed.
+          cp target/release/feline target/release/feline-login COPYING LICENSE.exception TRADEMARKS.md README.md docs/LEGAL.md feline-linux-aarch64/
+          cp -r LICENSES feline-linux-aarch64/
+          tar -czf out/feline-linux-aarch64.tar.gz feline-linux-aarch64
+          cd out
+          for f in feline-aarch64 feline-login-aarch64 feline-linux-aarch64.tar.gz; do
+            sha256sum "$f" > "$f.sha256"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm
+          path: out/*
+
   windows:
     runs-on: windows-latest
     steps:
@@ -67,9 +100,21 @@ jobs:
           path: out/*
 
   publish:
-    needs: [linux, windows]
+    needs: [linux, linux-arm, windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      # The release notes: this version's section of CHANGELOG.md (from its
+      # "## <version>" heading to the next "## "), then GitHub's list of
+      # changes. Feline's "Check for updates" shows them.
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="## $version" '$0 == v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           path: files
@@ -77,4 +122,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: files/*
+          body_path: notes.md
           generate_release_notes: true

@@ -76,4 +76,4 @@ body:
     attributes:
       label: Feline version
       description: Shown at the bottom left of Feline's window and on the About page.
-      placeholder: "0.1.0"
+      placeholder: "0.1.1"

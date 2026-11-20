@@ -25,6 +25,8 @@ ring = "0.17"
 # Unpacking downloaded Roblox packages (zip's deflate). MIT OR Zlib OR
 # Apache-2.0. Already used by feline-runtime.
 miniz_oxide = "0.9"
+# PNG reading (Feline's own, shared crate).
+feline-png = { path = "../feline-png" }
 # RSA PKCS#1 v1.5 signature checks for Roblox's APK: its signing key is
 # 1024-bit RSA (from 2010), below ring's 2048-bit minimum. Verification
 # only. MIT OR Apache-2.0.

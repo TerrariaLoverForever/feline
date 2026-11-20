@@ -146,22 +146,23 @@ fn gl() -> Option<&'static Gl> {
 /// Roblox's UI font, from the APK's assets (unpacked at startup).
 fn font() -> Option<&'static FontVec> {
     static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
-    FONT.get_or_init(|| {
-        let data = std::env::var_os("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                    .join(".local/share")
-            });
-        let path = data.join("feline/runtime/assets/content/fonts/BuilderSans-Regular.otf");
-        let bytes = std::fs::read(&path).ok()?;
-        let font = FontVec::try_from_vec(bytes).ok();
-        if font.is_none() {
-            eprintln!("feline-runtime: overlay: couldn't read {}", path.display());
-        }
-        font
-    })
-    .as_ref()
+    FONT.get_or_init(|| load_font("BuilderSans-Regular.otf")).as_ref()
+}
+
+/// One of Roblox's fonts (`content/fonts/<name>` in the unpacked assets).
+fn load_font(name: &str) -> Option<FontVec> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
+        });
+    let path = data.join("feline/runtime/assets/content/fonts").join(name);
+    let bytes = std::fs::read(&path).ok()?;
+    let font = FontVec::try_from_vec(bytes).ok();
+    if font.is_none() {
+        eprintln!("feline-runtime: overlay: couldn't read {}", path.display());
+    }
+    font
 }
 
 /// The program (one texture, no transform) and the texture, made once.
@@ -212,6 +213,164 @@ struct Image {
 
 static LAST: Mutex<Option<Image>> = Mutex::new(None);
 
+/// Which font draws a character of typed text.
+#[derive(Clone, Copy)]
+enum Glyph {
+    Outline(&'static FontVec, ab_glyph::GlyphId),
+    /// A colour bitmap (emoji fonts keep their emoji as PNG images).
+    Image(&'static FontVec, ab_glyph::GlyphId),
+    /// No font has it.
+    Missing,
+    /// Not drawn and takes no room (joiners, variation selectors).
+    Nothing,
+}
+
+struct Piece {
+    glyph: Glyph,
+    advance: f32,
+}
+
+/// Characters that only change how their neighbours look.
+fn invisible(c: char) -> bool {
+    matches!(c, '\u{200b}'..='\u{200f}' | '\u{fe00}'..='\u{fe0f}' | '\u{2060}' | '\u{e0020}'..='\u{e007f}')
+}
+
+/// Picks the font for `c` at `size` pixels: Builder Sans, else the first
+/// fallback that has it ([`fallbacks`]).
+fn piece(primary: &'static FontVec, c: char, size: f32) -> Piece {
+    if invisible(c) {
+        return Piece { glyph: Glyph::Nothing, advance: 0.0 };
+    }
+    let scale = PxScale::from(size);
+    let id = primary.glyph_id(c);
+    if id.0 != 0 || c.is_whitespace() {
+        return Piece { glyph: Glyph::Outline(primary, id), advance: primary.as_scaled(scale).h_advance(id) };
+    }
+    for f in fallbacks() {
+        let id = f.glyph_id(c);
+        if id.0 == 0 {
+            continue;
+        }
+        if let Some(image) = f.glyph_raster_image2(id, size.ceil() as u16)
+            && image.height > 0
+        {
+            let advance = size * f32::from(image.width) / f32::from(image.height) + size * 0.1;
+            return Piece { glyph: Glyph::Image(f, id), advance };
+        }
+        return Piece { glyph: Glyph::Outline(f, id), advance: f.as_scaled(scale).h_advance(id) };
+    }
+    Piece { glyph: Glyph::Missing, advance: size * 0.6 }
+}
+
+/// Fonts for characters Builder Sans doesn't have, in the order tried:
+/// Roblox's own (Arimo for Cyrillic and Greek, Noto for other scripts),
+/// then the desktop's for emoji, Chinese, Japanese and Korean, and its
+/// default sans-serif font (found with fontconfig's `fc-match`). Loaded the
+/// first time a character needs them.
+fn fallbacks() -> &'static [FontVec] {
+    static FONTS: OnceLock<Vec<FontVec>> = OnceLock::new();
+    FONTS.get_or_init(|| {
+        const ROBLOX: [&str; 9] = [
+            "Arimo-Regular.ttf",
+            "NotoNaskhArabicUI-Regular.ttf",
+            "NotoSansDevanagariUI-Regular.ttf",
+            "NotoSansBengaliUI-Regular.ttf",
+            "NotoSansThaiUI-Regular.ttf",
+            "NotoSansGeorgian-Regular.ttf",
+            "NotoSansKhmerUI-Regular.ttf",
+            "NotoSansMyanmarUI-Regular.ttf",
+            "NotoSansSinhalaUI-Regular.ttf",
+        ];
+        const DESKTOP: [&str; 5] =
+            ["emoji", "sans-serif:lang=ja", "sans-serif:lang=ko", "sans-serif:lang=zh-cn", "sans-serif"];
+        let mut fonts: Vec<FontVec> = ROBLOX.iter().filter_map(|name| load_font(name)).collect();
+        let mut seen = Vec::new();
+        for pattern in DESKTOP {
+            let Some((path, index)) = fc_match(pattern) else { continue };
+            if seen.contains(&(path.clone(), index)) {
+                continue;
+            }
+            seen.push((path.clone(), index));
+            if let Some(font) = std::fs::read(&path).ok().and_then(|b| FontVec::try_from_vec_and_index(b, index).ok()) {
+                fonts.push(font);
+            }
+        }
+        eprintln!("feline-runtime: overlay: {} fallback fonts for typed text", fonts.len());
+        fonts
+    })
+}
+
+/// fontconfig's best font file (and index in it) for `pattern`.
+fn fc_match(pattern: &str) -> Option<(std::path::PathBuf, u32)> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}\n%{index}", pattern])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (file, index) = text.split_once('\n')?;
+    (!file.is_empty()).then(|| (std::path::PathBuf::from(file), index.trim().parse().unwrap_or(0)))
+}
+
+/// A text image being drawn (opaque RGBA).
+struct Canvas<'a> {
+    rgba: &'a mut [u8],
+    width: i32,
+    height: i32,
+}
+
+impl Canvas<'_> {
+    fn blend(&mut self, x: i32, y: i32, color: [u8; 3], coverage: f32) {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return;
+        }
+        let at = ((y * self.width + x) * 4) as usize;
+        for (out, ink) in self.rgba[at..at + 3].iter_mut().zip(color) {
+            let bg = f32::from(*out);
+            *out = (bg + (f32::from(ink) - bg) * coverage.clamp(0.0, 1.0)) as u8;
+        }
+    }
+
+    /// A colour glyph (`size` pixels high, top at `top`) from its PNG,
+    /// scaled down by averaging.
+    fn image(&mut self, font: &FontVec, id: ab_glyph::GlyphId, size: f32, left: f32, top: f32) {
+        let Some(raw) = font.glyph_raster_image2(id, size.ceil() as u16) else { return };
+        if !matches!(raw.format, ab_glyph::GlyphImageFormat::Png) {
+            return;
+        }
+        let Ok(png) = feline_png::decode(raw.data) else { return };
+        if png.width == 0 || png.height == 0 {
+            return;
+        }
+        let h = size.round().max(1.0) as u32;
+        let w = ((size * png.width as f32 / png.height as f32).round() as u32).max(1);
+        for ty in 0..h {
+            let (y0, y1) = (ty * png.height / h, ((ty + 1) * png.height / h).max(ty * png.height / h + 1));
+            for tx in 0..w {
+                let (x0, x1) = (tx * png.width / w, ((tx + 1) * png.width / w).max(tx * png.width / w + 1));
+                // Premultiplied average of the source pixels under this one.
+                let mut sum = [0u32; 4];
+                for sy in y0..y1.min(png.height) {
+                    for sx in x0..x1.min(png.width) {
+                        let at = ((sy * png.width + sx) * 4) as usize;
+                        let a = u32::from(png.pixels[at + 3]);
+                        for (total, &value) in sum.iter_mut().zip(&png.pixels[at..at + 3]) {
+                            *total += u32::from(value) * a;
+                        }
+                        sum[3] += a;
+                    }
+                }
+                let n = ((y1.min(png.height) - y0) * (x1.min(png.width) - x0)).max(1);
+                if sum[3] == 0 {
+                    continue;
+                }
+                let color = [(sum[0] / sum[3]) as u8, (sum[1] / sum[3]) as u8, (sum[2] / sum[3]) as u8];
+                let alpha = sum[3] as f32 / (255.0 * n as f32);
+                self.blend(left as i32 + tx as i32, top as i32 + ty as i32, color, alpha);
+            }
+        }
+    }
+}
+
 /// Lays out `text` over `background` in a `width`×`height` RGBA image.
 pub(crate) fn render(
     info: &BoxInfo,
@@ -233,13 +392,13 @@ pub(crate) fn render(
     } else {
         text.to_owned()
     };
-    let scale = PxScale::from(info.font_size.max(8.0));
+    let size = info.font_size.max(8.0);
+    let scale = PxScale::from(size);
     let scaled = font.as_scaled(scale);
-    // Advance widths, to keep the end of long text (and the caret) visible.
-    let advance: f32 = shown
-        .chars()
-        .map(|c| scaled.h_advance(font.glyph_id(c)))
-        .sum();
+    // Each character's font and width; the total keeps the end of long
+    // text (and the caret) visible.
+    let pieces: Vec<Piece> = shown.chars().map(|c| piece(font, c, size)).collect();
+    let advance: f32 = pieces.iter().map(|p| p.advance).sum();
     let caret_room = 2.0;
     let free = width as f32 - advance - caret_room;
     let start_x = match info.x_alignment {
@@ -265,32 +424,39 @@ pub(crate) fn render(
     }
     let color = info.text_color;
     let ink = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
-    let mut put = |x: i32, y: i32, coverage: f32| {
-        if x < 0 || y < 0 || x >= width || y >= height {
-            return;
-        }
-        let at = ((y * width + x) * 4) as usize;
-        for c in 0..3 {
-            let bg = f32::from(rgba[at + c]);
-            rgba[at + c] = (bg + (f32::from(ink[c]) - bg) * coverage.clamp(0.0, 1.0)) as u8;
-        }
-    };
+    let mut canvas = Canvas { rgba: &mut rgba, width, height };
     let mut pen = start_x;
-    for c in shown.chars() {
-        let id = font.glyph_id(c);
-        let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, baseline));
-        if let Some(outlined) = font.outline_glyph(glyph) {
-            let bounds = outlined.px_bounds();
-            outlined.draw(|gx, gy, coverage| {
-                put(
-                    bounds.min.x as i32 + gx as i32,
-                    bounds.min.y as i32 + gy as i32,
-                    coverage,
-                );
-            });
+    for p in &pieces {
+        match p.glyph {
+            Glyph::Outline(f, id) => {
+                let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, baseline));
+                if let Some(outlined) = f.outline_glyph(glyph) {
+                    let bounds = outlined.px_bounds();
+                    outlined.draw(|gx, gy, coverage| {
+                        canvas.blend(bounds.min.x as i32 + gx as i32, bounds.min.y as i32 + gy as i32, ink, coverage);
+                    });
+                }
+            }
+            Glyph::Image(f, id) => canvas.image(f, id, size, pen, baseline - scaled.ascent() * 0.9),
+            Glyph::Missing => {
+                // An empty box, as Android shows a character no font has
+                // (Builder Sans's own "missing" glyph is Roblox's logo).
+                let (left, right) = ((pen + size * 0.1) as i32, (pen + p.advance - size * 0.1) as i32);
+                let (top, bottom) = ((baseline - size * 0.7) as i32, baseline as i32);
+                for x in left..=right {
+                    canvas.blend(x, top, ink, 1.0);
+                    canvas.blend(x, bottom, ink, 1.0);
+                }
+                for y in top..=bottom {
+                    canvas.blend(left, y, ink, 1.0);
+                    canvas.blend(right, y, ink, 1.0);
+                }
+            }
+            Glyph::Nothing => {}
         }
-        pen += scaled.h_advance(id);
+        pen += p.advance;
     }
+    let mut put = |x: i32, y: i32, coverage: f32| canvas.blend(x, y, ink, coverage);
     // A steady caret after the text (no blinking).
     let caret_x = pen.round() as i32;
     let top = ((height as f32 - info.font_size) / 2.0).max(0.0) as i32;

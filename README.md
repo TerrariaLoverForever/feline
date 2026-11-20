@@ -37,6 +37,10 @@ Ready-made programs for Linux and Windows are on the
 on Linux, unpack `feline-linux-x86_64.tar.gz`, put the three programs in
 `~/.local/bin`, install the libraries from step 2 below and run
 `~/.local/bin/feline --install-desktop-entry`; on Windows, run `feline.exe`.
+On an ARM64 Linux PC, use `feline-linux-aarch64.tar.gz` the same way: it has
+the launcher and login window but not Feline's own runtime, which runs
+Roblox's x86-64 engine and so needs an x86-64 PC. On ARM, play through
+another runtime, chosen in Feline.
 There are no distribution packages yet. The steps below build Feline from
 its source instead.
 

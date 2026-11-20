@@ -2,7 +2,8 @@
 //! Opening `roblox://` links from the Roblox website with Feline.
 //!
 //! Off by default. Switching it on (Settings page) makes Feline the default
-//! handler for `roblox://` and `roblox-player:` links through `xdg-mime`,
+//! handler for `roblox://`, `roblox-player:` and `robloxmobile://` links
+//! (the website opens the last on Linux) through `xdg-mime`,
 //! after remembering which app handled them before; switching it off gives
 //! them back to that app. A link then arrives as `feline <link>`: Feline
 //! starts the runtime picked for links (Settings; by default the one in
@@ -20,18 +21,27 @@ use feline_core::settings::Settings;
 
 use crate::desktop::{self, LINK_ENTRY};
 
-const SCHEMES: [&str; 2] = ["x-scheme-handler/roblox", "x-scheme-handler/roblox-player"];
+const SCHEMES: [&str; 3] = [
+    "x-scheme-handler/roblox",
+    "x-scheme-handler/roblox-player",
+    "x-scheme-handler/robloxmobile",
+];
 
 /// True for the arguments a browser passes when opening a Roblox link.
 pub fn is_link(arg: &str) -> bool {
     let lower = arg.to_ascii_lowercase();
-    lower.starts_with("roblox://") || lower.starts_with("roblox-player:")
+    lower.starts_with("roblox://") || lower.starts_with("roblox-player:") || lower.starts_with("robloxmobile://")
 }
 
 /// The desktop entry that currently handles `roblox://` links.
 fn current_handler() -> Option<String> {
+    handler_of(SCHEMES[0])
+}
+
+/// The desktop entry that currently handles `scheme`'s links.
+fn handler_of(scheme: &str) -> Option<String> {
     let out = Command::new("xdg-mime")
-        .args(["query", "default", SCHEMES[0]])
+        .args(["query", "default", scheme])
         .stderr(Stdio::null())
         .output()
         .ok()?;
@@ -66,6 +76,29 @@ pub fn enable(settings: &mut Settings) -> Result<(), String> {
         settings.previous_link_handler = previous;
     }
     Ok(())
+}
+
+/// With link handling on, takes back any of the link types another app
+/// claimed since (other launchers make themselves the default when they're
+/// installed or started), and the ones Feline didn't claim before
+/// (`robloxmobile://`). Called when Feline starts.
+pub fn keep_claimed(settings: &Settings) {
+    if cfg!(windows) || !settings.link_handler {
+        return;
+    }
+    let taken: Vec<&str> = SCHEMES
+        .iter()
+        .copied()
+        .filter(|s| handler_of(s).as_deref() != Some(LINK_ENTRY))
+        .collect();
+    if taken.is_empty() {
+        return;
+    }
+    let result = desktop::install_link_entry().and_then(|()| set_default(LINK_ENTRY));
+    match result {
+        Ok(()) => eprintln!("feline: Roblox links ({}) open with Feline again", taken.join(", ")),
+        Err(e) => eprintln!("feline: couldn't take back Roblox links: {e}"),
+    }
 }
 
 /// Gives the links back to the previous handler (if there was one).
