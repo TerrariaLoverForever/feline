@@ -245,7 +245,8 @@ top of ordinary Linux libraries.
   mode and VSync, a lower frame rate while the window is in the background.
 - **Input:** keyboard and mouse with Roblox's desktop layout, the camera
   turns freely while you hold the right button (the pointer is held in
-  place), typing and chat, copy and paste, F11 for fullscreen.
+  place), typing and chat, copy and paste, F11 for fullscreen, and
+  controllers (gamepads).
 - **Sound** through PulseAudio or PipeWire.
 - **Signing in** on Roblox's own website in a separate window; the session
   is kept between runs.
@@ -270,7 +271,6 @@ Expect rough edges, and please say what you find.
 
 | Feature | What's missing |
 |---|---|
-| Controllers | No gamepad was connected while it was written |
 | Voice chat | Not confirmed that other players hear you |
 | First person and Shift Lock | The mouse lock is new; only the right-button camera is confirmed |
 | CPU threads, priority, giving memory back | Not checked in a game |
