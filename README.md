@@ -32,8 +32,13 @@ please say what happened: a bug report from the Diagnostics page helps a lot.
 
 ## Install
 
-There are no ready-made downloads and no distribution packages yet: for now
-Feline is built from its source. Packages will come later.
+Ready-made programs for Linux and Windows are on the
+[Releases](https://github.com/TerrariaLoverForever/feline/releases) page:
+on Linux, unpack `feline-linux-x86_64.tar.gz`, put the three programs in
+`~/.local/bin`, install the libraries from step 2 below and run
+`~/.local/bin/feline --install-desktop-entry`; on Windows, run `feline.exe`.
+There are no distribution packages yet. The steps below build Feline from
+its source instead.
 
 - [Linux](#linux)
 - [Windows](#windows)
@@ -280,8 +285,7 @@ Expect rough edges, and please say what you find.
 | Stud, Tipsy, Mocktail, Nightcap | Finding and starting them was only tried with stand-in installs, not the real programs |
 | Desk cat on Linux | Tried on KDE Plasma (Wayland) only; following the pointer on Hyprland and wandering on other desktops haven't been tried |
 | Mods with Sober | Written from Sober's documentation, not tried on a real install |
-| Feline updating itself | No release has been published yet, so there was nothing to update to |
-| The release build (GitHub Actions) | Never run: no version has been tagged |
+| Feline updating itself | Only one release so far, so there was nothing to update to yet |
 | The Arch package | The recipe is written; a full `makepkg` build hasn't been run |
 | Studio's script status plugin (Windows) | Not tried in Studio |
 | Building on anything but Arch Linux | The Debian/Ubuntu and Fedora package lists were written from each distribution's package names, not run there |
@@ -299,8 +303,7 @@ Expect rough edges, and please say what you find.
 ## Updating
 
 How to update Feline itself is at the end of each [install](#install)
-section. Once releases are published, Feline will also be able to update
-itself (About → Updates), together with its runtime and login window on
+section. Feline can also update itself from its releases (About → Updates), together with its runtime and login window on
 Linux, checking each download against its published SHA-256 checksum.
 
 Roblox, for Feline's runtime: Feline looks for a new version when it opens.
